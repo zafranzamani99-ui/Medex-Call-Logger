@@ -2,26 +2,253 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* WHY: Dark theme as default — optimised for all-day use.
+   Light theme available via data-theme="light" on <html>. */
+:root, [data-theme="dark"] {
+  /* Base */
+  --background: #09090b;
+  --foreground: #e4e4e7;
+  --surface: #18181b;
+  --border: #27272a;
+
+  /* Surface levels */
+  --surface-raised: #1c1c20;
+  --surface-overlay: #27272a;
+
+  /* Text hierarchy */
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-tertiary: #71717a;
+  --text-muted: #3f3f46;
+
+  /* Interactive */
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-muted: rgba(59, 130, 246, 0.15);
+
+  /* Focus */
+  --ring: rgba(59, 130, 246, 0.5);
+
+  /* Sidebar */
+  --sidebar-width: 220px;
+  --sidebar-collapsed-width: 60px;
+
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+[data-theme="light"] {
+  --background: #f8fafc;
+  --foreground: #18181b;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+
+  --surface-raised: #f1f5f9;
+  --surface-overlay: #ffffff;
+
+  --text-primary: #09090b;
+  --text-secondary: #52525b;
+  --text-tertiary: #71717a;
+  --text-muted: #a1a1aa;
+
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-muted: rgba(37, 99, 235, 0.1);
+
+  --ring: rgba(37, 99, 235, 0.5);
+
+  color-scheme: light;
 }
+
+/* WHY: Fonts now loaded via next/font in layout.tsx — self-hosted at build time,
+   no render-blocking @import, no external Google Fonts request.
+   CSS variables --font-sans and --font-mono set by next/font on <html>. */
 
 body {
   color: var(--foreground);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
+/* WHY: Breathing theme transition using View Transitions API.
+   Page inhales (scales up + fades), theme shifts, page exhales (settles back).
+   Toggle button pulses gently. Falls back to smooth fade on unsupported browsers. */
+
+/* View Transition: disable default crossfade */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* Old content: inhale — gently expands and fades out */
+::view-transition-old(root) {
+  z-index: 1;
+  animation: theme-breathe-out 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+/* New content: exhale — starts expanded, settles into place */
+::view-transition-new(root) {
+  z-index: 9999;
+  animation: theme-breathe-in 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes theme-breathe-out {
+  0%   { opacity: 1; transform: scale(1); }
+  50%  { opacity: 0.5; transform: scale(1.012); }
+  100% { opacity: 0; transform: scale(1.02); }
+}
+
+@keyframes theme-breathe-in {
+  0%   { opacity: 0; transform: scale(1.02); }
+  40%  { opacity: 0.7; transform: scale(1.005); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Toggle button animation — soft pulse like a heartbeat */
+@keyframes theme-spin {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.2); }
+  60%  { transform: scale(0.95); }
+  100% { transform: scale(1); }
+}
+.theme-spin {
+  animation: theme-spin 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Fallback: smooth fade for browsers without View Transitions (Safari/Firefox) */
+.theme-transitioning,
+.theme-transitioning *,
+.theme-transitioning *::before,
+.theme-transitioning *::after {
+  transition: background-color 400ms ease, color 400ms ease, border-color 400ms ease !important;
+}
+
+/* Custom scrollbar — adapts to theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* Pill selector tap target — mobile-first (spec: one-thumb logging)
+   baseline-ui: min 44px touch target */
+@layer components {
+  .pill {
+    @apply inline-flex items-center justify-center px-3 py-2 rounded-full text-sm font-medium
+           cursor-pointer transition-colors duration-150 select-none
+           min-h-[44px] min-w-[44px];
+  }
+  .pill-active {
+    @apply ring-2 ring-offset-1 ring-offset-background;
   }
 }
+
+/* Toast notification animation — baseline-ui: only animate transform+opacity */
+@keyframes slideIn {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.toast-enter {
+  animation: slideIn 0.2s ease-out;
+}
+
+/* Skeleton loading animation — baseline-ui: use structural skeletons */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--border) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 0.375rem;
+}
+
+/* WHY: color-scheme tells the browser to render native form controls
+   (calendar icon, dropdown arrows) in matching colors for the theme. */
+[data-theme="dark"] input[type="date"] {
+  color-scheme: dark;
+}
+[data-theme="light"] input[type="date"] {
+  color-scheme: light;
+}
+select {
+  outline: none !important;
+  box-shadow: none !important;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23a1a1aa' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+input[type="date"] {
+  outline: none !important;
+  box-shadow: none !important;
+}
+select:hover,
+select:focus,
+select:active,
+input[type="date"]:hover,
+input[type="date"]:focus,
+input[type="date"]:active {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: var(--border) !important;
+}
+
+/* Mobile "More" sheet slide-up animation */
+@keyframes slideUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-slideUp {
+  animation: slideUp 0.2s ease-out;
+}
+
+/* WHY: Override hardcoded Tailwind dark colors when in light mode.
+   The app was built dark-first, so text-white, bg-zinc-800 etc are scattered.
+   These overrides flip the most visible patterns without touching every file. */
+[data-theme="light"] .text-white { color: var(--foreground); }
+[data-theme="light"] .text-zinc-300 { color: #3f3f46; }
+[data-theme="light"] .text-zinc-400 { color: #52525b; }
+[data-theme="light"] .text-zinc-200 { color: #27272a; }
+[data-theme="light"] .hover\:bg-zinc-800:hover { background-color: #f1f5f9; }
+[data-theme="light"] .hover\:bg-zinc-800\/50:hover { background-color: rgba(241, 245, 249, 0.7); }
+[data-theme="light"] .bg-zinc-800\/50 { background-color: rgba(241, 245, 249, 0.5); }
+[data-theme="light"] .bg-zinc-800 { background-color: #f1f5f9; }
+[data-theme="light"] .bg-zinc-900 { background-color: #ffffff; }
+[data-theme="light"] .bg-zinc-900\/50 { background-color: rgba(255, 255, 255, 0.5); }
+[data-theme="light"] .bg-zinc-700\/50 { background-color: rgba(226, 232, 240, 0.5); }
+[data-theme="light"] .bg-zinc-700 { background-color: #e2e8f0; }
+[data-theme="light"] .hover\:bg-zinc-600:hover { background-color: #cbd5e1; }
+[data-theme="light"] .hover\:text-white:hover { color: var(--foreground); }
+[data-theme="light"] .ring-offset-background { --tw-ring-offset-color: var(--background); }
+
+/* Colored text: -400 shades are washed out on light backgrounds → bump to -600 */
+[data-theme="light"] .text-cyan-400 { color: #0891b2; }
+[data-theme="light"] .text-violet-400 { color: #7c3aed; }
+[data-theme="light"] .text-red-400 { color: #dc2626; }
+[data-theme="light"] .text-orange-400 { color: #ea580c; }
+[data-theme="light"] .text-green-400 { color: #16a34a; }
+[data-theme="light"] .text-blue-400 { color: #2563eb; }
+[data-theme="light"] .text-amber-300 { color: #d97706; }
+[data-theme="light"] .text-amber-200\/90 { color: rgba(146, 64, 14, 0.9); }
+[data-theme="light"] .text-blue-200\/90 { color: rgba(30, 64, 175, 0.9); }
+[data-theme="light"] .text-blue-300 { color: #2563eb; }
+[data-theme="light"] .text-zinc-500 { color: #52525b; }
+[data-theme="light"] .hover\:text-zinc-300:hover { color: #18181b; }
+[data-theme="light"] .file\:text-white::file-selector-button { color: var(--foreground); }
+
+/* baseline-ui: safe-area-inset for fixed/sticky elements (iPhone notch) */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }

@@ -1,0 +1,200 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import type { Clinic } from '@/lib/types'
+import ClinicSearch from '@/components/ClinicSearch'
+import LicenseKeyModal from '@/components/LicenseKeyModal'
+import Button from '@/components/ui/Button'
+import { Label } from '@/components/ui/Input'
+
+// WHY: Dedicated License Key Request page — search clinic, open form, copy to Outlook.
+
+interface LKRecord {
+  id: string
+  clinic_code: string
+  clinic_name: string
+  created_by: string
+  created_at: string
+}
+
+export default function LKPage() {
+  const supabase = createClient()
+  const [userName, setUserName] = useState('')
+  const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null)
+  const [showModal, setShowModal] = useState(false)
+  const [history, setHistory] = useState<LKRecord[]>([])
+  const [loadingRow, setLoadingRow] = useState<string | null>(null)
+
+  useEffect(() => {
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .eq('id', session.user.id)
+          .single()
+        if (profile) setUserName(profile.display_name)
+      }
+      // Load recent LK requests
+      const { data } = await supabase
+        .from('license_key_requests')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(20)
+      if (data) setHistory(data)
+    }
+    init()
+  }, [supabase])
+
+  const refreshHistory = async () => {
+    const { data } = await supabase
+      .from('license_key_requests')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20)
+    if (data) setHistory(data)
+  }
+
+  const handleClinicSelect = (clinic: Clinic) => {
+    setSelectedClinic(clinic)
+    setShowModal(true)
+  }
+
+  const handleRowClick = async (record: LKRecord) => {
+    setLoadingRow(record.id)
+    const { data } = await supabase
+      .from('clinics')
+      .select('*')
+      .eq('clinic_code', record.clinic_code)
+      .single()
+    setLoadingRow(null)
+    if (data) {
+      setSelectedClinic(data as Clinic)
+      setShowModal(true)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <h1 className="text-lg font-semibold text-text-primary">License Key Request</h1>
+
+      {/* Clinic Search */}
+      <div>
+        <Label>Search Clinic</Label>
+        <ClinicSearch onSelect={handleClinicSelect} />
+      </div>
+
+      {/* Selected clinic info */}
+      {selectedClinic && (
+        <div className="space-y-3">
+          <div className="relative grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-surface-raised border border-border rounded-lg text-sm">
+            <button
+              onClick={() => setSelectedClinic(null)}
+              className="absolute -top-2 -right-2 size-6 rounded-full bg-zinc-700 hover:bg-zinc-600 text-text-tertiary hover:text-text-primary flex items-center justify-center transition-colors"
+            >
+              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <div>
+              <span className="text-text-tertiary text-xs">Code</span>
+              <p className="text-text-primary font-mono">{selectedClinic.clinic_code}</p>
+            </div>
+            <div>
+              <span className="text-text-tertiary text-xs">Clinic Name</span>
+              <p className="text-text-primary">{selectedClinic.clinic_name}</p>
+            </div>
+            <div>
+              <span className="text-text-tertiary text-xs">Product</span>
+              <p className="text-text-primary">{selectedClinic.product_type || '-'}</p>
+            </div>
+            <div>
+              <span className="text-text-tertiary text-xs">MTN Start</span>
+              <p className="text-text-primary">{selectedClinic.mtn_start ? selectedClinic.mtn_start.split('-').reverse().join('/') : '-'}</p>
+            </div>
+            <div>
+              <span className="text-text-tertiary text-xs">MTN Expiry</span>
+              <p className="text-text-primary">{selectedClinic.mtn_expiry ? selectedClinic.mtn_expiry.split('-').reverse().join('/') : '-'}</p>
+            </div>
+            <div>
+              <span className="text-text-tertiary text-xs">Location</span>
+              <p className="text-text-primary">{[selectedClinic.city, selectedClinic.state].filter(Boolean).join(', ') || '-'}</p>
+            </div>
+          </div>
+
+          <Button onClick={() => setShowModal(true)} size="lg" className="w-full">
+            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+            </svg>
+            Create License Key Request
+          </Button>
+        </div>
+      )}
+
+      {/* Recent LK Requests */}
+      {history.length > 0 && (
+        <div>
+          <h2 className="text-sm font-medium text-text-secondary mb-2">Recent Requests</h2>
+          <div className="border border-border rounded-lg overflow-hidden">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="bg-surface-raised text-text-tertiary">
+                  <th className="text-left px-3 py-2 font-medium">Date</th>
+                  <th className="text-left px-3 py-2 font-medium">Code</th>
+                  <th className="text-left px-3 py-2 font-medium">Clinic</th>
+                  <th className="text-left px-3 py-2 font-medium">By</th>
+                  <th className="w-8"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {history.map((r) => (
+                  <tr
+                    key={r.id}
+                    onClick={() => handleRowClick(r)}
+                    className="hover:bg-surface-raised cursor-pointer transition-colors"
+                  >
+                    <td className="px-3 py-2 text-text-secondary">
+                      {new Date(r.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td className="px-3 py-2 text-text-primary font-mono">{r.clinic_code}</td>
+                    <td className="px-3 py-2 text-text-primary">{r.clinic_name}</td>
+                    <td className="px-3 py-2 text-text-secondary">
+                      {loadingRow === r.id ? (
+                        <span className="text-accent animate-pulse">Loading…</span>
+                      ) : r.created_by}
+                    </td>
+                    <td className="px-1 py-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!confirm('Delete this LK request?')) return
+                          supabase.from('license_key_requests').delete().eq('id', r.id).then(() => refreshHistory())
+                        }}
+                        className="text-text-muted hover:text-red-400 p-1"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Modal */}
+      {showModal && selectedClinic && (
+        <LicenseKeyModal
+          clinic={selectedClinic}
+          agentName={userName}
+          onClose={() => { setShowModal(false); refreshHistory() }}
+        />
+      )}
+    </div>
+  )
+}
