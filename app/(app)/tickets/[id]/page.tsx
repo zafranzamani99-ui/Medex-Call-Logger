@@ -9,7 +9,7 @@ import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel } from '@/lib
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
-import { NeedsAttentionBadge, StaleBadge, IssueTypeBadge } from '@/components/FlagBadge'
+import { NeedsAttentionBadge, StaleBadge, IssueTypeBadge, IssueCategoryBadge } from '@/components/FlagBadge'
 import PillSelector from '@/components/PillSelector'
 import TimelineBuilder from '@/components/TimelineBuilder'
 import WADraftModal from '@/components/WADraftModal'
@@ -20,14 +20,6 @@ import { useToast } from '@/components/ui/Toast'
 
 // WHY: Ticket Detail — spec Section 9.
 // UPGRADE: Breadcrumb nav, two-column layout on lg, redesigned vertical timeline.
-
-// Channel dot color mapping for timeline
-const CHANNEL_DOT_COLORS: Record<string, string> = {
-  Call: 'bg-blue-400',
-  WhatsApp: 'bg-green-400',
-  Email: 'bg-purple-400',
-  Internal: 'bg-gray-400',
-}
 
 export default function TicketDetailPage() {
   const router = useRouter()
@@ -185,6 +177,10 @@ export default function TicketDetailPage() {
     fetchTicket()
   }
 
+  // Follow-up fields (shown in Add Update form)
+  const [followUpStatus, setFollowUpStatus] = useState<TicketStatus | null>(null)
+  const [followUpResponse, setFollowUpResponse] = useState('')
+
   const handleAddUpdate = async (data: {
     entryDate: string; channel: Channel; notes: string; formattedString: string
   }) => {
@@ -198,19 +194,33 @@ export default function TicketDetailPage() {
       added_by: userId,
       added_by_name: userName,
     })
-    await supabase
-      .from('tickets')
-      .update({
-        last_activity_at: new Date().toISOString(),
-        last_updated_by: userId,
-        last_updated_by_name: userName,
-        last_change_note: `Timeline update added (${data.channel})`,
-      })
-      .eq('id', ticket.id)
+    // Build ticket update — always update activity + audit
+    const ticketUpdate: Record<string, unknown> = {
+      last_activity_at: new Date().toISOString(),
+      last_updated_by: userId,
+      last_updated_by_name: userName,
+      last_change_note: `Timeline update added (${data.channel})`,
+    }
+    // Optional: update status if agent changed it
+    if (followUpStatus && followUpStatus !== ticket.status) {
+      ticketUpdate.status = followUpStatus
+      ticketUpdate.last_change_note = `Status → ${followUpStatus} (${data.channel})`
+    }
+    // Optional: append to my_response if agent added follow-up notes
+    if (followUpResponse.trim()) {
+      const existing = ticket.my_response || ''
+      const timestamp = format(new Date(), 'dd/MM HH:mm')
+      ticketUpdate.my_response = existing
+        ? `${existing}\n\n[${timestamp} - ${userName}] ${followUpResponse.trim()}`
+        : `[${timestamp} - ${userName}] ${followUpResponse.trim()}`
+    }
+    await supabase.from('tickets').update(ticketUpdate).eq('id', ticket.id)
     setShowAddUpdate(false)
+    setFollowUpStatus(null)
+    setFollowUpResponse('')
     fetchTicket()
     setSaving(false)
-    toast('Timeline update added')
+    toast('Follow-up added')
   }
 
   const handleDeleteTimeline = async (entryId: string) => {
@@ -275,10 +285,24 @@ export default function TicketDetailPage() {
     value: s, label: s, colors: STATUS_COLORS[s],
   }))
 
+  // Hero banner tint based on status
+  const statusBannerStyle = (() => {
+    switch (ticket.status) {
+      case 'Escalated':
+        return { background: 'linear-gradient(135deg, rgba(239, 68, 68, 0.06) 0%, rgba(239, 68, 68, 0.02) 100%)', border: '1px solid rgba(239, 68, 68, 0.1)' }
+      case 'Resolved':
+        return { background: 'linear-gradient(135deg, rgba(52, 211, 153, 0.06) 0%, rgba(52, 211, 153, 0.02) 100%)', border: '1px solid rgba(52, 211, 153, 0.08)' }
+      case 'In Progress':
+        return { background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(99, 102, 241, 0.02) 100%)', border: '1px solid rgba(99, 102, 241, 0.08)' }
+      default:
+        return { background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }
+    }
+  })()
+
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-5xl mx-auto pb-20 md:pb-0">
       {/* Breadcrumb */}
-      <nav className="flex items-center gap-1.5 text-sm mb-5">
+      <nav className="flex items-center gap-1.5 text-sm mb-4">
         <button onClick={() => router.back()} className="text-text-tertiary hover:text-text-primary transition-colors">
           History
         </button>
@@ -288,14 +312,32 @@ export default function TicketDetailPage() {
         <span className="text-text-primary font-medium">{ticket.clinic_name}</span>
       </nav>
 
-      {/* Header — clinic name is primary, ticket ref is secondary */}
-      <div className="mb-6">
-        <div className="flex items-center gap-2 mb-1.5">
-          <span className="font-mono text-sm text-accent">[{ticket.clinic_code}]</span>
-          <h1 className="text-xl font-bold text-text-primary">{ticket.clinic_name}</h1>
+      {/* Hero banner header — status-tinted */}
+      <div className="rounded-xl p-5 mb-6" style={statusBannerStyle}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-mono text-xs text-indigo-400">{ticket.clinic_code}</span>
+              <span className="font-mono text-xs text-text-muted">{ticket.ticket_ref}</span>
+            </div>
+            <h1 className="text-2xl font-bold text-text-primary">{ticket.clinic_name}</h1>
+          </div>
+          {/* Inline status change */}
+          {!editing && (
+            <div className="flex-shrink-0">
+              <select
+                value={ticket.status}
+                onChange={(e) => handleStatusChange(e.target.value)}
+                className="text-sm font-medium rounded-lg px-3 py-1.5 bg-white/[0.05] border border-white/[0.08] text-text-primary cursor-pointer"
+              >
+                {STATUSES.map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="font-mono text-sm text-text-tertiary">{ticket.ticket_ref}</span>
+        <div className="flex items-center gap-3 flex-wrap mt-3">
           <button
             onClick={async () => {
               if (ticket.record_type === 'call') {
@@ -320,6 +362,7 @@ export default function TicketDetailPage() {
             <RecordTypeBadge recordType={ticket.record_type} />
           </button>
           <StatusBadge status={ticket.status} />
+          {ticket.issue_category && <IssueCategoryBadge category={ticket.issue_category} />}
           <IssueTypeBadge issueType={ticket.issue_type} />
           {ticket.need_team_check && <NeedsAttentionBadge />}
           {isStale(ticket) && <StaleBadge />}
@@ -351,7 +394,7 @@ export default function TicketDetailPage() {
         <div className="flex-1 lg:w-3/5 space-y-4">
 
           {/* Details Section */}
-          <div className="bg-surface border border-border rounded-lg p-4">
+          <div className="card p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-medium text-text-secondary">Details</h2>
               {!editing ? (
@@ -476,26 +519,63 @@ export default function TicketDetailPage() {
             )}
           </div>
 
-          {/* Timeline Section — redesigned with vertical line */}
-          <div className="bg-surface border border-border rounded-lg p-4">
+          {/* Timeline — visual centerpiece, chat-log feel */}
+          <div>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-medium text-text-secondary">
-                Timeline ({timeline.length})
+              <h2 className="text-sm font-semibold text-text-secondary tracking-wide uppercase">
+                Timeline
+                <span className="ml-2 text-text-muted font-normal normal-case tracking-normal">
+                  {timeline.length} {timeline.length === 1 ? 'entry' : 'entries'}
+                </span>
               </h2>
               <Button size="sm" onClick={() => setShowAddUpdate(!showAddUpdate)}>
-                {showAddUpdate ? 'Cancel' : 'Add Update'}
+                {showAddUpdate ? 'Cancel' : '+ Add Update'}
               </Button>
             </div>
 
-            {/* Add Update form */}
+            {/* Add Follow-up form */}
             {showAddUpdate && (
-              <div className="mb-4 p-3 bg-surface-raised border border-border rounded-lg">
+              <div className="mb-5 p-4 rounded-xl border border-indigo-500/20" style={{ background: 'rgba(99, 102, 241, 0.04)' }}>
                 <TimelineBuilder
                   agentName={userName}
                   onChange={(data) => {
                     timelineDataRef.current = data
                   }}
                 />
+                {/* Optional: Update status */}
+                <div className="mt-3 pt-3 border-t border-border/50">
+                  <p className="text-xs text-text-muted mb-2">Update status? <span className="text-text-tertiary">(optional)</span></p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {STATUSES.map((s) => {
+                      const colors = STATUS_COLORS[s]
+                      const isActive = followUpStatus === s
+                      const isCurrent = ticket.status === s && !followUpStatus
+                      return (
+                        <button key={s} type="button"
+                          onClick={() => setFollowUpStatus(isActive ? null : s)}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                            isActive ? `${colors.bg} ${colors.text} ring-1 ring-current` :
+                            isCurrent ? `${colors.bg} ${colors.text} opacity-50` :
+                            'bg-zinc-800/50 text-zinc-400 hover:opacity-80'
+                          }`}
+                        >
+                          {s}{isCurrent ? ' (current)' : ''}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                {/* Optional: Append to response */}
+                <div className="mt-3">
+                  <p className="text-xs text-text-muted mb-1">Add to response <span className="text-text-tertiary">(optional)</span></p>
+                  <textarea
+                    value={followUpResponse}
+                    onChange={(e) => setFollowUpResponse(e.target.value)}
+                    placeholder="Additional response or notes to append..."
+                    rows={2}
+                    className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none"
+                  />
+                </div>
                 <Button
                   onClick={() => {
                     const data = timelineDataRef.current
@@ -509,106 +589,111 @@ export default function TicketDetailPage() {
                   size="sm"
                   className="mt-3"
                 >
-                  Save Update
+                  Save Follow-up
                 </Button>
               </div>
             )}
 
-            {/* Timeline entries — vertical line design */}
+            {/* Timeline entries — channel-colored left border, chat-log style */}
             {timeline.length === 0 ? (
-              <div className="text-center py-6">
-                <div className="text-2xl mb-2">📝</div>
+              <div className="text-center py-10 rounded-xl border border-dashed border-border">
+                <svg className="size-8 text-text-muted mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                </svg>
                 <p className="text-sm text-text-tertiary">No timeline entries yet</p>
-                <p className="text-xs text-text-muted mt-1">Click &quot;Add Update&quot; to record an interaction</p>
+                <p className="text-xs text-text-muted mt-1">Click &quot;+ Add Update&quot; to record an interaction</p>
               </div>
             ) : (
-              <div className="relative">
-                {/* Vertical connecting line */}
-                <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-border" />
+              <div className="space-y-2">
+                {timeline.map((entry, i) => {
+                  const channelColor = CHANNEL_COLORS[entry.channel as Channel] || { bg: 'bg-gray-500/20', text: 'text-gray-400' }
 
-                <div className="space-y-4">
-                  {timeline.map((entry, i) => {
-                    const channelColor = CHANNEL_COLORS[entry.channel as Channel] || { bg: 'bg-gray-500/20', text: 'text-gray-400' }
-                    const dotColor = CHANNEL_DOT_COLORS[entry.channel] || 'bg-gray-400'
+                  // Channel-specific left border color
+                  const borderColor = (() => {
+                    switch (entry.channel) {
+                      case 'Call': return 'border-l-blue-400/60'
+                      case 'WhatsApp': return 'border-l-green-400/60'
+                      case 'Email': return 'border-l-purple-400/60'
+                      case 'Internal': return 'border-l-gray-400/40'
+                      default: return 'border-l-gray-400/40'
+                    }
+                  })()
 
-                    // Check if this is a new date compared to previous entry
-                    const prevDate = i > 0 ? format(new Date(timeline[i - 1].entry_date), 'yyyy-MM-dd') : null
-                    const thisDate = format(new Date(entry.entry_date), 'yyyy-MM-dd')
-                    const showDateBadge = thisDate !== prevDate
+                  // Check if this is a new date compared to previous entry
+                  const prevDate = i > 0 ? format(new Date(timeline[i - 1].entry_date), 'yyyy-MM-dd') : null
+                  const thisDate = format(new Date(entry.entry_date), 'yyyy-MM-dd')
+                  const showDateBadge = thisDate !== prevDate
 
-                    return (
-                      <div key={entry.id}>
-                        {/* Date separator badge */}
-                        {showDateBadge && (
-                          <div className="relative flex items-center mb-3 ml-6">
-                            <span className="text-xs font-medium text-text-tertiary bg-surface px-2 py-0.5 rounded border border-border">
-                              {format(new Date(entry.entry_date), 'dd MMM yyyy')}
+                  return (
+                    <div key={entry.id}>
+                      {/* Date separator */}
+                      {showDateBadge && (
+                        <div className={`flex items-center gap-3 ${i > 0 ? 'mt-4' : ''} mb-2`}>
+                          <div className="h-px flex-1 bg-border" />
+                          <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">
+                            {format(new Date(entry.entry_date), 'dd MMM yyyy')}
+                          </span>
+                          <div className="h-px flex-1 bg-border" />
+                        </div>
+                      )}
+
+                      {/* Entry — card with channel-colored left border */}
+                      <div className={`group rounded-lg border-l-[3px] ${borderColor} transition-colors`}
+                        style={{ background: 'rgba(255,255,255,0.015)' }}>
+                        <div className="px-4 py-3">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${channelColor.bg} ${channelColor.text} font-medium`}>
+                              {entry.channel}
                             </span>
+                            <span className="text-xs text-text-muted">{entry.added_by_name}</span>
+                            <span className="text-xs text-text-muted tabular-nums ml-auto">
+                              {format(new Date(entry.created_at), 'HH:mm')}
+                            </span>
+                            {/* Edit/Delete buttons — visible on hover */}
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                              <button
+                                onClick={() => { setEditingTimelineId(entry.id); setEditTimelineNotes(entry.notes) }}
+                                className="p-1 text-text-muted hover:text-text-primary rounded hover:bg-white/[0.06] transition-colors"
+                                title="Edit"
+                              >
+                                <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteTimeline(entry.id)}
+                                className="p-1 text-text-muted hover:text-red-400 rounded hover:bg-red-500/10 transition-colors"
+                                title="Delete"
+                              >
+                                <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </div>
                           </div>
-                        )}
-
-                        <div className="flex gap-3 relative">
-                          {/* Colored dot */}
-                          <div className="flex-shrink-0 mt-1.5 z-10">
-                            <div className={`w-3.5 h-3.5 rounded-full ${dotColor} ring-2 ring-surface`} />
-                          </div>
-
-                          {/* Content */}
-                          <div className="flex-1 pb-1 group">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className={`text-xs px-2 py-0.5 rounded-full ${channelColor.bg} ${channelColor.text} font-medium`}>
-                                {entry.channel}
-                              </span>
-                              <span className="text-xs text-text-muted">by {entry.added_by_name}</span>
-                              <span className="text-xs text-text-muted tabular-nums">
-                                {format(new Date(entry.created_at), 'HH:mm')}
-                              </span>
-                              {/* Edit/Delete buttons — visible on hover */}
-                              <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ml-auto">
-                                <button
-                                  onClick={() => { setEditingTimelineId(entry.id); setEditTimelineNotes(entry.notes) }}
-                                  className="p-1 text-text-muted hover:text-text-primary rounded hover:bg-zinc-700/50 transition-colors"
-                                  title="Edit"
-                                >
-                                  <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
-                                  </svg>
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteTimeline(entry.id)}
-                                  className="p-1 text-text-muted hover:text-red-400 rounded hover:bg-red-500/10 transition-colors"
-                                  title="Delete"
-                                >
-                                  <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                  </svg>
-                                </button>
+                          {editingTimelineId === entry.id ? (
+                            <div className="mt-2">
+                              <input
+                                type="text"
+                                value={editTimelineNotes}
+                                onChange={(e) => setEditTimelineNotes(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTimeline(entry.id); if (e.key === 'Escape') setEditingTimelineId(null) }}
+                                className="w-full px-2 py-1.5 bg-surface-inset border border-border rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                                autoFocus
+                              />
+                              <div className="flex gap-2 mt-2">
+                                <Button size="sm" onClick={() => handleSaveTimeline(entry.id)}>Save</Button>
+                                <Button size="sm" variant="ghost" onClick={() => setEditingTimelineId(null)}>Cancel</Button>
                               </div>
                             </div>
-                            {editingTimelineId === entry.id ? (
-                              <div className="mt-1">
-                                <input
-                                  type="text"
-                                  value={editTimelineNotes}
-                                  onChange={(e) => setEditTimelineNotes(e.target.value)}
-                                  onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTimeline(entry.id); if (e.key === 'Escape') setEditingTimelineId(null) }}
-                                  className="w-full px-2 py-1 bg-surface border border-border rounded text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                                  autoFocus
-                                />
-                                <div className="flex gap-2 mt-1">
-                                  <Button size="sm" onClick={() => handleSaveTimeline(entry.id)}>Save</Button>
-                                  <Button size="sm" variant="ghost" onClick={() => setEditingTimelineId(null)}>Cancel</Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <p className="text-sm text-text-primary mt-1 whitespace-pre-wrap">{entry.notes}</p>
-                            )}
-                          </div>
+                          ) : (
+                            <p className="text-sm text-text-primary mt-1.5 whitespace-pre-wrap leading-relaxed">{entry.notes}</p>
+                          )}
                         </div>
                       </div>
-                    )
-                  })}
-                </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -617,11 +702,11 @@ export default function TicketDetailPage() {
         {/* Right column (40%) — Status, Actions, Audit */}
         <div className="lg:w-2/5 space-y-4">
 
-          {/* Quick Status Change */}
+          {/* Status Quick Change — pill selector for desktop */}
           {!editing && (
-            <div className="bg-surface border border-border rounded-lg p-4">
+            <div className="hidden lg:block card p-4">
               <PillSelector
-                label="Quick Status Change"
+                label="Status"
                 options={statusOptions}
                 value={ticket.status}
                 onChange={handleStatusChange}
@@ -629,9 +714,22 @@ export default function TicketDetailPage() {
             </div>
           )}
 
-          {/* Actions */}
-          <div className="bg-surface border border-border rounded-lg p-4 space-y-2">
-            <h2 className="text-sm font-medium text-text-secondary mb-3">Actions</h2>
+          {/* Actions — desktop only (mobile uses fixed bar) */}
+          <div className="hidden md:block card p-4 space-y-2">
+            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Actions</h2>
+            <Button variant="secondary" size="sm" onClick={() => {
+              sessionStorage.setItem('clinic_prefill', JSON.stringify({
+                clinic_code: ticket.clinic_code,
+                caller_tel: ticket.caller_tel,
+                pic: ticket.pic,
+              }))
+              router.push('/log')
+            }} className="w-full justify-start">
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Same Clinic, New Issue
+            </Button>
             {ticket.record_type === 'call' && (
               <Button variant="secondary" size="sm" onClick={handlePromoteToTicket} className="w-full justify-start">
                 <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -644,39 +742,37 @@ export default function TicketDetailPage() {
               <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
               </svg>
-              Generate WA Draft
+              WA Draft
             </Button>
             {ticket.issue && (
               <Button variant="secondary" size="sm" onClick={() => triggerKBGeneration(ticket)} className="w-full justify-start">
                 <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
                 </svg>
-                Generate KB Draft
+                KB Draft
               </Button>
             )}
-            <Button variant="danger" size="sm" onClick={handleDelete} className="w-full justify-start">
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              Delete {ticket.record_type === 'ticket' ? 'Ticket' : 'Call Log'}
-            </Button>
+            <div className="pt-2 border-t border-border mt-2">
+              <Button variant="danger" size="sm" onClick={handleDelete} className="w-full justify-start">
+                <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete
+              </Button>
+            </div>
           </div>
 
           {/* Audit Info */}
-          <div className="bg-surface border border-border rounded-lg p-4">
-            <h2 className="text-sm font-medium text-text-secondary mb-3">Audit Trail</h2>
-            <div className="space-y-2 text-xs text-text-tertiary tabular-nums">
+          <div className="card p-4">
+            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Audit Trail</h2>
+            <div className="space-y-3 text-xs text-text-tertiary">
               <div className="flex items-center gap-2">
-                <svg className="size-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                </svg>
+                <div className="size-1.5 rounded-full bg-green-400/60 flex-shrink-0" />
                 <span>Created {format(new Date(ticket.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{ticket.created_by_name}</span></span>
               </div>
               {ticket.last_updated_by_name && (
                 <div className="flex items-start gap-2">
-                  <svg className="size-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
+                  <div className="size-1.5 rounded-full bg-blue-400/60 flex-shrink-0 mt-1" />
                   <div>
                     <span>Updated {format(new Date(ticket.updated_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{ticket.last_updated_by_name}</span></span>
                     {ticket.last_change_note && (
@@ -687,6 +783,50 @@ export default function TicketDetailPage() {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Mobile fixed action bar */}
+      <div className="fixed bottom-0 left-0 right-0 md:hidden z-30 border-t border-border"
+        style={{ background: 'rgba(11, 13, 20, 0.92)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}>
+        <div className="flex items-center justify-around px-2 py-2 max-w-lg mx-auto">
+          <button onClick={() => setEditing(true)} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-tertiary hover:text-text-primary transition-colors">
+            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+            <span className="text-[10px]">Edit</span>
+          </button>
+          <button onClick={() => setShowAddUpdate(true)} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-indigo-400 hover:text-indigo-300 transition-colors">
+            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            <span className="text-[10px] font-medium">Update</span>
+          </button>
+          <button onClick={() => setShowWADraft(true)} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-green-400 hover:text-green-300 transition-colors">
+            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            </svg>
+            <span className="text-[10px]">WA Draft</span>
+          </button>
+          <button onClick={() => {
+            sessionStorage.setItem('clinic_prefill', JSON.stringify({
+              clinic_code: ticket.clinic_code,
+              caller_tel: ticket.caller_tel,
+              pic: ticket.pic,
+            }))
+            router.push('/log')
+          }} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-blue-400 hover:text-blue-300 transition-colors">
+            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            <span className="text-[10px]">New Issue</span>
+          </button>
+          <button onClick={handleDelete} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-muted hover:text-red-400 transition-colors">
+            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            <span className="text-[10px]">Delete</span>
+          </button>
         </div>
       </div>
 

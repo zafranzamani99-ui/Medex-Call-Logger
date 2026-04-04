@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -8,7 +9,7 @@ import {
   isSameMonth, isToday,
 } from 'date-fns'
 import type { Schedule } from '@/lib/types'
-import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS } from '@/lib/constants'
+import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, formatWorkDuration } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 import { Input, Label, Textarea } from '@/components/ui/Input'
 import ClinicSearch from '@/components/ClinicSearch'
@@ -33,6 +34,7 @@ function parseTimeToMinutes(t: string): number {
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
   scheduled: { bg: 'bg-blue-500/20', text: 'text-blue-400' },
+  in_progress: { bg: 'bg-amber-500/20', text: 'text-amber-400' },
   completed: { bg: 'bg-green-500/20', text: 'text-green-400' },
   cancelled: { bg: 'bg-zinc-500/20', text: 'text-zinc-400' },
   rescheduled: { bg: 'bg-violet-500/20', text: 'text-violet-400' },
@@ -41,6 +43,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
 
 export default function SchedulePage() {
   const supabase = createClient()
+  const router = useRouter()
   const { toast } = useToast()
 
   // Current user
@@ -64,6 +67,7 @@ export default function SchedulePage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [selectedSchedule, setSelectedSchedule] = useState<Schedule | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
+  const [showWorkPanel, setShowWorkPanel] = useState(false)
   const [dayDetailDate, setDayDetailDate] = useState<string | null>(null) // yyyy-MM-dd for day expansion
 
   // Edit mode state (inside detail modal)
@@ -80,6 +84,12 @@ export default function SchedulePage() {
   const [editClinicNameManual, setEditClinicNameManual] = useState('')
   const [editManualMode, setEditManualMode] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
+
+  // Work Panel state — full clinic details when in_progress
+  const [workClinic, setWorkClinic] = useState<Clinic | null>(null)
+  const [workNotes, setWorkNotes] = useState('')
+  const workNotesRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [elapsedMinutes, setElapsedMinutes] = useState(0)
 
   // Clinic phone lookup (clinic_code → phone)
   const [clinicPhones, setClinicPhones] = useState<Record<string, string>>({})
@@ -149,6 +159,21 @@ export default function SchedulePage() {
     const scheduleList = (data || []) as Schedule[]
     setSchedules(scheduleList)
 
+    // Auto-resume: if current user has an in_progress schedule, open its work panel
+    if (!showDetailModal && userId) {
+      const activeWork = scheduleList.find(s => s.status === 'in_progress' && s.agent_id === userId)
+      if (activeWork) {
+        setSelectedSchedule(activeWork)
+        setShowDetailModal(true)
+        setShowWorkPanel(true)
+        setWorkNotes(activeWork.notes || '')
+        if (activeWork.clinic_code && activeWork.clinic_code !== 'MANUAL') {
+          const { data: clinic } = await supabase.from('clinics').select('*').eq('clinic_code', activeWork.clinic_code).single()
+          setWorkClinic(clinic as Clinic | null)
+        }
+      }
+    }
+
     // Look up clinic phones from CRM
     const codeSet = new Set<string>()
     scheduleList.forEach(s => { if (s.clinic_code !== 'MANUAL') codeSet.add(s.clinic_code) })
@@ -198,10 +223,21 @@ export default function SchedulePage() {
   const goToNext = () => setCurrentMonth(addMonths(currentMonth, 1))
   const goToToday = () => setCurrentMonth(new Date())
 
-  // Open detail modal
-  const handleChipClick = (schedule: Schedule) => {
+  // Open detail modal — if in_progress, also fetch clinic details for Work Panel
+  const handleChipClick = async (schedule: Schedule) => {
     setSelectedSchedule(schedule)
+    setDayDetailDate(null) // close day detail if open
     setShowDetailModal(true)
+    setShowWorkPanel(schedule.status === 'in_progress')
+    if (schedule.status === 'in_progress') {
+      setWorkNotes(schedule.notes || '')
+      if (schedule.clinic_code && schedule.clinic_code !== 'MANUAL') {
+        const { data } = await supabase.from('clinics').select('*').eq('clinic_code', schedule.clinic_code).single()
+        setWorkClinic(data as Clinic | null)
+      } else {
+        setWorkClinic(null)
+      }
+    }
   }
 
   // Ensure schedule has a linked ticket — create one if missing
@@ -215,7 +251,7 @@ export default function SchedulePage() {
       clinic_name: s.clinic_name,
       pic: s.pic || null,
       issue_type: 'Schedule',
-      issue: `Schedule ${typeLabel}: ${s.clinic_name} on ${s.schedule_date} at ${s.schedule_time}`,
+      issue: `Schedule ${typeLabel}: ${s.clinic_name} on ${s.schedule_date.split('-').reverse().join('-')} at ${s.schedule_time}`,
       my_response: `${s.mode || 'Remote'} ${typeLabel} scheduled.`,
       status: 'Resolved',
       created_by: userId,
@@ -244,21 +280,32 @@ export default function SchedulePage() {
 
   // Status update
   const handleStatusChange = async (id: string, newStatus: string) => {
-    await supabase.from('schedules').update({
-      status: newStatus,
-      updated_at: new Date().toISOString(),
-    }).eq('id', id)
+    const now = new Date().toISOString()
+    // Calculate actual duration if completing from in_progress
+    const updatePayload: Record<string, unknown> = { status: newStatus, updated_at: now }
+    if (newStatus === 'completed' && selectedSchedule?.started_at) {
+      updatePayload.completed_at = now
+      updatePayload.actual_duration_minutes = Math.round(
+        (new Date(now).getTime() - new Date(selectedSchedule.started_at).getTime()) / 60000
+      )
+    }
+    const { error } = await supabase.from('schedules').update(updatePayload).eq('id', id)
+    if (error) {
+      // Fallback without time tracking columns
+      await supabase.from('schedules').update({ status: newStatus, updated_at: now }).eq('id', id)
+    }
     // Log timeline entry
     if (selectedSchedule) {
       const ticketId = await ensureTicket(selectedSchedule)
       if (ticketId) {
-        const label = newStatus === 'completed' ? 'Completed' : newStatus === 'cancelled' ? 'Cancelled' : newStatus === 'scheduled' ? 'Reopened' : newStatus
+        const label = newStatus === 'completed' ? 'Completed' : newStatus === 'cancelled' ? 'Cancelled' : newStatus === 'scheduled' ? 'Reopened' : newStatus === 'in_progress' ? 'Started' : newStatus
         await addTimelineEntry(ticketId, `${label}: ${selectedSchedule.clinic_name}`)
         if (newStatus === 'completed') {
           await supabase.from('tickets').update({ status: 'Resolved', updated_at: new Date().toISOString() }).eq('id', ticketId)
         }
       }
     }
+    setSchedules(prev => prev.map(sch => sch.id === id ? { ...sch, status: newStatus as Schedule['status'], updated_at: now } : sch))
     fetchSchedules()
     setShowDetailModal(false)
     toast(`Schedule ${newStatus}`)
@@ -266,14 +313,22 @@ export default function SchedulePage() {
 
   // Reschedule — mark old as rescheduled, open add form pre-filled
   const handleReschedule = async (s: Schedule) => {
-    await supabase.from('schedules').update({
-      status: 'rescheduled',
-      updated_at: new Date().toISOString(),
-    }).eq('id', s.id)
+    const now = new Date().toISOString()
+    const updatePayload: Record<string, unknown> = { status: 'rescheduled', updated_at: now }
+    if (s.started_at) {
+      updatePayload.completed_at = now
+      updatePayload.actual_duration_minutes = Math.round(
+        (new Date(now).getTime() - new Date(s.started_at).getTime()) / 60000
+      )
+    }
+    const { error: reschErr } = await supabase.from('schedules').update(updatePayload).eq('id', s.id)
+    if (reschErr) {
+      await supabase.from('schedules').update({ status: 'rescheduled', updated_at: now }).eq('id', s.id)
+    }
     // Log timeline entry
     const ticketId = await ensureTicket(s)
     if (ticketId) {
-      await addTimelineEntry(ticketId, `Rescheduled: ${s.clinic_name} — was ${s.schedule_date} at ${s.schedule_time}`)
+      await addTimelineEntry(ticketId, `Rescheduled: ${s.clinic_name} — was ${s.schedule_date.split('-').reverse().join('-')} at ${s.schedule_time}`)
     }
     // Pre-fill add form with all details from old schedule
     if (s.clinic_code && s.clinic_code !== 'MANUAL') {
@@ -292,6 +347,7 @@ export default function SchedulePage() {
     setFormCustomType(s.custom_type || '')
     setFormMode((s.mode as 'Remote' | 'Onsite') || 'Remote')
     setFormNotes(s.notes || '')
+    setSchedules(prev => prev.map(sch => sch.id === s.id ? { ...sch, status: 'rescheduled' as const, updated_at: now } : sch))
     setShowDetailModal(false)
     setShowAddModal(true)
     fetchSchedules()
@@ -300,19 +356,27 @@ export default function SchedulePage() {
 
   // No answer — set status + append timestamped note
   const handleNoAnswer = async (s: Schedule) => {
+    const now = new Date().toISOString()
     const timestamp = new Date().toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit', hour12: true })
     const noAnswerNote = `No answer at ${timestamp}`
     const updatedNotes = s.notes ? `${s.notes}\n${noAnswerNote}` : noAnswerNote
-    await supabase.from('schedules').update({
-      status: 'no_answer',
-      notes: updatedNotes,
-      updated_at: new Date().toISOString(),
-    }).eq('id', s.id)
+    const updatePayload: Record<string, unknown> = { status: 'no_answer', notes: updatedNotes, updated_at: now }
+    if (s.started_at) {
+      updatePayload.completed_at = now
+      updatePayload.actual_duration_minutes = Math.round(
+        (new Date(now).getTime() - new Date(s.started_at).getTime()) / 60000
+      )
+    }
+    const { error: naErr } = await supabase.from('schedules').update(updatePayload).eq('id', s.id)
+    if (naErr) {
+      await supabase.from('schedules').update({ status: 'no_answer', notes: updatedNotes, updated_at: now }).eq('id', s.id)
+    }
     // Log timeline entry
     const ticketId = await ensureTicket(s)
     if (ticketId) {
       await addTimelineEntry(ticketId, `No answer: ${s.clinic_name} at ${timestamp}`)
     }
+    setSchedules(prev => prev.map(sch => sch.id === s.id ? { ...sch, status: 'no_answer' as const, notes: updatedNotes, updated_at: now } : sch))
     fetchSchedules()
     setShowDetailModal(false)
     toast('Marked as no answer')
@@ -326,6 +390,76 @@ export default function SchedulePage() {
     setShowDetailModal(false)
     toast('Schedule deleted')
   }
+
+  // Start working on a schedule — set in_progress + fetch full clinic details
+  const handleStartWork = async (s: Schedule) => {
+    const now = new Date().toISOString()
+    const { error } = await supabase.from('schedules').update({
+      status: 'in_progress',
+      started_at: now,
+      updated_at: now,
+    }).eq('id', s.id)
+    // Fallback: if started_at column doesn't exist yet (migration 031), update without it
+    if (error) {
+      await supabase.from('schedules').update({
+        status: 'in_progress',
+        updated_at: now,
+      }).eq('id', s.id)
+    }
+    // Log timeline entry
+    const ticketId = await ensureTicket(s)
+    if (ticketId) {
+      await addTimelineEntry(ticketId, `Started: ${s.clinic_name}`)
+    }
+    // Fetch full clinic details
+    if (s.clinic_code && s.clinic_code !== 'MANUAL') {
+      const { data } = await supabase.from('clinics').select('*').eq('clinic_code', s.clinic_code).single()
+      setWorkClinic(data as Clinic | null)
+    } else {
+      setWorkClinic(null)
+    }
+    setWorkNotes(s.notes || '')
+    // Update local state immediately — don't wait for fetchSchedules
+    const updated = { ...s, status: 'in_progress' as const, started_at: now, updated_at: now }
+    setSelectedSchedule(updated)
+    setSchedules(prev => prev.map(sch => sch.id === s.id ? updated : sch))
+    setShowWorkPanel(true)
+    fetchSchedules()
+    toast('Work started')
+  }
+
+  // Save work notes (debounced auto-save)
+  const saveWorkNotes = useCallback(async (notes: string) => {
+    if (!selectedSchedule) return
+    await supabase.from('schedules').update({
+      notes: notes || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', selectedSchedule.id)
+  }, [selectedSchedule, supabase])
+
+  const handleWorkNotesChange = (notes: string) => {
+    setWorkNotes(notes)
+    if (workNotesRef.current) clearTimeout(workNotesRef.current)
+    workNotesRef.current = setTimeout(() => saveWorkNotes(notes), 2000)
+  }
+
+  // Format phone for WhatsApp link (strip non-digits, add 60 if needed)
+  const formatWALink = (phone: string) => {
+    const digits = phone.replace(/\D/g, '')
+    const number = digits.startsWith('0') ? '60' + digits.slice(1) : digits.startsWith('60') ? digits : '60' + digits
+    return `https://wa.me/${number}`
+  }
+
+  // Live work timer — ticks every 30s while work panel is open
+  useEffect(() => {
+    if (!selectedSchedule?.started_at || selectedSchedule.status !== 'in_progress' || !showWorkPanel) {
+      return
+    }
+    const calc = () => Math.max(0, Math.round((Date.now() - new Date(selectedSchedule.started_at!).getTime()) / 60000))
+    setElapsedMinutes(calc())
+    const interval = setInterval(() => setElapsedMinutes(calc()), 30000)
+    return () => clearInterval(interval)
+  }, [selectedSchedule?.started_at, selectedSchedule?.status, showWorkPanel])
 
   // Start editing a schedule
   const startEditing = async (s: Schedule) => {
@@ -432,7 +566,7 @@ export default function SchedulePage() {
       caller_tel: null,
       pic: formPic || null,
       issue_type: 'Schedule',
-      issue: `Schedule ${typeLabel}: ${clinicName} on ${formDate} at ${formTime}`,
+      issue: `Schedule ${typeLabel}: ${clinicName} on ${formDate.split('-').reverse().join('-')} at ${formTime}`,
       my_response: `${formMode} ${typeLabel} scheduled. ${duration ? 'Duration: ' + duration + '.' : ''}`,
       status: 'Resolved',
       created_by: userId,
@@ -475,8 +609,11 @@ export default function SchedulePage() {
   return (
     <div className="pb-20 md:pb-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-        <h1 className="text-xl font-bold text-text-primary">Schedule</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">Schedule</h1>
+          <p className="text-[13px] text-text-tertiary mt-0.5">Manage appointments and visits</p>
+        </div>
         <div className="flex items-center gap-2">
           {/* Agent filter */}
           <select
@@ -567,16 +704,18 @@ export default function SchedulePage() {
                     const isCompleted = s.status === 'completed'
                     const isRescheduled = s.status === 'rescheduled'
                     const isNoAnswer = s.status === 'no_answer'
+                    const isInProgress = s.status === 'in_progress'
                     const isStruck = isCancelled || isCompleted || isRescheduled
                     const now = new Date()
                     const isPastTime = today && s.status === 'scheduled' && parseTimeToMinutes(s.schedule_time) < (now.getHours() * 60 + now.getMinutes())
                     return (
                       <div
                         key={s.id}
-                        className={`w-full text-left px-1.5 py-0.5 rounded text-[10px] sm:text-xs ${colors.bg} ${colors.text} ${
-                          isStruck ? 'line-through' : ''
-                        } ${isCancelled || isRescheduled ? 'opacity-50' : ''} ${isCompleted ? 'opacity-70' : ''}`}
+                        className={`w-full text-left px-1.5 py-0.5 rounded text-[10px] sm:text-xs ${
+                          isInProgress ? 'bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40' : `${colors.bg} ${colors.text}`
+                        } ${isStruck ? 'line-through' : ''} ${isCancelled || isRescheduled ? 'opacity-50' : ''} ${isCompleted ? 'opacity-70' : ''}`}
                       >
+                        {isInProgress && <span className="inline-block size-1.5 rounded-full bg-amber-400 animate-pulse mr-0.5 align-middle" />}
                         {isPastTime && <span className="text-amber-400 mr-0.5">!</span>}
                         {isNoAnswer && <span className="text-orange-400 mr-0.5">!</span>}
                         <span className="hidden sm:inline">{s.schedule_time} </span>
@@ -594,7 +733,19 @@ export default function SchedulePage() {
       {/* Stats bar */}
       <div className="flex items-center gap-4 mt-3 text-xs text-text-tertiary flex-wrap">
         <span>{schedules.filter(s => s.status === 'scheduled').length} scheduled</span>
-        <span>{schedules.filter(s => s.status === 'completed').length} completed</span>
+        {schedules.filter(s => s.status === 'in_progress').length > 0 && (
+          <span className="text-amber-400">{schedules.filter(s => s.status === 'in_progress').length} in progress</span>
+        )}
+        {(() => {
+          const completed = schedules.filter(s => s.status === 'completed')
+          const totalMin = completed.reduce((sum, s) => sum + (s.actual_duration_minutes || 0), 0)
+          return (
+            <span>
+              {completed.length} completed
+              {totalMin > 0 && <span className="text-green-400 ml-1">({formatWorkDuration(totalMin)})</span>}
+            </span>
+          )
+        })()}
         <span>{schedules.filter(s => s.status === 'no_answer').length} no answer</span>
         <span>{schedules.filter(s => s.status === 'rescheduled').length} rescheduled</span>
         <span>{schedules.filter(s => s.status === 'cancelled').length} cancelled</span>
@@ -633,6 +784,7 @@ export default function SchedulePage() {
                     const isCompleted = s.status === 'completed'
                     const isRescheduled = s.status === 'rescheduled'
                     const isNoAnswer = s.status === 'no_answer'
+                    const isInProgress = s.status === 'in_progress'
                     const isStruck = isCancelled || isCompleted || isRescheduled
                     const now = new Date()
                     const isDayToday = isToday(dateObj)
@@ -643,12 +795,15 @@ export default function SchedulePage() {
                         onClick={() => handleChipClick(s)}
                         className={`w-full text-left px-5 py-3 hover:bg-surface-raised/60 transition-colors ${
                           isCancelled || isRescheduled ? 'opacity-40' : ''
-                        } ${isCompleted ? 'opacity-60' : ''}`}
+                        } ${isCompleted ? 'opacity-60' : ''} ${isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
                             {/* Time + Clinic */}
                             <div className="flex items-center gap-2">
+                              {isInProgress && (
+                                <span className="inline-block size-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+                              )}
                               {isPastTime && (
                                 <svg className="size-3.5 text-amber-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                                   <path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 6zm0 9a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
@@ -681,6 +836,12 @@ export default function SchedulePage() {
                                   <span className="text-xs text-text-tertiary">{s.duration_estimate}</span>
                                 </>
                               )}
+                              {s.actual_duration_minutes && (
+                                <>
+                                  <span className="text-zinc-600">·</span>
+                                  <span className="text-xs text-green-400 font-medium">{formatWorkDuration(s.actual_duration_minutes)}</span>
+                                </>
+                              )}
                             </div>
                           </div>
                           {/* Type badge */}
@@ -703,11 +864,23 @@ export default function SchedulePage() {
         <>
           <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => { setShowDetailModal(false); setIsEditing(false) }} />
           <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-2 sm:p-4 pointer-events-none">
-            <div className="bg-surface border border-border rounded-xl w-full max-w-md max-h-[90vh] flex flex-col pointer-events-auto shadow-xl">
+            <div className={`bg-surface border border-border rounded-xl w-full ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'max-w-2xl' : 'max-w-lg'} max-h-[90vh] flex flex-col pointer-events-auto shadow-xl transition-all`}>
               {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-                <h3 className="font-semibold text-text-primary">{isEditing ? 'Edit Schedule' : 'Schedule Detail'}</h3>
-                <button onClick={() => { setShowDetailModal(false); setIsEditing(false) }} className="text-text-tertiary hover:text-text-primary p-2 -mr-2 transition-colors">
+              <div className={`flex items-center justify-between px-4 py-3 border-b flex-shrink-0 ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'border-amber-500/30 bg-amber-500/5' : 'border-border'}`}>
+                <div className="flex items-center gap-2">
+                  {/* Back arrow when in work panel */}
+                  {(selectedSchedule.status === 'in_progress' && showWorkPanel && !isEditing) && (
+                    <button onClick={() => setShowWorkPanel(false)} className="text-text-tertiary hover:text-text-primary p-1 -ml-1 transition-colors" title="Back to details">
+                      <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                  )}
+                  <h3 className="font-semibold text-text-primary">
+                    {isEditing ? 'Edit Schedule' : (selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'Work Panel' : 'Schedule Detail'}
+                  </h3>
+                </div>
+                <button onClick={() => { setShowDetailModal(false); setIsEditing(false); setShowWorkPanel(false) }} className="text-text-tertiary hover:text-text-primary p-2 -mr-2 transition-colors">
                   <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -858,8 +1031,216 @@ export default function SchedulePage() {
                       />
                     </div>
                   </div>
+                ) : (selectedSchedule.status === 'in_progress' && showWorkPanel) ? (
+                  /* ===== WORK PANEL — in_progress ===== */
+                  <>
+                    <div className="flex items-center gap-2">
+                      {(() => {
+                        const colors = SCHEDULE_TYPE_COLORS[selectedSchedule.schedule_type] || { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
+                        return <span className={`text-xs px-2 py-0.5 rounded-full ${colors.bg} ${colors.text}`}>
+                          {selectedSchedule.schedule_type}{selectedSchedule.custom_type ? ` — ${selectedSchedule.custom_type}` : ''}
+                        </span>
+                      })()}
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 animate-pulse">
+                        In Progress
+                      </span>
+                      <span className={`text-xs ${selectedSchedule.mode === 'Remote' ? 'text-purple-400' : 'text-emerald-400'}`}>
+                        {selectedSchedule.mode || 'Onsite'}
+                      </span>
+                    </div>
+
+                    {/* Schedule summary + live timer */}
+                    <div className="flex items-center gap-3 text-sm text-text-secondary">
+                      <span className="font-mono text-accent">{selectedSchedule.schedule_time}</span>
+                      <span>{selectedSchedule.schedule_date.split('-').reverse().join('/')}</span>
+                      <span>{agentDisplayName(selectedSchedule)}</span>
+                      {selectedSchedule.started_at && (
+                        <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-xs font-medium tabular-nums">
+                          <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+                          {formatWorkDuration(elapsedMinutes)}
+                        </span>
+                      )}
+                    </div>
+                    {selectedSchedule.duration_estimate && (
+                      <p className="text-xs text-text-muted">Estimated: {selectedSchedule.duration_estimate}</p>
+                    )}
+
+                    {/* Full Clinic Details Card */}
+                    <div className="border border-amber-500/20 bg-amber-500/5 rounded-lg p-3 space-y-2">
+                      <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Clinic Details</h4>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-text-tertiary text-xs">Name</span>
+                          <p className="text-text-primary font-medium">{selectedSchedule.clinic_name}</p>
+                        </div>
+                        <div>
+                          <span className="text-text-tertiary text-xs">Code</span>
+                          <p className="text-text-primary font-mono">{selectedSchedule.clinic_code}</p>
+                        </div>
+                        <div>
+                          <span className="text-text-tertiary text-xs">Phone</span>
+                          <p className="text-text-primary">{workClinic?.clinic_phone || clinicPhones[selectedSchedule.clinic_code] || '-'}</p>
+                        </div>
+                        <div>
+                          <span className="text-text-tertiary text-xs">WhatsApp</span>
+                          <p className="text-text-primary">{selectedSchedule.clinic_wa || '-'}</p>
+                        </div>
+                        {selectedSchedule.pic && (
+                          <div>
+                            <span className="text-text-tertiary text-xs">PIC</span>
+                            <p className="text-text-primary">{selectedSchedule.pic}</p>
+                          </div>
+                        )}
+                        {workClinic?.registered_contact && (
+                          <div>
+                            <span className="text-text-tertiary text-xs">Registered Contact</span>
+                            <p className="text-text-primary">{workClinic.registered_contact}</p>
+                          </div>
+                        )}
+                        {workClinic?.email_main && (
+                          <div className="col-span-2">
+                            <span className="text-text-tertiary text-xs">Email</span>
+                            <p className="text-text-primary truncate">{workClinic.email_main}{workClinic.email_secondary ? ` · ${workClinic.email_secondary}` : ''}</p>
+                          </div>
+                        )}
+                        {workClinic?.product_type && (
+                          <div>
+                            <span className="text-text-tertiary text-xs">Product</span>
+                            <p className="text-text-primary">{workClinic.product_type}</p>
+                          </div>
+                        )}
+                        {workClinic?.mtn_expiry && (
+                          <div>
+                            <span className="text-text-tertiary text-xs">MTN</span>
+                            <p className="text-text-primary flex items-center gap-1.5">
+                              {workClinic.mtn_start?.split('-').reverse().join('/') || '?'} → {workClinic.mtn_expiry.split('-').reverse().join('/')}
+                              {(() => {
+                                const today = new Date(); today.setHours(0,0,0,0)
+                                const exp = new Date(workClinic.mtn_expiry + 'T00:00:00')
+                                const diff = Math.ceil((exp.getTime() - today.getTime()) / 86400000)
+                                if (diff < 0) return <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/20 text-red-400">EXPIRED</span>
+                                if (diff <= 30) return <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400">EXPIRING</span>
+                                return <span className="text-[10px] px-1 py-0.5 rounded bg-green-500/20 text-green-400">ACTIVE</span>
+                              })()}
+                            </p>
+                          </div>
+                        )}
+                        {(workClinic?.city || workClinic?.state) && (
+                          <div>
+                            <span className="text-text-tertiary text-xs">Location</span>
+                            <p className="text-text-primary">{[workClinic.city, workClinic.state].filter(Boolean).join(', ')}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Quick Action Buttons */}
+                    <div className="flex flex-wrap gap-2">
+                      {/* Call */}
+                      {(() => {
+                        const phone = workClinic?.clinic_phone || clinicPhones[selectedSchedule.clinic_code]
+                        return (
+                          <a
+                            href={phone ? `tel:${phone}` : undefined}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                              phone ? 'bg-green-500/10 text-green-400 border-green-500/30 hover:bg-green-500/20' : 'bg-surface border-border text-text-muted cursor-not-allowed'
+                            }`}
+                          >
+                            <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
+                            </svg>
+                            Call
+                          </a>
+                        )
+                      })()}
+                      {/* WhatsApp */}
+                      {(() => {
+                        const wa = selectedSchedule.clinic_wa
+                        return (
+                          <button
+                            onClick={() => wa && window.open(formatWALink(wa), '_blank')}
+                            disabled={!wa}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                              wa ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20' : 'bg-surface border-border text-text-muted cursor-not-allowed'
+                            }`}
+                          >
+                            <svg className="size-3.5" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                              <path d="M12 0C5.373 0 0 5.373 0 12c0 2.136.558 4.137 1.534 5.879L.067 23.537l5.818-1.527A11.935 11.935 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818c-1.902 0-3.69-.517-5.218-1.414l-.374-.222-3.88 1.018 1.035-3.78-.244-.388A9.767 9.767 0 012.182 12c0-5.418 4.4-9.818 9.818-9.818S21.818 6.582 21.818 12s-4.4 9.818-9.818 9.818z"/>
+                            </svg>
+                            WhatsApp
+                          </button>
+                        )
+                      })()}
+                      {/* License Key */}
+                      <button
+                        onClick={() => {
+                          if (selectedSchedule.clinic_code === 'MANUAL') return
+                          sessionStorage.setItem('lk-prefill', JSON.stringify({
+                            clinic_code: selectedSchedule.clinic_code,
+                            clinic_name: selectedSchedule.clinic_name,
+                          }))
+                          router.push('/lk')
+                        }}
+                        disabled={selectedSchedule.clinic_code === 'MANUAL'}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          selectedSchedule.clinic_code !== 'MANUAL'
+                            ? 'bg-blue-500/10 text-blue-400 border-blue-500/30 hover:bg-blue-500/20'
+                            : 'bg-surface border-border text-text-muted cursor-not-allowed'
+                        }`}
+                      >
+                        <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                        </svg>
+                        License Key
+                      </button>
+                      {/* View Ticket */}
+                      <button
+                        onClick={() => selectedSchedule.source_ticket_id && router.push(`/tickets/${selectedSchedule.source_ticket_id}`)}
+                        disabled={!selectedSchedule.source_ticket_id}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                          selectedSchedule.source_ticket_id
+                            ? 'bg-violet-500/10 text-violet-400 border-violet-500/30 hover:bg-violet-500/20'
+                            : 'bg-surface border-border text-text-muted cursor-not-allowed'
+                        }`}
+                      >
+                        <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        View Ticket
+                      </button>
+                      {/* Email */}
+                      {(() => {
+                        const email = workClinic?.email_main
+                        return (
+                          <a
+                            href={email ? `mailto:${email}` : undefined}
+                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                              email ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/20' : 'bg-surface border-border text-text-muted cursor-not-allowed'
+                            }`}
+                          >
+                            <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                            Email
+                          </a>
+                        )
+                      })()}
+                    </div>
+
+                    {/* Live Notes */}
+                    <div>
+                      <span className="text-text-tertiary text-xs">Notes</span>
+                      <Textarea
+                        value={workNotes}
+                        onChange={(e) => handleWorkNotesChange(e.target.value)}
+                        rows={3}
+                        placeholder="Working notes — auto-saves..."
+                      />
+                    </div>
+                  </>
                 ) : (
-                  /* ===== VIEW MODE ===== */
+                  /* ===== VIEW MODE (non in_progress) ===== */
                   <>
                     <div className="flex items-center gap-2">
                       {(() => {
@@ -903,7 +1284,16 @@ export default function SchedulePage() {
                       </div>
                       <div>
                         <span className="text-text-tertiary text-xs">Duration</span>
-                        <p className="text-text-primary">{selectedSchedule.duration_estimate || '-'}</p>
+                        {selectedSchedule.actual_duration_minutes ? (
+                          <p className="text-text-primary">
+                            <span className="font-medium">{formatWorkDuration(selectedSchedule.actual_duration_minutes)}</span>
+                            {selectedSchedule.duration_estimate && (
+                              <span className="text-text-muted text-xs ml-1">(est. {selectedSchedule.duration_estimate})</span>
+                            )}
+                          </p>
+                        ) : (
+                          <p className="text-text-primary">{selectedSchedule.duration_estimate || '-'}</p>
+                        )}
                       </div>
                       <div>
                         <span className="text-text-tertiary text-xs">Staff</span>
@@ -941,68 +1331,101 @@ export default function SchedulePage() {
               </div>
 
               {/* Actions */}
-              <div className="px-4 py-3 border-t border-border flex gap-2 flex-shrink-0">
+              <div className="px-4 py-3 border-t border-border flex-shrink-0 space-y-2">
                 {isEditing ? (
-                  <>
+                  <div className="flex gap-2">
                     <Button size="sm" onClick={handleSaveEdit} loading={editSaving} className="flex-1">
                       Save Changes
                     </Button>
                     <Button size="sm" variant="secondary" onClick={() => setIsEditing(false)}>
                       Cancel
                     </Button>
-                  </>
+                  </div>
                 ) : (
                   <>
-                    <Button size="sm" variant="secondary" onClick={() => startEditing(selectedSchedule)} className="flex-1">
-                      <svg className="size-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                      </svg>
-                      Edit
-                    </Button>
+                    {/* Primary action — full width */}
                     {selectedSchedule.status === 'scheduled' && (
-                      <>
+                      <Button size="sm" onClick={() => handleStartWork(selectedSchedule)} className="w-full bg-amber-500 hover:bg-amber-600 text-black">
+                        <svg className="size-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Start Work
+                      </Button>
+                    )}
+                    {selectedSchedule.status === 'in_progress' && (
+                      <div className="flex gap-2">
                         <Button size="sm" variant="success" onClick={() => handleStatusChange(selectedSchedule.id, 'completed')} className="flex-1">
                           Complete
                         </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleNoAnswer(selectedSchedule)}>
-                          No Answer
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleReschedule(selectedSchedule)}>
-                          Reschedule
-                        </Button>
-                      </>
+                        {!showWorkPanel && (
+                          <Button size="sm" onClick={() => setShowWorkPanel(true)} className="flex-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30">
+                            Open Work Panel
+                          </Button>
+                        )}
+                      </div>
                     )}
-                    {selectedSchedule.status === 'no_answer' && (
-                      <>
-                        <Button size="sm" variant="secondary" onClick={() => handleNoAnswer(selectedSchedule)} className="flex-1">
-                          No Answer Again
-                        </Button>
-                        <Button size="sm" variant="secondary" onClick={() => handleReschedule(selectedSchedule)}>
-                          Reschedule
-                        </Button>
+
+                    {/* Secondary actions row */}
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => startEditing(selectedSchedule)}>
+                        <svg className="size-3.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Edit
+                      </Button>
+                      {selectedSchedule.status === 'scheduled' && (
+                        <>
+                          <Button size="sm" variant="secondary" onClick={() => handleStatusChange(selectedSchedule.id, 'completed')}>
+                            Complete
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={() => handleNoAnswer(selectedSchedule)}>
+                            No Answer
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={() => handleReschedule(selectedSchedule)}>
+                            Reschedule
+                          </Button>
+                        </>
+                      )}
+                      {selectedSchedule.status === 'in_progress' && (
+                        <>
+                          <Button size="sm" variant="secondary" onClick={() => handleNoAnswer(selectedSchedule)}>
+                            No Answer
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={() => handleReschedule(selectedSchedule)}>
+                            Reschedule
+                          </Button>
+                        </>
+                      )}
+                      {selectedSchedule.status === 'no_answer' && (
+                        <>
+                          <Button size="sm" variant="secondary" onClick={() => handleNoAnswer(selectedSchedule)}>
+                            No Answer Again
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={() => handleReschedule(selectedSchedule)}>
+                            Reschedule
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={() => handleStatusChange(selectedSchedule.id, 'scheduled')}>
+                            Retry
+                          </Button>
+                        </>
+                      )}
+                      {(selectedSchedule.status === 'cancelled' || selectedSchedule.status === 'rescheduled' || selectedSchedule.status === 'completed') && (
                         <Button size="sm" variant="secondary" onClick={() => handleStatusChange(selectedSchedule.id, 'scheduled')}>
-                          Retry
+                          Reopen
                         </Button>
-                      </>
-                    )}
-                    {selectedSchedule.status === 'cancelled' && (
-                      <Button size="sm" variant="secondary" onClick={() => handleStatusChange(selectedSchedule.id, 'scheduled')} className="flex-1">
-                        Reopen
-                      </Button>
-                    )}
-                    {selectedSchedule.status === 'rescheduled' && (
-                      <Button size="sm" variant="secondary" onClick={() => handleStatusChange(selectedSchedule.id, 'scheduled')} className="flex-1">
-                        Reopen
-                      </Button>
-                    )}
-                    {selectedSchedule.status === 'completed' && (
-                      <Button size="sm" variant="secondary" onClick={() => handleStatusChange(selectedSchedule.id, 'scheduled')} className="flex-1">
-                        Reopen
-                      </Button>
-                    )}
-                    <Button size="sm" variant="danger" onClick={() => handleDelete(selectedSchedule.id)}>
-                      Delete
-                    </Button>
+                      )}
+                      {/* Delete — subtle icon, pushed to the right */}
+                      <button
+                        onClick={() => handleDelete(selectedSchedule.id)}
+                        className="ml-auto text-text-muted hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
+                        title="Delete"
+                      >
+                        <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </>
                 )}
               </div>

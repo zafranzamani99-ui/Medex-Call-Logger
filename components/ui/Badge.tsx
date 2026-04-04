@@ -11,7 +11,7 @@ interface BadgeProps {
 
 export default function Badge({ children, bg, text, className = '', pulse }: BadgeProps) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${bg} ${text} ${pulse ? 'animate-pulse' : ''} ${className}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium ${bg} ${text} ${pulse ? 'animate-pulse' : ''} ${className}`}>
       {children}
     </span>
   )

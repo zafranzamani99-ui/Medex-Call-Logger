@@ -32,6 +32,29 @@ export const ISSUE_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 // Default fallback color for custom issue types
 export const DEFAULT_ISSUE_COLOR = { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
 
+// Issue categories — parent classification above issue types
+export const ISSUE_CATEGORIES: string[] = [
+  'System Implementation',
+  'User',
+  'Data Issue',
+  'System Issue',
+  'Change Request',
+]
+
+export const ISSUE_CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
+  'System Implementation': { bg: 'bg-blue-500/20', text: 'text-blue-400' },
+  'User':                  { bg: 'bg-emerald-500/20', text: 'text-emerald-400' },
+  'Data Issue':            { bg: 'bg-amber-500/20', text: 'text-amber-400' },
+  'System Issue':          { bg: 'bg-red-500/20', text: 'text-red-400' },
+  'Change Request':        { bg: 'bg-violet-500/20', text: 'text-violet-400' },
+}
+
+export const DEFAULT_CATEGORY_COLOR = { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
+
+export function getIssueCategoryColor(cat: string) {
+  return ISSUE_CATEGORY_COLORS[cat] || DEFAULT_CATEGORY_COLOR
+}
+
 // Helper to get issue type color with fallback
 export function getIssueTypeColor(issueType: string) {
   return ISSUE_TYPE_COLORS[issueType] || DEFAULT_ISSUE_COLOR
@@ -112,6 +135,25 @@ export function getDurationLabel(minutes: number | null): string {
   if (!minutes) return '-'
   const found = CALL_DURATIONS.find((d) => d.value === minutes)
   return found ? found.label : `${minutes} min`
+}
+
+// Format actual work duration (minutes → "45m", "1h 30m", "2h")
+export function formatWorkDuration(minutes: number | null): string {
+  if (!minutes) return '-'
+  if (minutes < 60) return `${minutes}m`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+// Format live work duration (seconds → "04:32", "1:23:05")
+export function formatWorkDurationLive(totalSeconds: number): string {
+  if (totalSeconds < 0) return '0:00'
+  const h = Math.floor(totalSeconds / 3600)
+  const m = Math.floor((totalSeconds % 3600) / 60)
+  const s = totalSeconds % 60
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`
 }
 
 // Schedule type options with duration estimates

@@ -6,8 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 
 // WHY: Register page — spec Section 14. Creates auth.users + profiles row.
-// Display name is critical — it appears on every ticket and timeline entry
-// as "Logged by: Zafran" or "Added by: Hazleen".
+// Display name is critical — it appears on every ticket and timeline entry.
 export default function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -22,7 +21,6 @@ export default function RegisterPage() {
     setError('')
     setLoading(true)
 
-    // Step 1: Create the auth user
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -40,9 +38,6 @@ export default function RegisterPage() {
       return
     }
 
-    // Step 2: Create the profiles row with display_name
-    // WHY: The profiles table stores the display_name that appears on all log entries.
-    // This must happen immediately after auth signup.
     const { error: profileError } = await supabase
       .from('profiles')
       .insert({
@@ -61,93 +56,114 @@ export default function RegisterPage() {
     router.refresh()
   }
 
+  const inputClasses = `w-full px-3 py-2.5 bg-surface-inset border border-border rounded-lg text-white text-[13px]
+    placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-[var(--ring)]
+    focus:border-transparent focus-glow transition-all`
+
   return (
-    <div className="min-h-dvh flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
+    <div className="min-h-dvh flex items-center justify-center px-4 relative overflow-hidden" style={{
+      background: 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.12), transparent 70%), #0b0d14',
+    }}>
+      <div className="absolute inset-0 opacity-[0.015]" style={{
+        backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+        backgroundSize: '64px 64px',
+      }} />
+
+      <div className="w-full max-w-[380px] relative z-10">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-white">MEDEX CALL LOGGER</h1>
-          <p className="text-zinc-500 text-sm mt-1">Create your account</p>
+          <div className="inline-flex items-center justify-center size-11 rounded-xl bg-indigo-500/10 mb-5" style={{
+            boxShadow: '0 0 20px -4px rgba(99, 102, 241, 0.2)',
+          }}>
+            <svg className="size-5 text-indigo-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold text-text-primary">Create your account</h1>
+          <p className="text-[13px] text-text-tertiary mt-1.5">Join the Medex support team</p>
         </div>
 
-        {/* Register Form */}
-        <form onSubmit={handleRegister} className="space-y-4">
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-red-400 text-sm">
-              {error}
+        {/* Form */}
+        <div className="card p-7" style={{
+          background: 'linear-gradient(180deg, rgba(17, 19, 24, 0.95) 0%, rgba(17, 19, 24, 1) 100%)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          boxShadow: '0 16px 48px -8px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.03)',
+        }}>
+          <form onSubmit={handleRegister} className="space-y-4">
+            {error && (
+              <div className="bg-red-500/8 border border-red-500/15 rounded-lg px-3.5 py-2.5 text-red-400 text-[13px]">
+                {error}
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="displayName" className="block text-[12px] font-medium text-text-tertiary mb-1.5">
+                Display Name
+              </label>
+              <input
+                id="displayName"
+                type="text"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                required
+                className={inputClasses}
+                placeholder="Zafran"
+              />
+              <p className="text-[11px] text-text-muted mt-1">
+                This name appears on every ticket you log
+              </p>
             </div>
-          )}
 
-          <div>
-            <label htmlFor="displayName" className="block text-sm text-zinc-400 mb-1">
-              Display Name
-            </label>
-            <input
-              id="displayName"
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              required
-              className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-white
-                         placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50
-                         focus:border-blue-500/50"
-              placeholder="Zafran"
-            />
-            <p className="text-xs text-zinc-500 mt-1">
-              This name appears on every ticket you log
-            </p>
-          </div>
+            <div>
+              <label htmlFor="email" className="block text-[12px] font-medium text-text-tertiary mb-1.5">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                className={inputClasses}
+                placeholder="agent@medex.com"
+              />
+            </div>
 
-          <div>
-            <label htmlFor="email" className="block text-sm text-zinc-400 mb-1">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-white
-                         placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50
-                         focus:border-blue-500/50"
-              placeholder="agent@medex.com"
-            />
-          </div>
+            <div>
+              <label htmlFor="password" className="block text-[12px] font-medium text-text-tertiary mb-1.5">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                minLength={6}
+                autoComplete="new-password"
+                className={inputClasses}
+                placeholder="••••••••"
+              />
+            </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm text-zinc-400 mb-1">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              minLength={6}
-              autoComplete="new-password"
-              className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-white
-                         placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50
-                         focus:border-blue-500/50"
-              placeholder="••••••••"
-            />
-          </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50
+                         text-white text-[13px] font-semibold rounded-lg transition-all mt-1"
+              style={{
+                boxShadow: '0 1px 2px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
+              }}
+            >
+              {loading ? 'Creating account...' : 'Create Account'}
+            </button>
+          </form>
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50
-                       text-white font-medium rounded-lg transition-colors"
-          >
-            {loading ? 'Creating account...' : 'Create Account'}
-          </button>
-        </form>
-
-        <p className="text-center text-sm text-zinc-500 mt-6">
+        <p className="text-center text-[13px] text-text-tertiary mt-5">
           Already have an account?{' '}
-          <Link href="/login" className="text-blue-400 hover:text-blue-300">
+          <Link href="/login" className="text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
             Sign In
           </Link>
         </p>

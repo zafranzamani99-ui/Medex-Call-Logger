@@ -32,7 +32,7 @@ function Overlay({ open, onClose, children }: { open: boolean; onClose: () => vo
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 bg-black/60 transition-opacity duration-200"
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm transition-opacity duration-200"
       onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
     >
       {children}
@@ -43,7 +43,7 @@ function Overlay({ open, onClose, children }: { open: boolean; onClose: () => vo
 export function SlidePanel({ open, onClose, title, children }: BaseProps) {
   return (
     <Overlay open={open} onClose={onClose}>
-      <div className="absolute inset-y-0 right-0 w-full max-w-sm bg-surface border-l border-border shadow-2xl flex flex-col">
+      <div className="absolute inset-y-0 right-0 w-full max-w-sm bg-surface border-l border-border shadow-theme-lg flex flex-col animate-fadeIn">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
           {title && <h3 className="font-semibold text-white">{title}</h3>}
@@ -73,7 +73,7 @@ export function ModalDialog({ open, onClose, title, children, size = 'md' }: Bas
   return (
     <Overlay open={open} onClose={onClose}>
       <div className="flex items-end sm:items-center justify-center min-h-full p-2 sm:p-4">
-        <div className={`bg-surface border border-border rounded-xl w-full ${MODAL_SIZES[size]} max-h-[85vh] flex flex-col shadow-2xl`}>
+        <div className={`bg-surface border border-border rounded-2xl w-full ${MODAL_SIZES[size]} max-h-[85vh] flex flex-col shadow-theme-lg animate-scaleIn`}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
             {title && <h3 className="font-semibold text-white">{title}</h3>}

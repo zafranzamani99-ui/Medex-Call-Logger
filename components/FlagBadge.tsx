@@ -4,7 +4,7 @@
 // something requires action.
 
 import Badge from '@/components/ui/Badge'
-import { getIssueTypeColor } from '@/lib/constants'
+import { getIssueTypeColor, getIssueCategoryColor } from '@/lib/constants'
 
 export function NeedsAttentionBadge() {
   return (
@@ -28,6 +28,16 @@ export function IssueTypeBadge({ issueType }: { issueType: string }) {
   return (
     <Badge bg={c.bg} text={c.text}>
       {issueType}
+    </Badge>
+  )
+}
+
+export function IssueCategoryBadge({ category }: { category: string }) {
+  const c = getIssueCategoryColor(category)
+
+  return (
+    <Badge bg={c.bg} text={c.text}>
+      {category}
     </Badge>
   )
 }

@@ -265,8 +265,11 @@ export default function KBPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-text-primary">Knowledge Base</h1>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">Knowledge Base</h1>
+          <p className="text-[13px] text-text-tertiary mt-0.5">Solutions and reference articles</p>
+        </div>
         <Button size="sm" onClick={() => setShowAdd(!showAdd)}>
           {showAdd ? 'Cancel' : 'Add Entry'}
         </Button>

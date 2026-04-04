@@ -134,7 +134,10 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-xl mx-auto">
-      <h1 className="text-xl font-bold text-text-primary mb-6">Settings</h1>
+      <div className="mb-8">
+        <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
+        <p className="text-[13px] text-text-tertiary mt-0.5">Manage your account preferences</p>
+      </div>
 
       {/* Display Name Edit */}
       <div className="bg-surface border border-border rounded-lg p-4 mb-4">

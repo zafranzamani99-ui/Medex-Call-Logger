@@ -1,14 +1,12 @@
-import { RECORD_TYPE_COLORS, RECORD_TYPE_LABELS } from '@/lib/constants'
+import { RECORD_TYPE_LABELS } from '@/lib/constants'
 import type { RecordType } from '@/lib/types'
 import Badge from '@/components/ui/Badge'
 
-// WHY: Visual indicator to distinguish call logs from tickets at a glance.
-// Cyan for calls (routine), violet for tickets (needs attention).
+// WHY: Label-only badge — neutral styling since record type is not a scanning signal.
+// Color is reserved for Status and Issue Type badges.
 export default function RecordTypeBadge({ recordType }: { recordType: RecordType }) {
-  const colors = RECORD_TYPE_COLORS[recordType] || { bg: 'bg-gray-500/20', text: 'text-gray-400' }
-
   return (
-    <Badge bg={colors.bg} text={colors.text}>
+    <Badge bg="bg-zinc-500/10" text="text-zinc-500">
       {RECORD_TYPE_LABELS[recordType]}
     </Badge>
   )

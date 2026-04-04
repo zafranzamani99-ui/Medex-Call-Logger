@@ -4,10 +4,6 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pi
 import { CHART_TOOLTIP_STYLE, getIssueHexColor, theme } from '@/lib/theme'
 
 // WHY: Spec Section 7.4 — Dashboard charts.
-// - Calls per day (last 14 days bar chart)
-// - Issue type breakdown (donut chart)
-// Uses Recharts — lightweight, React-native, works well with Next.js.
-// Colors imported from lib/theme.ts — single source of truth.
 
 interface ChartData {
   dailyCalls: { date: string; count: number }[]
@@ -16,21 +12,21 @@ interface ChartData {
 
 export default function DashboardCharts({ data }: { data: ChartData }) {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-      {/* Calls per day — last 14 days */}
-      <div className="bg-surface border border-border rounded-lg p-4">
-        <h3 className="text-sm font-medium text-zinc-400 mb-4">Calls per Day (Last 14 Days)</h3>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-10">
+      {/* Calls per day */}
+      <div className="card p-5">
+        <h3 className="text-[12px] font-semibold text-text-muted uppercase tracking-wider mb-4">Calls per Day</h3>
         <div className="h-40 sm:h-48">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data.dailyCalls}>
               <XAxis
                 dataKey="date"
-                tick={{ fontSize: 10, fill: theme.textTertiary }}
+                tick={{ fontSize: 10, fill: theme.textMuted }}
                 axisLine={false}
                 tickLine={false}
               />
               <YAxis
-                tick={{ fontSize: 10, fill: theme.textTertiary }}
+                tick={{ fontSize: 10, fill: theme.textMuted }}
                 axisLine={false}
                 tickLine={false}
                 allowDecimals={false}
@@ -40,15 +36,15 @@ export default function DashboardCharts({ data }: { data: ChartData }) {
                 labelStyle={{ color: theme.textSecondary }}
                 itemStyle={{ color: theme.foreground }}
               />
-              <Bar dataKey="count" fill={theme.accent} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="count" fill={theme.accent} radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
       {/* Issue type breakdown — donut */}
-      <div className="bg-surface border border-border rounded-lg p-4">
-        <h3 className="text-sm font-medium text-zinc-400 mb-4">Issue Type Breakdown</h3>
+      <div className="card p-5">
+        <h3 className="text-[12px] font-semibold text-text-muted uppercase tracking-wider mb-4">Issue Breakdown</h3>
         <div className="h-40 sm:h-48 flex items-center justify-center">
           {data.issueBreakdown.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
@@ -73,18 +69,18 @@ export default function DashboardCharts({ data }: { data: ChartData }) {
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-sm text-zinc-500">No data yet</p>
+            <p className="text-[13px] text-text-muted">No data yet</p>
           )}
         </div>
         {/* Legend */}
-        <div className="flex flex-wrap gap-3 mt-2 justify-center">
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-3 justify-center">
           {data.issueBreakdown.map((entry) => (
             <div key={entry.name} className="flex items-center gap-1.5">
               <div
-                className="w-2.5 h-2.5 rounded-full"
+                className="size-2 rounded-full"
                 style={{ backgroundColor: getIssueHexColor(entry.name) }}
               />
-              <span className="text-xs text-zinc-400">{entry.name} ({entry.count})</span>
+              <span className="text-[11px] text-text-tertiary">{entry.name} ({entry.count})</span>
             </div>
           ))}
         </div>

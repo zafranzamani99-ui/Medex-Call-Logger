@@ -92,9 +92,9 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
     includeScore: true,
   }), [clinics])
 
-  // Search on query change
+  // Search on query change — skip if clinic already selected
   useEffect(() => {
-    if (query.length < 2) {
+    if (query.length < 2 || selectedClinic) {
       setResults([])
       setShowDropdown(false)
       return
@@ -122,22 +122,42 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
   }, [])
 
   // Open ticket check — fires when a clinic is selected (spec Section 5.1)
+  // WHY: Shows two things:
+  // 1. Any unresolved tickets (last 30 days) — needs attention
+  // 2. ALL of today's calls/tickets (even resolved) — gives agent context
+  //    when same clinic calls multiple times in a day
   const checkOpenTickets = async (clinicCode: string) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
     const thirtyDaysAgo = new Date()
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
 
-    // WHY: Only warn about open tickets, not resolved call logs
-    const { data } = await supabase
-      .from('tickets')
-      .select('id, ticket_ref, issue_type, issue, created_at, created_by_name, status, record_type')
-      .eq('clinic_code', clinicCode)
-      .eq('record_type', 'ticket')
-      .neq('status', 'Resolved')
-      .gte('created_at', thirtyDaysAgo.toISOString())
-      .order('created_at', { ascending: false })
+    // Two parallel queries: today's activity + unresolved tickets
+    const [todayRes, unresolvedRes] = await Promise.all([
+      // All records from today (any status, any type)
+      supabase
+        .from('tickets')
+        .select('id, ticket_ref, issue_type, issue, created_at, created_by_name, status, record_type')
+        .eq('clinic_code', clinicCode)
+        .gte('created_at', today.toISOString())
+        .order('created_at', { ascending: false }),
+      // Unresolved tickets from last 30 days (excluding today to avoid duplicates)
+      supabase
+        .from('tickets')
+        .select('id, ticket_ref, issue_type, issue, created_at, created_by_name, status, record_type')
+        .eq('clinic_code', clinicCode)
+        .neq('status', 'Resolved')
+        .gte('created_at', thirtyDaysAgo.toISOString())
+        .lt('created_at', today.toISOString())
+        .order('created_at', { ascending: false }),
+    ])
 
-    if (data && data.length > 0) {
-      onOpenTickets?.(data as OpenTicketWarning[])
+    // Merge and deduplicate by id
+    const all = [...(todayRes.data || []), ...(unresolvedRes.data || [])]
+    const unique = all.filter((item, idx, arr) => arr.findIndex(t => t.id === item.id) === idx)
+
+    if (unique.length > 0) {
+      onOpenTickets?.(unique as OpenTicketWarning[])
     } else {
       onOpenTickets?.([])
     }

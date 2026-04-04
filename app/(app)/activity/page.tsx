@@ -206,8 +206,11 @@ export default function ActivityPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-text-primary">Activity Log</h1>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">Activity Log</h1>
+          <p className="text-[13px] text-text-tertiary mt-0.5">Audit trail for all actions</p>
+        </div>
         <span className="text-xs text-text-tertiary tabular-nums">{total.toLocaleString()} entries</span>
       </div>
 

@@ -19,6 +19,7 @@ const config: Config = {
           DEFAULT: "var(--surface)",
           raised: "var(--surface-raised)",
           overlay: "var(--surface-overlay)",
+          inset: "var(--surface-inset)",
         },
         border: "var(--border)",
         accent: {
@@ -34,6 +35,13 @@ const config: Config = {
       fontFamily: {
         sans: ['var(--font-sans)', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
         mono: ['var(--font-mono)', 'monospace'],
+      },
+      boxShadow: {
+        'theme-sm': 'var(--shadow-sm)',
+        'theme-md': 'var(--shadow-md)',
+        'theme-lg': 'var(--shadow-lg)',
+        'glow': 'var(--glow-sm)',
+        'glow-md': 'var(--glow-md)',
       },
     },
   },

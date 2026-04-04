@@ -2,32 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
-/* WHY: Dark theme as default — optimised for all-day use.
-   Light theme available via data-theme="light" on <html>. */
+/* V3.0 — Premium slate-indigo palette.
+   Shifted from flat zinc-grays to blue-tinted darks with indigo accent.
+   Every surface has a subtle cool tone that creates depth and sophistication. */
 :root, [data-theme="dark"] {
-  /* Base */
-  --background: #09090b;
-  --foreground: #e4e4e7;
-  --surface: #18181b;
-  --border: #27272a;
+  /* Base — deep navy-black, not pure black */
+  --background: #0b0d14;
+  --foreground: #e2e4ed;
+  --surface: #111318;
+  --border: #1e2235;
 
-  /* Surface levels */
-  --surface-raised: #1c1c20;
-  --surface-overlay: #27272a;
+  /* Surface levels — each step adds subtle warmth */
+  --surface-raised: #171a24;
+  --surface-overlay: #1e2230;
 
-  /* Text hierarchy */
-  --text-primary: #fafafa;
-  --text-secondary: #a1a1aa;
-  --text-tertiary: #71717a;
-  --text-muted: #3f3f46;
+  /* Text hierarchy — cool-toned for cohesion */
+  --text-primary: #eef0f6;
+  --text-secondary: #8b91a5;
+  --text-tertiary: #5c6278;
+  --text-muted: #363c52;
 
-  /* Interactive */
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent-muted: rgba(59, 130, 246, 0.15);
+  /* Interactive — indigo accent (distinctive, premium) */
+  --accent: #6366f1;
+  --accent-hover: #4f46e5;
+  --accent-muted: rgba(99, 102, 241, 0.12);
 
   /* Focus */
-  --ring: rgba(59, 130, 246, 0.5);
+  --ring: rgba(99, 102, 241, 0.5);
+
+  /* Inset — for inputs, deeper than surface */
+  --surface-inset: #0d0f16;
+
+  /* Glow effects — indigo-tinted */
+  --glow-sm: 0 0 0 1px rgba(99, 102, 241, 0.08), 0 0 12px -2px rgba(99, 102, 241, 0.12);
+  --glow-md: 0 0 0 1px rgba(99, 102, 241, 0.12), 0 0 20px -4px rgba(99, 102, 241, 0.18);
+
+  /* Shadows — cool-tinted, layered for depth */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --shadow-lg: 0 12px 24px -4px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.04);
 
   /* Sidebar */
   --sidebar-width: 220px;
@@ -37,56 +50,54 @@
 }
 
 [data-theme="light"] {
-  --background: #f8fafc;
+  --background: #f6f7fb;
   --foreground: #18181b;
   --surface: #ffffff;
-  --border: #e2e8f0;
+  --border: #e2e5f0;
 
-  --surface-raised: #f1f5f9;
+  --surface-raised: #f0f1f7;
   --surface-overlay: #ffffff;
 
-  --text-primary: #09090b;
-  --text-secondary: #52525b;
-  --text-tertiary: #71717a;
-  --text-muted: #a1a1aa;
+  --text-primary: #0f1020;
+  --text-secondary: #4b4f6b;
+  --text-tertiary: #6e7290;
+  --text-muted: #a0a4be;
 
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-muted: rgba(37, 99, 235, 0.1);
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-muted: rgba(79, 70, 229, 0.08);
 
-  --ring: rgba(37, 99, 235, 0.5);
+  --ring: rgba(79, 70, 229, 0.4);
+
+  --surface-inset: #eef0f7;
+
+  --glow-sm: 0 0 0 1px rgba(79, 70, 229, 0.06), 0 0 12px -2px rgba(79, 70, 229, 0.08);
+  --glow-md: 0 0 0 1px rgba(79, 70, 229, 0.1), 0 0 20px -4px rgba(79, 70, 229, 0.12);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 0 0 1px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.03);
+  --shadow-lg: 0 12px 24px -4px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.04);
 
   color-scheme: light;
 }
 
-/* WHY: Fonts now loaded via next/font in layout.tsx — self-hosted at build time,
-   no render-blocking @import, no external Google Fonts request.
-   CSS variables --font-sans and --font-mono set by next/font on <html>. */
-
+/* Fonts — loaded via next/font in layout.tsx */
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 
-/* WHY: Breathing theme transition using View Transitions API.
-   Page inhales (scales up + fades), theme shifts, page exhales (settles back).
-   Toggle button pulses gently. Falls back to smooth fade on unsupported browsers. */
-
-/* View Transition: disable default crossfade */
+/* Breathing theme transition — View Transitions API */
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation: none;
   mix-blend-mode: normal;
 }
-
-/* Old content: inhale — gently expands and fades out */
 ::view-transition-old(root) {
   z-index: 1;
   animation: theme-breathe-out 0.8s cubic-bezier(0.4, 0, 0.2, 1) forwards;
 }
-
-/* New content: exhale — starts expanded, settles into place */
 ::view-transition-new(root) {
   z-index: 9999;
   animation: theme-breathe-in 0.8s cubic-bezier(0.16, 1, 0.3, 1);
@@ -97,14 +108,12 @@ body {
   50%  { opacity: 0.5; transform: scale(1.012); }
   100% { opacity: 0; transform: scale(1.02); }
 }
-
 @keyframes theme-breathe-in {
   0%   { opacity: 0; transform: scale(1.02); }
   40%  { opacity: 0.7; transform: scale(1.005); }
   100% { opacity: 1; transform: scale(1); }
 }
 
-/* Toggle button animation — soft pulse like a heartbeat */
 @keyframes theme-spin {
   0%   { transform: scale(1); }
   30%  { transform: scale(1.2); }
@@ -115,7 +124,7 @@ body {
   animation: theme-spin 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Fallback: smooth fade for browsers without View Transitions (Safari/Firefox) */
+/* Fallback: smooth fade for browsers without View Transitions */
 .theme-transitioning,
 .theme-transitioning *,
 .theme-transitioning *::before,
@@ -123,13 +132,13 @@ body {
   transition: background-color 400ms ease, color 400ms ease, border-color 400ms ease !important;
 }
 
-/* Custom scrollbar — adapts to theme */
+/* Custom scrollbar — thin, subtle */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--background);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--text-muted);
@@ -139,20 +148,67 @@ body {
   background: var(--text-tertiary);
 }
 
-/* Pill selector tap target — mobile-first (spec: one-thumb logging)
-   baseline-ui: min 44px touch target */
 @layer components {
+  /* Card — shadow-defined elevation, near-invisible border */
+  .card {
+    @apply bg-surface rounded-xl;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+  }
+  .card-raised {
+    @apply bg-surface-raised rounded-xl;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+  }
+  .card-hover {
+    @apply transition-all duration-200;
+  }
+  .card-hover:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+
+  /* Section header — uppercase label */
+  .section-header {
+    @apply text-xs font-semibold uppercase tracking-wider text-text-tertiary;
+  }
+
+  /* Focus glow for inputs — indigo-tinted */
+  .focus-glow:focus {
+    box-shadow: var(--glow-sm);
+  }
+  .focus-glow:focus-within {
+    box-shadow: var(--glow-sm);
+  }
+
+  /* Pill selector */
   .pill {
     @apply inline-flex items-center justify-center px-3 py-2 rounded-full text-sm font-medium
-           cursor-pointer transition-colors duration-150 select-none
+           cursor-pointer transition-all duration-150 select-none
            min-h-[44px] min-w-[44px];
   }
   .pill-active {
-    @apply ring-2 ring-offset-1 ring-offset-background;
+    @apply ring-2 ring-offset-1 ring-offset-background shadow-sm;
+  }
+
+  /* Accent top bar on cards */
+  .card-accent-top {
+    position: relative;
+    overflow: hidden;
+  }
+  .card-accent-top::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), #a78bfa, var(--accent));
+    opacity: 0.6;
   }
 }
 
-/* Toast notification animation — baseline-ui: only animate transform+opacity */
+/* Toast animation */
 @keyframes slideIn {
   from { transform: translateY(-100%); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -161,7 +217,7 @@ body {
   animation: slideIn 0.2s ease-out;
 }
 
-/* Skeleton loading animation — baseline-ui: use structural skeletons */
+/* Skeleton loading */
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -170,23 +226,18 @@ body {
   background: linear-gradient(90deg, var(--surface) 25%, var(--border) 50%, var(--surface) 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 0.375rem;
+  border-radius: 0.5rem;
 }
 
-/* WHY: color-scheme tells the browser to render native form controls
-   (calendar icon, dropdown arrows) in matching colors for the theme. */
-[data-theme="dark"] input[type="date"] {
-  color-scheme: dark;
-}
-[data-theme="light"] input[type="date"] {
-  color-scheme: light;
-}
+/* Date/select native controls */
+[data-theme="dark"] input[type="date"] { color-scheme: dark; }
+[data-theme="light"] input[type="date"] { color-scheme: light; }
 select {
   outline: none !important;
   box-shadow: none !important;
   -webkit-appearance: none;
   appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23a1a1aa' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%235c6278' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 8px center;
   padding-right: 28px;
@@ -195,18 +246,14 @@ input[type="date"] {
   outline: none !important;
   box-shadow: none !important;
 }
-select:hover,
-select:focus,
-select:active,
-input[type="date"]:hover,
-input[type="date"]:focus,
-input[type="date"]:active {
+select:hover, select:focus, select:active,
+input[type="date"]:hover, input[type="date"]:focus, input[type="date"]:active {
   outline: none !important;
   box-shadow: none !important;
   border-color: var(--border) !important;
 }
 
-/* Mobile "More" sheet slide-up animation */
+/* Mobile sheet */
 @keyframes slideUp {
   from { transform: translateY(100%); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
@@ -215,26 +262,49 @@ input[type="date"]:active {
   animation: slideUp 0.2s ease-out;
 }
 
-/* WHY: Override hardcoded Tailwind dark colors when in light mode.
-   The app was built dark-first, so text-white, bg-zinc-800 etc are scattered.
-   These overrides flip the most visible patterns without touching every file. */
+/* V3.0 animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+.animate-scaleIn {
+  animation: scaleIn 0.15s ease-out;
+}
+
+@keyframes pulseRing {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+  50% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
+}
+.animate-pulseRing {
+  animation: pulseRing 2s ease-in-out infinite;
+}
+
+/* Light theme overrides for dark-first utility classes */
 [data-theme="light"] .text-white { color: var(--foreground); }
 [data-theme="light"] .text-zinc-300 { color: #3f3f46; }
-[data-theme="light"] .text-zinc-400 { color: #52525b; }
+[data-theme="light"] .text-zinc-400 { color: #4b4f6b; }
 [data-theme="light"] .text-zinc-200 { color: #27272a; }
-[data-theme="light"] .hover\:bg-zinc-800:hover { background-color: #f1f5f9; }
-[data-theme="light"] .hover\:bg-zinc-800\/50:hover { background-color: rgba(241, 245, 249, 0.7); }
-[data-theme="light"] .bg-zinc-800\/50 { background-color: rgba(241, 245, 249, 0.5); }
-[data-theme="light"] .bg-zinc-800 { background-color: #f1f5f9; }
+[data-theme="light"] .hover\:bg-zinc-800:hover { background-color: #f0f1f7; }
+[data-theme="light"] .hover\:bg-zinc-800\/50:hover { background-color: rgba(240, 241, 247, 0.7); }
+[data-theme="light"] .bg-zinc-800\/50 { background-color: rgba(240, 241, 247, 0.5); }
+[data-theme="light"] .bg-zinc-800 { background-color: #f0f1f7; }
 [data-theme="light"] .bg-zinc-900 { background-color: #ffffff; }
 [data-theme="light"] .bg-zinc-900\/50 { background-color: rgba(255, 255, 255, 0.5); }
-[data-theme="light"] .bg-zinc-700\/50 { background-color: rgba(226, 232, 240, 0.5); }
-[data-theme="light"] .bg-zinc-700 { background-color: #e2e8f0; }
-[data-theme="light"] .hover\:bg-zinc-600:hover { background-color: #cbd5e1; }
+[data-theme="light"] .bg-zinc-700\/50 { background-color: rgba(226, 229, 240, 0.5); }
+[data-theme="light"] .bg-zinc-700 { background-color: #e2e5f0; }
+[data-theme="light"] .hover\:bg-zinc-600:hover { background-color: #c7cade; }
 [data-theme="light"] .hover\:text-white:hover { color: var(--foreground); }
 [data-theme="light"] .ring-offset-background { --tw-ring-offset-color: var(--background); }
 
-/* Colored text: -400 shades are washed out on light backgrounds → bump to -600 */
+/* Colored text: -400 shades bumped for light backgrounds */
 [data-theme="light"] .text-cyan-400 { color: #0891b2; }
 [data-theme="light"] .text-violet-400 { color: #7c3aed; }
 [data-theme="light"] .text-red-400 { color: #dc2626; }
@@ -245,10 +315,16 @@ input[type="date"]:active {
 [data-theme="light"] .text-amber-200\/90 { color: rgba(146, 64, 14, 0.9); }
 [data-theme="light"] .text-blue-200\/90 { color: rgba(30, 64, 175, 0.9); }
 [data-theme="light"] .text-blue-300 { color: #2563eb; }
-[data-theme="light"] .text-zinc-500 { color: #52525b; }
+[data-theme="light"] .text-zinc-500 { color: #4b4f6b; }
 [data-theme="light"] .hover\:text-zinc-300:hover { color: #18181b; }
 [data-theme="light"] .file\:text-white::file-selector-button { color: var(--foreground); }
+[data-theme="light"] .text-indigo-400 { color: #4f46e5; }
+[data-theme="light"] .text-purple-400 { color: #7c3aed; }
 
-/* baseline-ui: safe-area-inset for fixed/sticky elements (iPhone notch) */
+/* Indigo badge overrides for light */
+[data-theme="light"] .bg-indigo-500\/10 { background-color: rgba(79, 70, 229, 0.08); }
+[data-theme="light"] .bg-indigo-500\/15 { background-color: rgba(79, 70, 229, 0.1); }
+
+/* Safe area insets */
 .safe-top { padding-top: env(safe-area-inset-top); }
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }

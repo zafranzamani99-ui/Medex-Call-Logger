@@ -76,6 +76,7 @@ export interface Ticket {
   pic: string | null
 
   // Issue
+  issue_category: string | null
   issue_type: IssueType
   issue: string
   my_response: string | null
@@ -171,6 +172,7 @@ export interface OpenTicketWarning {
 // Dashboard stats — split by call logs vs tickets
 export interface DashboardStats {
   callsToday: number
+  openCalls: number
   openTickets: number
   needsAttention: number
   stale: number
@@ -191,6 +193,7 @@ export interface NewTicketInput {
   registered_contact: string | null
   caller_tel: string | null
   pic: string | null
+  issue_category: string | null
   issue_type: IssueType
   issue: string
   my_response: string | null
@@ -213,7 +216,7 @@ export interface NewTimelineInput {
 
 // Schedule types — appointment management
 export type ScheduleType = 'MTN' | 'Server Migration' | 'E-INV + SST' | 'WhatsApp' | 'Training' | 'Others'
-export type ScheduleStatus = 'scheduled' | 'completed' | 'cancelled' | 'rescheduled' | 'no_answer'
+export type ScheduleStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'rescheduled' | 'no_answer'
 export type ScheduleMode = 'Remote' | 'Onsite'
 
 export interface Schedule {
@@ -233,6 +236,9 @@ export interface Schedule {
   notes: string | null
   source_ticket_id: string | null
   status: ScheduleStatus
+  started_at: string | null
+  completed_at: string | null
+  actual_duration_minutes: number | null
   created_at: string
   updated_at: string
 }

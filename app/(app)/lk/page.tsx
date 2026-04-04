@@ -44,6 +44,26 @@ export default function LKPage() {
         .order('created_at', { ascending: false })
         .limit(20)
       if (data) setHistory(data)
+
+      // Check for pre-fill from Schedule Work Panel
+      const prefill = sessionStorage.getItem('lk-prefill')
+      if (prefill) {
+        sessionStorage.removeItem('lk-prefill')
+        try {
+          const { clinic_code } = JSON.parse(prefill)
+          if (clinic_code) {
+            const { data: clinic } = await supabase
+              .from('clinics')
+              .select('*')
+              .eq('clinic_code', clinic_code)
+              .single()
+            if (clinic) {
+              setSelectedClinic(clinic as Clinic)
+              setShowModal(true)
+            }
+          }
+        } catch { /* ignore bad prefill */ }
+      }
     }
     init()
   }, [supabase])
@@ -78,7 +98,10 @@ export default function LKPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold text-text-primary">License Key Request</h1>
+      <div className="mb-4">
+        <h1 className="text-2xl font-bold text-text-primary">License Key</h1>
+        <p className="text-[13px] text-text-tertiary mt-0.5">Generate and manage license key requests</p>
+      </div>
 
       {/* Clinic Search */}
       <div>

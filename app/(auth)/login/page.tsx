@@ -22,8 +22,6 @@ export default function LoginPage() {
     setLoading(true)
 
     // WHY: Clear any stale session before login attempt.
-    // If user's account was deleted/recreated or project keys changed,
-    // old cookies in the browser interfere and cause 400 errors.
     await supabase.auth.signOut()
 
     const { error } = await supabase.auth.signInWithPassword({
@@ -42,71 +40,95 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-dvh flex items-center justify-center px-4">
-      <div className="w-full max-w-sm">
+    <div className="min-h-dvh flex items-center justify-center px-4 relative overflow-hidden" style={{
+      background: 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.12), transparent 70%), #0b0d14',
+    }}>
+      {/* Subtle grid pattern */}
+      <div className="absolute inset-0 opacity-[0.015]" style={{
+        backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+        backgroundSize: '64px 64px',
+      }} />
+
+      <div className="w-full max-w-[380px] relative z-10">
         {/* Logo / Header */}
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-white">MEDEX CALL LOGGER</h1>
-          <p className="text-zinc-500 text-sm mt-1">Support Team Login</p>
+          <div className="inline-flex items-center justify-center size-11 rounded-xl bg-indigo-500/10 mb-5" style={{
+            boxShadow: '0 0 20px -4px rgba(99, 102, 241, 0.2)',
+          }}>
+            <svg className="size-5 text-indigo-400" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold text-text-primary">Sign in to Medex</h1>
+          <p className="text-text-tertiary text-[13px] mt-1.5">Call Logger · Support Team</p>
         </div>
 
         {/* Login Form */}
-        <form onSubmit={handleLogin} className="space-y-4">
-          {error && (
-            <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-4 py-3 text-red-400 text-sm">
-              {error}
+        <div className="card p-7" style={{
+          background: 'linear-gradient(180deg, rgba(17, 19, 24, 0.95) 0%, rgba(17, 19, 24, 1) 100%)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          boxShadow: '0 16px 48px -8px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.03)',
+        }}>
+          <form onSubmit={handleLogin} className="space-y-4">
+            {error && (
+              <div className="bg-red-500/8 border border-red-500/15 rounded-lg px-3.5 py-2.5 text-red-400 text-[13px]">
+                {error}
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="email" className="block text-[12px] font-medium text-text-tertiary mb-1.5">
+                Email address
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                className="w-full px-3 py-2.5 bg-surface-inset border border-border rounded-lg text-white text-[13px]
+                           placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-[var(--ring)]
+                           focus:border-transparent focus-glow transition-all"
+                placeholder="agent@medex.com"
+              />
             </div>
-          )}
 
-          <div>
-            <label htmlFor="email" className="block text-sm text-zinc-400 mb-1">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-              className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-white
-                         placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50
-                         focus:border-blue-500/50"
-              placeholder="agent@medex.com"
-            />
-          </div>
+            <div>
+              <label htmlFor="password" className="block text-[12px] font-medium text-text-tertiary mb-1.5">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+                className="w-full px-3 py-2.5 bg-surface-inset border border-border rounded-lg text-white text-[13px]
+                           placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-[var(--ring)]
+                           focus:border-transparent focus-glow transition-all"
+                placeholder="••••••••"
+              />
+            </div>
 
-          <div>
-            <label htmlFor="password" className="block text-sm text-zinc-400 mb-1">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-white
-                         placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50
-                         focus:border-blue-500/50"
-              placeholder="••••••••"
-            />
-          </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50
+                         text-white text-[13px] font-semibold rounded-lg transition-all mt-1"
+              style={{
+                boxShadow: '0 1px 2px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
+              }}
+            >
+              {loading ? 'Signing in...' : 'Continue'}
+            </button>
+          </form>
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/50
-                       text-white font-medium rounded-lg transition-colors"
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
-
-        <p className="text-center text-sm text-zinc-500 mt-6">
+        <p className="text-center text-[13px] text-text-tertiary mt-5">
           No account?{' '}
-          <Link href="/register" className="text-blue-400 hover:text-blue-300">
+          <Link href="/register" className="text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
             Register
           </Link>
         </p>

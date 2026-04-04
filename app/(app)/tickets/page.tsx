@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format, isToday, isYesterday } from 'date-fns'
 import type { Ticket, TicketStatus, RecordType } from '@/lib/types'
-import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel } from '@/lib/constants'
+import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
@@ -38,6 +38,7 @@ export default function HistoryPage() {
   const [dateTo, setDateTo] = useState('')
   const [statusFilter, setStatusFilter] = useState<TicketStatus[]>([])
   const [issueTypeFilter, setIssueTypeFilter] = useState<string[]>([])
+  const [issueCategoryFilter, setIssueCategoryFilter] = useState<string[]>([])
   const [loggedByFilter, setLoggedByFilter] = useState('')
   const [recordTypeFilter, setRecordTypeFilter] = useState<'all' | RecordType>('all')
   const [flaggedOnly, setFlaggedOnly] = useState(false)
@@ -68,6 +69,7 @@ export default function HistoryPage() {
         if (f.dateTo) setDateTo(f.dateTo)
         if (f.statusFilter?.length) setStatusFilter(f.statusFilter)
         if (f.issueTypeFilter?.length) setIssueTypeFilter(f.issueTypeFilter)
+        if (f.issueCategoryFilter?.length) setIssueCategoryFilter(f.issueCategoryFilter)
         if (f.loggedByFilter) setLoggedByFilter(f.loggedByFilter)
         if (f.recordTypeFilter && f.recordTypeFilter !== 'all') setRecordTypeFilter(f.recordTypeFilter)
         if (f.flaggedOnly) setFlaggedOnly(f.flaggedOnly)
@@ -77,15 +79,26 @@ export default function HistoryPage() {
         if (f.page) setPage(f.page)
       }
     } catch { /* ignore */ }
+
+    // Handle URL query params (e.g. ?filter=urgent from Dashboard)
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const filterParam = params.get('filter')
+      if (filterParam === 'urgent') {
+        setStatusFilter(['In Progress', 'Pending Customer', 'Pending Team', 'Escalated'])
+        setFlaggedOnly(false)
+        setPage(1)
+      }
+    }
   }, [])
 
   const saveFilters = useCallback(() => {
     sessionStorage.setItem(FILTERS_KEY, JSON.stringify({
-      search, dateFrom, dateTo, statusFilter, issueTypeFilter,
+      search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter,
       loggedByFilter, recordTypeFilter, flaggedOnly, staleOnly,
       sortKey, sortDir, page,
     }))
-  }, [search, dateFrom, dateTo, statusFilter, issueTypeFilter,
+  }, [search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter,
       loggedByFilter, recordTypeFilter, flaggedOnly, staleOnly,
       sortKey, sortDir, page])
 
@@ -96,7 +109,7 @@ export default function HistoryPage() {
   const STORAGE_KEY = 'history-col-widths'
   const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'staff', 'actions'] as const
   const DEFAULT_WIDTHS: Record<string, number> = {
-    ref: 170, phone: 130, clinic: 240, issue: 300, type: 140, status: 160, staff: 90, actions: 50,
+    ref: 170, phone: 130, clinic: 220, issue: 380, type: 120, status: 140, staff: 80, actions: 50,
   }
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return DEFAULT_WIDTHS
@@ -189,6 +202,7 @@ export default function HistoryPage() {
     if (dateTo) result = result.filter((t) => t.created_at <= dateTo + 'T23:59:59')
     if (statusFilter.length > 0) result = result.filter((t) => statusFilter.includes(t.status))
     if (issueTypeFilter.length > 0) result = result.filter((t) => issueTypeFilter.includes(t.issue_type))
+    if (issueCategoryFilter.length > 0) result = result.filter((t) => t.issue_category && issueCategoryFilter.includes(t.issue_category))
     if (loggedByFilter) result = result.filter((t) => t.created_by_name === loggedByFilter)
     if (flaggedOnly) result = result.filter((t) => t.need_team_check)
     if (staleOnly) result = result.filter((t) => isStale(t))
@@ -196,7 +210,7 @@ export default function HistoryPage() {
     if (renewalFilter) result = result.filter((t) => t.renewal_status === renewalFilter)
 
     return result
-  }, [tickets, search, dateFrom, dateTo, statusFilter, issueTypeFilter, loggedByFilter, flaggedOnly, staleOnly, recordTypeFilter, renewalFilter])
+  }, [tickets, search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter, loggedByFilter, flaggedOnly, staleOnly, recordTypeFilter, renewalFilter])
 
   // Apply sorting
   const sorted = useMemo(() => {
@@ -233,7 +247,7 @@ export default function HistoryPage() {
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   // Reset page when filters or sort change
-  useEffect(() => { setPage(1) }, [search, dateFrom, dateTo, statusFilter, issueTypeFilter, loggedByFilter, flaggedOnly, staleOnly, recordTypeFilter, renewalFilter, sortKey, sortDir])
+  useEffect(() => { setPage(1) }, [search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter, loggedByFilter, flaggedOnly, staleOnly, recordTypeFilter, renewalFilter, sortKey, sortDir])
 
   // "/" keyboard shortcut — focus search
   useEffect(() => {
@@ -273,7 +287,7 @@ export default function HistoryPage() {
   const handleExport = () => {
     const headers = [
       'Ref', 'Type', 'Date', 'Duration', 'Clinic Code', 'Clinic Name', 'City', 'State', 'Product',
-      'MTN Expiry', 'Renewal', 'Issue Type', 'Issue', 'My Response', 'Next Step',
+      'MTN Expiry', 'Renewal', 'Category', 'Issue Type', 'Issue', 'My Response', 'Next Step',
       'Status', 'PIC', 'Caller Tel', 'Logged By', 'Need Team Check'
     ]
     const rows = filtered.map((t) => [
@@ -283,7 +297,7 @@ export default function HistoryPage() {
       getDurationLabel(t.call_duration),
       t.clinic_code, t.clinic_name, t.city || '', t.state || '', t.product_type || '',
       t.mtn_expiry ? t.mtn_expiry.split('-').reverse().join('/') : '', t.renewal_status || '',
-      t.issue_type,
+      t.issue_category || '', t.issue_type,
       `"${(t.issue || '').replace(/"/g, '""')}"`,
       `"${(t.my_response || '').replace(/"/g, '""')}"`,
       t.next_step || '', t.status, t.pic || '', t.caller_tel || '',
@@ -307,6 +321,9 @@ export default function HistoryPage() {
   const toggleIssueType = (t: string) => {
     setIssueTypeFilter((prev) => prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t])
   }
+  const toggleIssueCategory = (c: string) => {
+    setIssueCategoryFilter((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c])
+  }
 
   const handleDelete = async (ticket: Ticket, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -316,12 +333,12 @@ export default function HistoryPage() {
   }
 
   const activeFilterCount =
-    statusFilter.length + issueTypeFilter.length +
+    statusFilter.length + issueTypeFilter.length + issueCategoryFilter.length +
     (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) +
     (loggedByFilter ? 1 : 0) + (flaggedOnly ? 1 : 0) + (staleOnly ? 1 : 0)
 
   const clearAllFilters = () => {
-    setStatusFilter([]); setIssueTypeFilter([]); setDateFrom(''); setDateTo('')
+    setStatusFilter([]); setIssueTypeFilter([]); setIssueCategoryFilter([]); setDateFrom(''); setDateTo('')
     setLoggedByFilter(''); setFlaggedOnly(false); setStaleOnly(false)
   }
 
@@ -355,15 +372,46 @@ export default function HistoryPage() {
 
   if (loading) return <HistorySkeleton />
 
+  // Row styling by status — open/escalated get visual weight, resolved gets muted
+  const getRowClasses = (ticket: Ticket) => {
+    const base = 'cursor-pointer transition-all'
+    switch (ticket.status) {
+      case 'In Progress':
+      case 'Pending Customer':
+      case 'Pending Team':
+        return `${base} hover:bg-indigo-500/[0.04] border-l-2 border-l-indigo-400/40`
+      case 'Escalated':
+        return `${base} hover:bg-red-500/[0.04] border-l-2 border-l-red-400/40`
+      case 'Resolved':
+        return `${base} hover:bg-surface-raised opacity-60 hover:opacity-100 border-l-2 border-l-transparent`
+      default:
+        return `${base} hover:bg-surface-raised border-l-2 border-l-transparent`
+    }
+  }
+
   return (
     <div>
-      <h1 className="text-xl font-bold text-text-primary mb-6">History</h1>
+      {/* Compact header */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">History</h1>
+          <p className="text-[13px] text-text-tertiary mt-0.5">{filtered.length} records</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" onClick={handleExport}>
+            <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            CSV
+          </Button>
+        </div>
+      </div>
 
-      {/* Search bar + filter button + type toggle */}
-      <div className="bg-surface border border-border rounded-lg p-3 mb-4 space-y-2">
-        <div className="flex gap-2">
+      {/* Command-palette style search */}
+      <div className="mb-4 rounded-xl p-1" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex gap-2 items-center">
           <div className="relative flex-1">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <Input
@@ -371,35 +419,25 @@ export default function HistoryPage() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search clinic, code, phone, PIC, issue...  (/)"
-              className="pl-9"
+              placeholder="Search clinic, code, phone, PIC, issue..."
+              className="pl-10 !bg-transparent !border-0 !shadow-none !ring-0 text-sm"
             />
           </div>
+          <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-text-muted bg-white/[0.04] border border-border rounded">/</kbd>
           <Button
-            variant={activeFilterCount > 0 ? 'primary' : 'secondary'}
-            size="md"
+            variant={activeFilterCount > 0 ? 'primary' : 'ghost'}
+            size="sm"
             onClick={() => setShowFilters(true)}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
             </svg>
-            Filters
-            {activeFilterCount > 0 && (
-              <span className="bg-white/20 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center font-medium">
-                {activeFilterCount}
-              </span>
-            )}
-          </Button>
-          <Button variant="secondary" size="md" onClick={handleExport}>
-            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            Export
+            {activeFilterCount > 0 ? `${activeFilterCount}` : 'Filter'}
           </Button>
         </div>
 
-        {/* Quick type toggle */}
-        <div className="flex items-center gap-1.5">
+        {/* Quick type toggle + sort */}
+        <div className="flex items-center gap-1.5 px-2 pb-1.5 pt-0.5">
           {(['all', 'call', 'ticket'] as const).map((type) => {
             const isActive = recordTypeFilter === type
             const colors = type === 'all'
@@ -415,13 +453,11 @@ export default function HistoryPage() {
             )
           })}
           <div className="flex items-center gap-1.5 ml-auto">
-            <span className="text-xs text-text-tertiary tabular-nums">{filtered.length} records</span>
-            <span className="text-zinc-600">·</span>
             <button
               onClick={() => setSortKey(sortKey === 'updated_at' ? 'created_at' : 'updated_at')}
-              className={`text-xs transition-colors ${sortKey === 'updated_at' ? 'text-accent font-medium' : 'text-text-tertiary hover:text-text-primary'}`}
+              className={`text-[11px] transition-colors ${sortKey === 'updated_at' ? 'text-indigo-400 font-medium' : 'text-text-muted hover:text-text-primary'}`}
             >
-              {sortKey === 'updated_at' ? 'Sort: Last Updated' : 'Sort: Created'}
+              {sortKey === 'updated_at' ? 'Last Updated' : 'Created'}
             </button>
           </div>
         </div>
@@ -432,16 +468,26 @@ export default function HistoryPage() {
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
           {statusFilter.map((s) => (
             <button key={s} onClick={() => toggleStatus(s)}
-              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[s].bg} ${STATUS_COLORS[s].text}`}>
+              className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm ${STATUS_COLORS[s].bg} ${STATUS_COLORS[s].text}`}>
               {s}
               <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           ))}
+          {issueCategoryFilter.map((cat) => {
+            const c = getIssueCategoryColor(cat)
+            return (
+              <button key={`cat-${cat}`} onClick={() => toggleIssueCategory(cat)}
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm ${c.bg} ${c.text}`}>
+                {cat}
+                <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            )
+          })}
           {issueTypeFilter.map((t) => {
             const c = getIssueTypeColor(t)
             return (
               <button key={t} onClick={() => toggleIssueType(t)}
-                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm ${c.bg} ${c.text}`}>
                 {t}
                 <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
@@ -449,35 +495,35 @@ export default function HistoryPage() {
           })}
           {loggedByFilter && (
             <button onClick={() => setLoggedByFilter('')}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-blue-500/20 text-blue-400">
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm bg-blue-500/20 text-blue-400">
               {loggedByFilter}
               <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           )}
           {dateFrom && (
             <button onClick={() => setDateFrom('')}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-zinc-500/20 text-zinc-400">
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm bg-zinc-500/20 text-zinc-400">
               From: {dateFrom}
               <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           )}
           {dateTo && (
             <button onClick={() => setDateTo('')}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-zinc-500/20 text-zinc-400">
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm bg-zinc-500/20 text-zinc-400">
               To: {dateTo}
               <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           )}
           {flaggedOnly && (
             <button onClick={() => setFlaggedOnly(false)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-red-500/20 text-red-400">
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm bg-red-500/20 text-red-400">
               Flagged
               <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           )}
           {staleOnly && (
             <button onClick={() => setStaleOnly(false)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-orange-500/20 text-orange-400">
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium shadow-sm bg-orange-500/20 text-orange-400">
               Stale
               <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
@@ -534,6 +580,32 @@ export default function HistoryPage() {
             </div>
           </div>
           <div>
+            <span className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">Category</span>
+            <div className="space-y-2">
+              {issueCategoryFilter.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {issueCategoryFilter.map((cat) => {
+                    const c = getIssueCategoryColor(cat)
+                    return (
+                      <button key={cat} type="button" onClick={() => toggleIssueCategory(cat)}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>
+                        {cat}
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              <select value="" onChange={(e) => { if (e.target.value) toggleIssueCategory(e.target.value) }}
+                className="w-full px-2.5 py-2 bg-background border border-border rounded-lg text-text-secondary text-sm">
+                <option value="">{issueCategoryFilter.length === 0 ? 'All categories' : '+ Add category filter'}</option>
+                {ISSUE_CATEGORIES.filter((c) => !issueCategoryFilter.includes(c)).map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
             <span className="text-xs font-medium text-text-tertiary uppercase tracking-wider mb-2 block">Issue Type</span>
             <div className="space-y-2">
               {issueTypeFilter.length > 0 && (
@@ -578,7 +650,7 @@ export default function HistoryPage() {
       </SlidePanel>
 
       {/* ─── Desktop table layout (md+) — resizable columns, saved to sessionStorage ─── */}
-      <div className="hidden md:block bg-surface border border-border rounded-lg overflow-x-auto">
+      <div className="hidden md:block card overflow-x-auto">
         {paginated.length === 0 ? (
           <EmptyState icon={EmptyIcons.search} title="No records match your filters" description="Try adjusting your search or filters" />
         ) : (
@@ -601,7 +673,7 @@ export default function HistoryPage() {
                   <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('clinic', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
                 </th>
                 <th className="text-left px-4 py-3 font-medium relative">
-                  Issue
+                  Details
                   <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('issue', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
                 </th>
                 <th className="text-left px-4 py-3 font-medium relative cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('issue_type')}>
@@ -640,28 +712,43 @@ export default function HistoryPage() {
                     )}
                     <tr
                       onClick={() => router.push(`/tickets/${ticket.id}`)}
-                      className="hover:bg-surface-raised transition-colors cursor-pointer"
+                      className={getRowClasses(ticket)}
                     >
                       <td className="px-4 py-3 align-top">
                         <span className="font-mono text-xs text-text-tertiary block whitespace-nowrap">{ticket.ticket_ref}</span>
                         <span className="text-xs text-text-muted tabular-nums whitespace-nowrap">{format(new Date(ticket.created_at), 'dd/MM/yy HH:mm')}</span>
                       </td>
                       <td className="px-4 py-3 align-top">
-                        <span className="font-mono text-sm text-emerald-400 font-semibold whitespace-nowrap">{ticket.caller_tel || '-'}</span>
+                        <span className="font-mono text-sm text-emerald-400 font-medium whitespace-nowrap">{ticket.caller_tel || '-'}</span>
                       </td>
                       <td className="px-4 py-3 align-top">
                         <span className="text-text-primary font-medium block">{ticket.clinic_name}</span>
                         <span className="font-mono text-xs text-text-muted">{ticket.clinic_code}</span>
                       </td>
                       <td className="px-4 py-3 align-top">
-                        <div className="flex items-start gap-1">
-                          <p className="text-text-secondary">{ticket.issue}</p>
-                          {ticket.attachment_urls?.length > 0 && (
-                            <svg className="size-3.5 text-text-tertiary flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-                            </svg>
+                        <div className="space-y-0.5 text-xs leading-relaxed">
+                          {ticket.issue_category && (
+                            <p className={`text-[11px] font-semibold uppercase tracking-wide ${getIssueCategoryColor(ticket.issue_category).text}`}>{ticket.issue_category}</p>
+                          )}
+                          {ticket.pic && (
+                            <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic}</span></p>
+                          )}
+                          <p><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
+                          {ticket.my_response && (
+                            <p><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response}</span></p>
+                          )}
+                          {ticket.next_step && (
+                            <p><span className="text-violet-400 font-medium">NEXT:</span> <span className="text-text-secondary">{ticket.next_step}</span></p>
                           )}
                         </div>
+                        {ticket.attachment_urls?.length > 0 && (
+                          <div className="flex items-center gap-1 mt-1 text-text-tertiary">
+                            <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                            </svg>
+                            <span className="text-xs">{ticket.attachment_urls.length} file{ticket.attachment_urls.length > 1 ? 's' : ''}</span>
+                          </div>
+                        )}
                         {sortKey === 'updated_at' && ticket.last_change_note && (
                           <p className="text-xs text-purple-400 mt-0.5 truncate">{ticket.last_change_note}{ticket.last_updated_by_name ? ` — ${ticket.last_updated_by_name}` : ''}</p>
                         )}
@@ -711,7 +798,7 @@ export default function HistoryPage() {
       </div>
 
       {/* ─── Mobile card layout ─── */}
-      <div className="md:hidden bg-surface border border-border rounded-lg overflow-hidden">
+      <div className="md:hidden card overflow-hidden">
         {paginated.length === 0 ? (
           <EmptyState icon={EmptyIcons.search} title="No records match your filters" description="Try adjusting your search or filters" />
         ) : (
@@ -734,7 +821,7 @@ export default function HistoryPage() {
               )}
               <div
                 onClick={() => router.push(`/tickets/${ticket.id}`)}
-                className="px-4 py-3 hover:bg-surface-raised transition-colors cursor-pointer"
+                className={`px-4 py-3 ${getRowClasses(ticket)}`}
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
@@ -766,12 +853,13 @@ export default function HistoryPage() {
                     </button>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 mt-1">
-                  <p className="text-sm text-text-secondary truncate">{ticket.issue}</p>
-                  {ticket.attachment_urls?.length > 0 && (
-                    <svg className="size-3.5 text-text-tertiary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-                    </svg>
+                <div className="mt-1 space-y-0.5 text-xs leading-relaxed">
+                  {ticket.pic && (
+                    <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic}</span></p>
+                  )}
+                  <p className="truncate"><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
+                  {ticket.my_response && (
+                    <p className="truncate"><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response}</span></p>
                   )}
                 </div>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
