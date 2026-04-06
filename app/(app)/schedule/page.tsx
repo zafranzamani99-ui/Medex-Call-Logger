@@ -80,6 +80,7 @@ export default function SchedulePage() {
   const [editNotes, setEditNotes] = useState('')
   const [editPic, setEditPic] = useState('')
   const [editClinicWa, setEditClinicWa] = useState('')
+  const [editPicSupport, setEditPicSupport] = useState('')
   const [editClinic, setEditClinic] = useState<Clinic | null>(null)
   const [editClinicNameManual, setEditClinicNameManual] = useState('')
   const [editManualMode, setEditManualMode] = useState(false)
@@ -105,6 +106,7 @@ export default function SchedulePage() {
   const [formCustomType, setFormCustomType] = useState('')
   const [formMode, setFormMode] = useState<'Remote' | 'Onsite'>('Remote')
   const [formNotes, setFormNotes] = useState('')
+  const [formPicSupport, setFormPicSupport] = useState('')
   const [formSaving, setFormSaving] = useState(false)
 
   // Get user on mount — default filter to current user
@@ -340,6 +342,7 @@ export default function SchedulePage() {
       setFormClinicName(s.clinic_name)
     }
     setFormPic(s.pic || '')
+    setFormPicSupport(s.pic_support || '')
     setFormClinicWa(s.clinic_wa || '')
     setFormDate('')
     setFormTime(s.schedule_time)
@@ -470,6 +473,7 @@ export default function SchedulePage() {
     setEditMode((s.mode as 'Remote' | 'Onsite') || 'Remote')
     setEditNotes(s.notes || '')
     setEditPic(s.pic || '')
+    setEditPicSupport(s.pic_support || '')
     setEditClinicWa(s.clinic_wa || '')
     setEditClinicNameManual(s.clinic_name)
     // Try to look up clinic from CRM
@@ -506,6 +510,7 @@ export default function SchedulePage() {
       mode: editMode,
       notes: editNotes || null,
       pic: editPic || null,
+      pic_support: editPicSupport || null,
       clinic_wa: editClinicWa || null,
       updated_at: new Date().toISOString(),
     }).eq('id', selectedSchedule.id)
@@ -526,6 +531,7 @@ export default function SchedulePage() {
     setFormClinic(null)
     setFormClinicName('')
     setFormPic('')
+    setFormPicSupport('')
     setFormClinicWa('')
     setFormDate('')
     setFormTime('')
@@ -580,6 +586,7 @@ export default function SchedulePage() {
       clinic_code: clinicCode,
       clinic_name: clinicName,
       pic: formPic || null,
+      pic_support: formPicSupport || null,
       schedule_date: formDate,
       schedule_time: formTime,
       schedule_type: formType,
@@ -823,9 +830,15 @@ export default function SchedulePage() {
                                 {s.pic}{(s.pic && (clinicPhones[s.clinic_code] || s.clinic_wa)) ? ' · ' : ''}{clinicPhones[s.clinic_code] || ''}{clinicPhones[s.clinic_code] && s.clinic_wa ? ' · ' : ''}{s.clinic_wa ? `WhatsApp: ${s.clinic_wa}` : ''}
                               </div>
                             )}
-                            {/* Agent + Mode + Duration */}
-                            <div className="flex items-center gap-2 mt-1.5">
+                            {/* Agent + PIC Support + Mode + Duration */}
+                            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                               <span className="text-xs text-text-secondary">{agentDisplayName(s)}</span>
+                              {s.pic_support && (
+                                <>
+                                  <span className="text-zinc-600">·</span>
+                                  <span className="text-xs text-blue-400">PIC: {s.pic_support}</span>
+                                </>
+                              )}
                               <span className="text-zinc-600">·</span>
                               <span className={`text-xs ${isRemote ? 'text-purple-400' : 'text-emerald-400'}`}>
                                 {isRemote ? 'Remote' : 'Onsite'}
@@ -917,15 +930,24 @@ export default function SchedulePage() {
                       )}
                     </div>
 
-                    {/* PIC + WA */}
-                    <div className="grid grid-cols-2 gap-3">
+                    {/* PIC Clinic + PIC Support + WA */}
+                    <div className="grid grid-cols-3 gap-3">
                       <div>
-                        <Label>PIC</Label>
+                        <Label>PIC Clinic</Label>
                         <Input
                           type="text"
                           value={editPic}
                           onChange={(e) => setEditPic(e.target.value)}
-                          placeholder="Person in charge"
+                          placeholder="Clinic contact"
+                        />
+                      </div>
+                      <div>
+                        <Label>PIC Support</Label>
+                        <Input
+                          type="text"
+                          value={editPicSupport}
+                          onChange={(e) => setEditPicSupport(e.target.value)}
+                          placeholder="Support agent"
                         />
                       </div>
                       <div>
@@ -934,7 +956,7 @@ export default function SchedulePage() {
                           type="text"
                           value={editClinicWa}
                           onChange={(e) => setEditClinicWa(e.target.value)}
-                          placeholder="e.g. 012-3456789"
+                          placeholder="012-3456789"
                         />
                       </div>
                     </div>
@@ -1087,8 +1109,14 @@ export default function SchedulePage() {
                         </div>
                         {selectedSchedule.pic && (
                           <div>
-                            <span className="text-text-tertiary text-xs">PIC</span>
+                            <span className="text-text-tertiary text-xs">PIC Clinic</span>
                             <p className="text-text-primary">{selectedSchedule.pic}</p>
+                          </div>
+                        )}
+                        {selectedSchedule.pic_support && (
+                          <div>
+                            <span className="text-text-tertiary text-xs">PIC Support</span>
+                            <p className="text-text-primary text-blue-400">{selectedSchedule.pic_support}</p>
                           </div>
                         )}
                         {workClinic?.registered_contact && (
@@ -1307,8 +1335,14 @@ export default function SchedulePage() {
                       </div>
                       {selectedSchedule.pic && (
                         <div>
-                          <span className="text-text-tertiary text-xs">PIC</span>
+                          <span className="text-text-tertiary text-xs">PIC Clinic</span>
                           <p className="text-text-primary">{selectedSchedule.pic}</p>
+                        </div>
+                      )}
+                      {selectedSchedule.pic_support && (
+                        <div>
+                          <span className="text-text-tertiary text-xs">PIC Support</span>
+                          <p className="text-text-primary text-blue-400">{selectedSchedule.pic_support}</p>
                         </div>
                       )}
                     </div>
@@ -1466,15 +1500,24 @@ export default function SchedulePage() {
                   )}
                 </div>
 
-                {/* PIC + WA */}
-                <div className="grid grid-cols-2 gap-3">
+                {/* PIC Clinic + PIC Support + WA */}
+                <div className="grid grid-cols-3 gap-3">
                   <div>
-                    <Label>PIC</Label>
+                    <Label>PIC Clinic</Label>
                     <Input
                       type="text"
                       value={formPic}
                       onChange={(e) => setFormPic(e.target.value)}
-                      placeholder="Person in charge"
+                      placeholder="Clinic contact"
+                    />
+                  </div>
+                  <div>
+                    <Label>PIC Support</Label>
+                    <Input
+                      type="text"
+                      value={formPicSupport}
+                      onChange={(e) => setFormPicSupport(e.target.value)}
+                      placeholder="Support agent"
                     />
                   </div>
                   <div>
@@ -1483,7 +1526,7 @@ export default function SchedulePage() {
                       type="text"
                       value={formClinicWa}
                       onChange={(e) => setFormClinicWa(e.target.value)}
-                      placeholder="e.g. 012-3456789"
+                      placeholder="012-3456789"
                     />
                   </div>
                 </div>
