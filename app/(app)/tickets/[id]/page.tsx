@@ -29,7 +29,8 @@ export default function TicketDetailPage() {
 
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[]>([])
-  const [auditEntries, setAuditEntries] = useState<{ action: string; changed_by: string; created_at: string; old_data: any; new_data: any }[]>([])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [auditEntries, setAuditEntries] = useState<{ action: string; changed_by: string; created_at: string; old_data: Record<string, unknown>; new_data: Record<string, unknown> }[]>([])
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
@@ -866,7 +867,7 @@ export default function TicketDetailPage() {
                     }
                     summary = changes.length > 0 ? changes.join(', ') : 'Details edited'
                   } else {
-                    summary = entry.new_data?.last_change_note || 'Updated'
+                    summary = (entry.new_data?.last_change_note as string) || 'Updated'
                   }
                   return (
                     <div key={i} className="flex items-start gap-2">
