@@ -107,9 +107,9 @@ export default function HistoryPage() {
 
   // ─── Column resize ───
   const STORAGE_KEY = 'history-col-widths'
-  const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'staff', 'actions'] as const
+  const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'next', 'staff', 'actions'] as const
   const DEFAULT_WIDTHS: Record<string, number> = {
-    ref: 170, phone: 130, clinic: 220, issue: 380, type: 120, status: 140, staff: 80, actions: 50,
+    ref: 155, phone: 120, clinic: 200, issue: 320, type: 105, status: 150, next: 150, staff: 80, actions: 50,
   }
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return DEFAULT_WIDTHS
@@ -684,6 +684,10 @@ export default function HistoryPage() {
                   <span className="inline-flex items-center gap-1">Status <SortIcon column="status" /></span>
                   <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('status', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
                 </th>
+                <th className="text-left px-4 py-3 font-medium relative">
+                  <span>Next Step</span>
+                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('next', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
+                </th>
                 <th className="text-left px-4 py-3 font-medium relative cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('created_by_name')}>
                   <span className="inline-flex items-center gap-1">Staff <SortIcon column="created_by_name" /></span>
                   <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('staff', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
@@ -701,7 +705,7 @@ export default function HistoryPage() {
                   <Fragment key={ticket.id}>
                     {showDateHeader && (
                       <tr>
-                        <td colSpan={8} className="px-4 py-2 bg-surface-raised/50">
+                        <td colSpan={9} className="px-4 py-2 bg-surface-raised/50">
                           <div className="flex items-center gap-3">
                             <span className="text-xs font-semibold text-text-secondary tracking-wide">{getDateLabel(ticket.created_at)}</span>
                             <div className="flex-1 h-px bg-border" />
@@ -730,16 +734,11 @@ export default function HistoryPage() {
                           {ticket.issue_category && (
                             <p className={`text-[11px] font-semibold uppercase tracking-wide ${getIssueCategoryColor(ticket.issue_category).text}`}>{ticket.issue_category}</p>
                           )}
-                          {ticket.pic && (
-                            <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic}</span></p>
-                          )}
+                          <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic || ''}</span></p>
                           <p><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
-                          {ticket.my_response && (
-                            <p><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response}</span></p>
-                          )}
-                          {ticket.next_step && (
-                            <p><span className="text-violet-400 font-medium">NEXT:</span> <span className="text-text-secondary">{ticket.next_step}</span></p>
-                          )}
+                          <p><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response || ''}</span></p>
+                          <p><span className="text-orange-400 font-medium">TIMELINE:</span> <span className="text-text-secondary">{ticket.timeline_from_customer || ''}</span></p>
+                          <p><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline || ''}</span></p>
                         </div>
                         {ticket.attachment_urls?.length > 0 && (
                           <div className="flex items-center gap-1 mt-1 text-text-tertiary">
@@ -773,6 +772,9 @@ export default function HistoryPage() {
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        <span className="text-xs text-violet-400">{ticket.next_step || ''}</span>
                       </td>
                       <td className="px-4 py-3 align-top">
                         <span className="text-xs text-accent font-medium">{ticket.created_by_name}</span>
@@ -854,13 +856,12 @@ export default function HistoryPage() {
                   </div>
                 </div>
                 <div className="mt-1 space-y-0.5 text-xs leading-relaxed">
-                  {ticket.pic && (
-                    <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic}</span></p>
-                  )}
+                  <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic || ''}</span></p>
                   <p className="truncate"><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
-                  {ticket.my_response && (
-                    <p className="truncate"><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response}</span></p>
-                  )}
+                  <p className="truncate"><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response || ''}</span></p>
+                  <p className="truncate"><span className="text-violet-400 font-medium">NEXT:</span> <span className="text-text-secondary">{ticket.next_step || ''}</span></p>
+                  <p className="truncate"><span className="text-orange-400 font-medium">TIMELINE:</span> <span className="text-text-secondary">{ticket.timeline_from_customer || ''}</span></p>
+                  <p className="truncate"><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline || ''}</span></p>
                 </div>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   <span className="bg-accent-muted text-accent font-medium text-xs px-1.5 py-0.5 rounded">{ticket.created_by_name}</span>

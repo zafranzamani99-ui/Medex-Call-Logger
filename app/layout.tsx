@@ -34,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en" data-theme="dark" className={`${ibmPlexSans.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" data-theme="dark" suppressHydrationWarning className={`${ibmPlexSans.variable} ${jetbrainsMono.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: `
           try {

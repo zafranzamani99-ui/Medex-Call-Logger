@@ -40,15 +40,17 @@ export default function JobSheetsPage() {
   const [prefillScheduleId, setPrefillScheduleId] = useState<string | null>(null)
   const [prefillClinicCode, setPrefillClinicCode] = useState('')
   const [prefillClinicName, setPrefillClinicName] = useState('')
+  const [prefillWorkNotes, setPrefillWorkNotes] = useState('')
 
   useEffect(() => {
     async function init() {
       const { data: { session } } = await supabase.auth.getSession()
+      let profileName = ''
       if (session?.user) {
         setUserId(session.user.id)
         const { data: profile } = await supabase
           .from('profiles').select('display_name').eq('id', session.user.id).single()
-        if (profile) setUserName(profile.display_name)
+        if (profile) { setUserName(profile.display_name); profileName = profile.display_name }
       }
 
       // Set default date to today
@@ -58,18 +60,27 @@ export default function JobSheetsPage() {
       const dd = String(today.getDate()).padStart(2, '0')
       setFormDate(`${yyyy}-${mm}-${dd}`)
 
-      // Check for schedule prefill
+      // Check for schedule prefill — auto-create job sheet from work panel
       const prefill = sessionStorage.getItem('js-prefill')
       const shouldCreate = new URLSearchParams(window.location.search).get('create')
       if (prefill && shouldCreate) {
         const data = JSON.parse(prefill)
         sessionStorage.removeItem('js-prefill')
+
+        if (data.clinic_code && data.work_notes?.trim()) {
+          // Has notes from work panel — auto-create with AI parsing
+          autoCreateFromNotes(data, session?.user?.id || '', profileName)
+          return
+        }
+
+        // No notes — show create modal for manual entry
         setPrefillScheduleId(data.schedule_id || null)
         setPrefillClinicCode(data.clinic_code || '')
         setPrefillClinicName(data.clinic_name || '')
         setFormContactPerson(data.contact_person || '')
         setFormContactTel(data.contact_tel || '')
         if (data.service_date) setFormDate(data.service_date)
+        setPrefillWorkNotes(data.work_notes || '')
         setShowCreate(true)
       }
     }
@@ -87,6 +98,99 @@ export default function JobSheetsPage() {
     setLoading(false)
   }
 
+  // Auto-create job sheet from work panel notes (skip modal)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const autoCreateFromNotes = async (data: any, uid: string, uname: string) => {
+    setFormSaving(true)
+    toast('Creating job sheet from notes...', 'info')
+
+    // Parse notes with AI
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any = {}
+    try {
+      const parseRes = await fetch('/api/parse-notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notes: data.work_notes }),
+      })
+      const parseData = await parseRes.json()
+      parsed = parseData.parsed || {}
+    } catch { /* continue without parsed data */ }
+
+    // Fetch clinic details for extra fields
+    let clinicData: { clinic_phone?: string; email_main?: string; registered_contact?: string; product_type?: string } | null = null
+    if (data.clinic_code) {
+      const { data: clinic } = await supabase.from('clinics').select('clinic_phone, email_main, registered_contact, product_type').eq('clinic_code', data.clinic_code).single()
+      clinicData = clinic
+    }
+
+    const checklist = JOB_SHEET_CHECKLIST_LABELS.map(label => {
+      const item = { label, checked: false, notes: '' }
+      if (parsed.total_workstation && label === 'Total Workstation') item.notes = parsed.total_workstation
+      if (parsed.program_version_after && label === 'Install/Update Program Version No') item.notes = parsed.program_version_after
+      if (parsed.db_version_after && label === 'Database Version (after update)') item.notes = parsed.db_version_after
+      if (parsed.checklist_notes?.[label]) item.notes = parsed.checklist_notes[label]
+      return item
+    })
+    const issueCategories = JOB_SHEET_ISSUE_CATEGORIES.map(label => ({ label, checked: false }))
+
+    const importantDetails = { ...DEFAULT_IMPORTANT_DETAILS }
+    if (parsed.main_pc_name) importantDetails.main_pc_name = parsed.main_pc_name
+    if (parsed.space_c) importantDetails.space_c = parsed.space_c
+    if (parsed.space_d) importantDetails.space_d = parsed.space_d
+    if (parsed.service_db_size_before) importantDetails.service_db_size_before = parsed.service_db_size_before
+    if (parsed.service_db_size_after) importantDetails.service_db_size_after = parsed.service_db_size_after
+    if (parsed.ultraviewer_id) importantDetails.ultraviewer_id = parsed.ultraviewer_id
+    if (parsed.ultraviewer_pw) importantDetails.ultraviewer_pw = parsed.ultraviewer_pw
+    if (parsed.anydesk_id) importantDetails.anydesk_id = parsed.anydesk_id
+    if (parsed.anydesk_pw) importantDetails.anydesk_pw = parsed.anydesk_pw
+    if (parsed.ram) importantDetails.ram = parsed.ram
+    if (parsed.processor) importantDetails.processor = parsed.processor
+    if (parsed.auto_backup_30days === true) importantDetails.auto_backup_30days = true
+    if (parsed.ext_hdd_backup === true) importantDetails.ext_hdd_backup = true
+    if (parsed.need_server === true) importantDetails.need_server = true
+    if (parsed.brief_doctor === true) importantDetails.brief_doctor = true
+
+    const { data: jsData, error } = await supabase.from('job_sheets').insert({
+      js_number: '',
+      service_date: data.service_date || new Date().toISOString().split('T')[0],
+      service_by: uname,
+      service_by_id: uid,
+      clinic_code: data.clinic_code,
+      clinic_name: data.clinic_name,
+      contact_person: data.contact_person || parsed.contact_person || null,
+      contact_tel: data.contact_tel || clinicData?.clinic_phone || parsed.contact_tel || null,
+      clinic_email: clinicData?.email_main || null,
+      doctor_name: clinicData?.registered_contact || parsed.doctor_name || null,
+      doctor_phone: parsed.doctor_phone || null,
+      program_type: clinicData?.product_type || null,
+      version_before: parsed.version_before || null,
+      db_version_before: parsed.db_version_before || null,
+      issue_detail: parsed.issue_detail || null,
+      service_done: parsed.service_done || null,
+      suggestion: parsed.suggestion || null,
+      remark: parsed.remark || null,
+      checklist,
+      important_details: importantDetails,
+      issue_categories: issueCategories,
+      schedule_id: data.schedule_id || null,
+      created_by: uid,
+      created_by_name: uname,
+    }).select().single()
+
+    setFormSaving(false)
+
+    if (error) {
+      toast('Failed to create: ' + error.message, 'error')
+      return
+    }
+
+    if (jsData) {
+      toast('Job sheet created from notes!')
+      router.push(`/job-sheets/${jsData.id}`)
+    }
+  }
+
   const handleCreate = async () => {
     const clinicCode = formClinic?.clinic_code || prefillClinicCode
     const clinicName = formClinic?.clinic_name || prefillClinicName
@@ -97,12 +201,60 @@ export default function JobSheetsPage() {
 
     setFormSaving(true)
 
-    const defaultChecklist = JOB_SHEET_CHECKLIST_LABELS.map(label => ({
-      label, checked: false, notes: '',
-    }))
+    // Parse work notes with AI if available
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any = {}
+    if (prefillWorkNotes.trim()) {
+      try {
+        const parseRes = await fetch('/api/parse-notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes: prefillWorkNotes }),
+        })
+        const parseData = await parseRes.json()
+        parsed = parseData.parsed || {}
+      } catch { /* continue without parsed data */ }
+    }
+
+    const defaultChecklist = JOB_SHEET_CHECKLIST_LABELS.map(label => {
+      const item: { label: string; checked: boolean; notes: string } = { label, checked: false, notes: '' }
+      // Pre-fill checklist notes from parsed data
+      if (parsed.total_workstation && label === 'Total Workstation') {
+        item.notes = parsed.total_workstation
+      }
+      if (parsed.program_version_after && label === 'Install/Update Program Version No') {
+        item.notes = parsed.program_version_after
+      }
+      if (parsed.db_version_after && label === 'Database Version (after update)') {
+        item.notes = parsed.db_version_after
+      }
+      // Apply any extra checklist_notes from AI
+      if (parsed.checklist_notes && parsed.checklist_notes[label]) {
+        item.notes = parsed.checklist_notes[label]
+      }
+      return item
+    })
     const defaultIssueCategories = JOB_SHEET_ISSUE_CATEGORIES.map(label => ({
       label, checked: false,
     }))
+
+    // Merge important details from parsed notes
+    const importantDetails = { ...DEFAULT_IMPORTANT_DETAILS }
+    if (parsed.main_pc_name) importantDetails.main_pc_name = parsed.main_pc_name
+    if (parsed.space_c) importantDetails.space_c = parsed.space_c
+    if (parsed.space_d) importantDetails.space_d = parsed.space_d
+    if (parsed.service_db_size_before) importantDetails.service_db_size_before = parsed.service_db_size_before
+    if (parsed.service_db_size_after) importantDetails.service_db_size_after = parsed.service_db_size_after
+    if (parsed.ultraviewer_id) importantDetails.ultraviewer_id = parsed.ultraviewer_id
+    if (parsed.ultraviewer_pw) importantDetails.ultraviewer_pw = parsed.ultraviewer_pw
+    if (parsed.anydesk_id) importantDetails.anydesk_id = parsed.anydesk_id
+    if (parsed.anydesk_pw) importantDetails.anydesk_pw = parsed.anydesk_pw
+    if (parsed.ram) importantDetails.ram = parsed.ram
+    if (parsed.processor) importantDetails.processor = parsed.processor
+    if (parsed.auto_backup_30days === true) importantDetails.auto_backup_30days = true
+    if (parsed.ext_hdd_backup === true) importantDetails.ext_hdd_backup = true
+    if (parsed.need_server === true) importantDetails.need_server = true
+    if (parsed.brief_doctor === true) importantDetails.brief_doctor = true
 
     const { data, error } = await supabase.from('job_sheets').insert({
       js_number: '',
@@ -111,12 +263,20 @@ export default function JobSheetsPage() {
       service_by_id: userId,
       clinic_code: clinicCode,
       clinic_name: clinicName,
-      contact_person: formContactPerson || null,
-      contact_tel: formContactTel || formClinic?.clinic_phone || null,
+      contact_person: formContactPerson || parsed.contact_person || null,
+      contact_tel: formContactTel || formClinic?.clinic_phone || parsed.contact_tel || null,
       clinic_email: formClinic?.email_main || null,
-      doctor_name: formClinic?.registered_contact || null,
+      doctor_name: formClinic?.registered_contact || parsed.doctor_name || null,
+      doctor_phone: parsed.doctor_phone || null,
+      program_type: formClinic?.product_type || null,
+      version_before: parsed.version_before || null,
+      db_version_before: parsed.db_version_before || null,
+      issue_detail: parsed.issue_detail || null,
+      service_done: parsed.service_done || null,
+      suggestion: parsed.suggestion || null,
+      remark: parsed.remark || null,
       checklist: defaultChecklist,
-      important_details: DEFAULT_IMPORTANT_DETAILS,
+      important_details: importantDetails,
       issue_categories: defaultIssueCategories,
       schedule_id: prefillScheduleId || null,
       created_by: userId,

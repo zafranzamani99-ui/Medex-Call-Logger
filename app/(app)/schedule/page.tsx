@@ -873,7 +873,7 @@ export default function SchedulePage() {
       {showDetailModal && selectedSchedule && (
         <>
           <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => { setShowDetailModal(false); setIsEditing(false) }} />
-          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-2 sm:p-4 pointer-events-none">
+          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-2 pb-20 sm:p-4 sm:pb-4 pointer-events-none">
             <div className={`bg-surface border border-border rounded-xl w-full ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'max-w-2xl' : 'max-w-lg'} max-h-[90vh] flex flex-col pointer-events-auto shadow-xl transition-all`}>
               {/* Header */}
               <div className={`flex items-center justify-between px-4 py-3 border-b flex-shrink-0 ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'border-amber-500/30 bg-amber-500/5' : 'border-border'}`}>
@@ -1244,6 +1244,7 @@ export default function SchedulePage() {
                             contact_person: selectedSchedule.pic || '',
                             contact_tel: selectedSchedule.clinic_wa || '',
                             service_date: selectedSchedule.schedule_date,
+                            work_notes: workNotes || '',
                           }))
                           router.push('/job-sheets?create=1')
                         }}

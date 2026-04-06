@@ -181,23 +181,6 @@ export default function MyLogPage() {
     all: 'All Time',
   }
 
-  // Time-block grouping
-  const getTimeBlock = (dateStr: string): 'morning' | 'afternoon' | 'evening' => {
-    const hour = new Date(dateStr).getHours()
-    if (hour < 12) return 'morning'
-    if (hour < 17) return 'afternoon'
-    return 'evening'
-  }
-
-  const timeBlockLabels = { morning: 'Morning', afternoon: 'Afternoon', evening: 'Evening' }
-
-  // Group filtered tickets by time block
-  const groupedTickets = filteredTickets.reduce((acc, ticket) => {
-    const block = getTimeBlock(ticket.created_at)
-    if (!acc[block]) acc[block] = []
-    acc[block].push(ticket)
-    return acc
-  }, {} as Record<string, Ticket[]>)
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -362,75 +345,70 @@ export default function MyLogPage() {
               title={search ? `No results for "${search}"` : `No records for ${dateLabels[dateRange].toLowerCase()}`}
             />
           ) : (
-            <div className="space-y-5 mb-8">
-              {(['morning', 'afternoon', 'evening'] as const).map((block) => {
-                const blockTickets = groupedTickets[block]
-                if (!blockTickets || blockTickets.length === 0) return null
+            <div className="card overflow-hidden divide-y divide-border mb-8">
+              {filteredTickets.map((ticket) => {
+                const isRepeat = clinicCounts[ticket.clinic_code] >= 2
                 return (
-                  <div key={block}>
-                    {/* Time block header */}
-                    <div className="flex items-center gap-3 mb-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">
-                        {timeBlockLabels[block]}
-                      </span>
-                      <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.04)' }} />
-                      <span className="text-[11px] text-text-muted tabular-nums">{blockTickets.length}</span>
+                  <div
+                    key={ticket.id}
+                    onClick={() => router.push(`/tickets/${ticket.id}`)}
+                    className={`px-4 py-2.5 transition-all cursor-pointer group ${
+                      ticket.status === 'Resolved'
+                        ? 'hover:bg-white/[0.02] opacity-60 hover:opacity-100'
+                        : 'hover:bg-indigo-500/[0.03] border-l-2 border-l-indigo-400/30'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span className="text-xs text-text-muted tabular-nums flex-shrink-0">
+                          {format(new Date(ticket.created_at), 'HH:mm')}
+                        </span>
+                        {ticket.caller_tel && (
+                          <span className="font-mono text-xs text-emerald-400 font-medium flex-shrink-0">
+                            {ticket.caller_tel}
+                          </span>
+                        )}
+                        <span className="text-sm text-text-primary font-medium truncate">
+                          {ticket.clinic_name}
+                        </span>
+                        {isRepeat && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-500/15 text-text-secondary font-medium flex-shrink-0 tabular-nums">
+                            {clinicCounts[ticket.clinic_code]}x
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {(ticket as Ticket & { _isUpdatedOnly?: boolean })._isUpdatedOnly && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">Updated</span>
+                        )}
+                        <StatusBadge status={ticket.status} />
+                        <svg className="size-3.5 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                        </svg>
+                      </div>
                     </div>
-
-                    <div className="card overflow-hidden divide-y divide-border">
-                      {blockTickets.map((ticket) => {
-                        const isRepeat = clinicCounts[ticket.clinic_code] >= 2
-                        return (
-                          <div
-                            key={ticket.id}
-                            onClick={() => router.push(`/tickets/${ticket.id}`)}
-                            className={`px-4 py-2.5 transition-all cursor-pointer group ${
-                              ticket.status === 'Resolved'
-                                ? 'hover:bg-white/[0.02] opacity-60 hover:opacity-100'
-                                : 'hover:bg-indigo-500/[0.03] border-l-2 border-l-indigo-400/30'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <span className="text-xs text-text-muted tabular-nums flex-shrink-0">
-                                  {format(new Date(ticket.created_at), 'HH:mm')}
-                                </span>
-                                {ticket.caller_tel && (
-                                  <span className="font-mono text-xs text-emerald-400 font-medium flex-shrink-0">
-                                    {ticket.caller_tel}
-                                  </span>
-                                )}
-                                <span className="text-sm text-text-primary font-medium truncate">
-                                  {ticket.clinic_name}
-                                </span>
-                                {isRepeat && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-500/15 text-text-secondary font-medium flex-shrink-0 tabular-nums">
-                                    {clinicCounts[ticket.clinic_code]}x
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 flex-shrink-0">
-                                {(ticket as Ticket & { _isUpdatedOnly?: boolean })._isUpdatedOnly && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium">Updated</span>
-                                )}
-                                <StatusBadge status={ticket.status} />
-                                {/* Clickable indicator */}
-                                <svg className="size-3.5 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
-                                </svg>
-                              </div>
-                            </div>
-                            <p className="text-sm text-text-secondary mt-1 line-clamp-1">{ticket.issue}</p>
-                            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                              <RecordTypeBadge recordType={ticket.record_type} />
-                              <IssueTypeBadge issueType={ticket.issue_type} />
-                              {ticket.call_duration && (
-                                <span className="text-xs text-text-tertiary">{getDurationLabel(ticket.call_duration)}</span>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
+                    {/* Detail fields — only show non-empty */}
+                    <div className="mt-1 space-y-0.5 text-xs leading-relaxed">
+                      <p className="line-clamp-1"><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue || ''}</span></p>
+                      {ticket.my_response && (
+                        <p className="line-clamp-1"><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response}</span></p>
+                      )}
+                      {ticket.next_step && (
+                        <p className="line-clamp-1"><span className="text-violet-400 font-medium">NEXT:</span> <span className="text-text-secondary">{ticket.next_step}</span></p>
+                      )}
+                      {ticket.timeline_from_customer && (
+                        <p className="line-clamp-1"><span className="text-orange-400 font-medium">TIMELINE:</span> <span className="text-text-secondary">{ticket.timeline_from_customer}</span></p>
+                      )}
+                      {ticket.internal_timeline && (
+                        <p className="line-clamp-1"><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline}</span></p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <RecordTypeBadge recordType={ticket.record_type} />
+                      <IssueTypeBadge issueType={ticket.issue_type} />
+                      {ticket.call_duration && (
+                        <span className="text-xs text-text-tertiary">{getDurationLabel(ticket.call_duration)}</span>
+                      )}
                     </div>
                   </div>
                 )

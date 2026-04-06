@@ -29,6 +29,7 @@ export default function TicketDetailPage() {
 
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[]>([])
+  const [auditEntries, setAuditEntries] = useState<{ action: string; changed_by: string; created_at: string; old_data: any; new_data: any }[]>([])
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
@@ -50,6 +51,8 @@ export default function TicketDetailPage() {
   const [editJiraLink, setEditJiraLink] = useState('')
   const [editPic, setEditPic] = useState('')
   const [editCallerTel, setEditCallerTel] = useState('')
+  const [editTimelineFromCustomer, setEditTimelineFromCustomer] = useState('')
+  const [editInternalTimeline, setEditInternalTimeline] = useState('')
 
   // Timeline entry edit/delete state
   const [editingTimelineId, setEditingTimelineId] = useState<string | null>(null)
@@ -71,11 +74,14 @@ export default function TicketDetailPage() {
   }, [])
 
   const fetchTicket = async () => {
-    const [ticketRes, timelineRes] = await Promise.all([
+    const [ticketRes, timelineRes, auditRes] = await Promise.all([
       supabase.from('tickets').select('*').eq('id', ticketId).single(),
       supabase.from('timeline_entries').select('*').eq('ticket_id', ticketId)
         .order('entry_date', { ascending: true })
         .order('created_at', { ascending: true }),
+      supabase.from('audit_log').select('action, changed_by, created_at, old_data, new_data')
+        .eq('record_id', ticketId).eq('table_name', 'tickets')
+        .order('created_at', { ascending: false }),
     ])
 
     if (ticketRes.data) {
@@ -89,9 +95,12 @@ export default function TicketDetailPage() {
       setEditJiraLink(t.jira_link || '')
       setEditPic(t.pic || '')
       setEditCallerTel(t.caller_tel || '')
+      setEditTimelineFromCustomer(t.timeline_from_customer || '')
+      setEditInternalTimeline(t.internal_timeline || '')
     }
 
     if (timelineRes.data) setTimeline(timelineRes.data as TimelineEntry[])
+    if (auditRes.data) setAuditEntries(auditRes.data)
     setLoading(false)
   }
 
@@ -119,6 +128,13 @@ export default function TicketDetailPage() {
 
   const handleSaveEdit = async () => {
     if (!ticket) return
+
+    // Require Jira link when escalating
+    if (editStatus === 'Escalated' && !editJiraLink.trim()) {
+      toast('Jira link is required when escalating a ticket', 'error')
+      return
+    }
+
     setSaving(true)
 
     const changes: string[] = []
@@ -126,6 +142,8 @@ export default function TicketDetailPage() {
     if (editIssue !== ticket.issue) changes.push('Issue updated')
     if ((editResponse || null) !== ticket.my_response) changes.push('Response updated')
     if ((editNextStep || null) !== ticket.next_step) changes.push('Next step updated')
+    if ((editTimelineFromCustomer || null) !== ticket.timeline_from_customer) changes.push('Timeline updated')
+    if ((editInternalTimeline || null) !== ticket.internal_timeline) changes.push('Internal timeline updated')
     if (editNeedCheck !== ticket.need_team_check) changes.push(editNeedCheck ? 'Flagged for attention' : 'Flag removed')
 
     const { error } = await supabase
@@ -134,6 +152,8 @@ export default function TicketDetailPage() {
         issue: editIssue,
         my_response: editResponse || null,
         next_step: editNextStep || null,
+        timeline_from_customer: editTimelineFromCustomer || null,
+        internal_timeline: editInternalTimeline || null,
         status: editStatus,
         need_team_check: editNeedCheck,
         jira_link: editStatus === 'Escalated' ? editJiraLink : ticket.jira_link,
@@ -161,6 +181,13 @@ export default function TicketDetailPage() {
 
   const handleStatusChange = async (newStatus: string) => {
     if (!ticket) return
+    // Block quick-escalate without Jira link — force edit mode
+    if (newStatus === 'Escalated' && !ticket.jira_link?.trim()) {
+      setEditing(true)
+      setEditStatus('Escalated')
+      toast('Please add a Jira link before escalating', 'error')
+      return
+    }
     await supabase
       .from('tickets')
       .update({
@@ -180,6 +207,8 @@ export default function TicketDetailPage() {
   // Follow-up fields (shown in Add Update form)
   const [followUpStatus, setFollowUpStatus] = useState<TicketStatus | null>(null)
   const [followUpResponse, setFollowUpResponse] = useState('')
+  const [followUpTimeline, setFollowUpTimeline] = useState('')
+  const [followUpInternal, setFollowUpInternal] = useState('')
 
   const handleAddUpdate = async (data: {
     entryDate: string; channel: Channel; notes: string; formattedString: string
@@ -214,10 +243,19 @@ export default function TicketDetailPage() {
         ? `${existing}\n\n[${timestamp} - ${userName}] ${followUpResponse.trim()}`
         : `[${timestamp} - ${userName}] ${followUpResponse.trim()}`
     }
+    // Optional: update timeline fields
+    if (followUpTimeline.trim()) {
+      ticketUpdate.timeline_from_customer = followUpTimeline.trim()
+    }
+    if (followUpInternal.trim()) {
+      ticketUpdate.internal_timeline = followUpInternal.trim()
+    }
     await supabase.from('tickets').update(ticketUpdate).eq('id', ticket.id)
     setShowAddUpdate(false)
     setFollowUpStatus(null)
     setFollowUpResponse('')
+    setFollowUpTimeline('')
+    setFollowUpInternal('')
     fetchTicket()
     setSaving(false)
     toast('Follow-up added')
@@ -469,18 +507,22 @@ export default function TicketDetailPage() {
                 <span className="text-text-tertiary text-xs">Logged By</span>
                 <p className="text-text-primary mt-1">{ticket.created_by_name}</p>
               </div>
-              {ticket.timeline_from_customer && (
-                <div>
-                  <span className="text-text-tertiary text-xs">Timeline from Customer</span>
-                  <p className="text-text-primary mt-1">{ticket.timeline_from_customer}</p>
-                </div>
-              )}
-              {ticket.internal_timeline && (
-                <div>
-                  <span className="text-text-tertiary text-xs">Internal Timeline</span>
-                  <p className="text-text-primary mt-1">{ticket.internal_timeline}</p>
-                </div>
-              )}
+              <div>
+                <span className="text-text-tertiary text-xs">Timeline from Customer</span>
+                {editing ? (
+                  <Input value={editTimelineFromCustomer} onChange={(e) => setEditTimelineFromCustomer(e.target.value)} className="mt-1" placeholder="Timeline stated by customer" />
+                ) : (
+                  <p className="text-text-primary mt-1">{ticket.timeline_from_customer || '-'}</p>
+                )}
+              </div>
+              <div>
+                <span className="text-text-tertiary text-xs">Internal Timeline</span>
+                {editing ? (
+                  <Input value={editInternalTimeline} onChange={(e) => setEditInternalTimeline(e.target.value)} className="mt-1" placeholder='e.g. "By Hazleen: 06/04/2026"' />
+                ) : (
+                  <p className="text-text-primary mt-1">{ticket.internal_timeline || '-'}</p>
+                )}
+              </div>
               {ticket.jira_link && (
                 <div className="sm:col-span-2">
                   <span className="text-text-tertiary text-xs">Jira Link</span>
@@ -575,6 +617,27 @@ export default function TicketDetailPage() {
                     rows={2}
                     className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none"
                   />
+                </div>
+                {/* Optional: Timeline fields */}
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-xs text-text-muted mb-1">Timeline from customer <span className="text-text-tertiary">(optional)</span></p>
+                    <input
+                      value={followUpTimeline}
+                      onChange={(e) => setFollowUpTimeline(e.target.value)}
+                      placeholder="Timeline stated by customer"
+                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs text-text-muted mb-1">Internal timeline <span className="text-text-tertiary">(optional)</span></p>
+                    <input
+                      value={followUpInternal}
+                      onChange={(e) => setFollowUpInternal(e.target.value)}
+                      placeholder='e.g. "By Hazleen: 06/04/2026"'
+                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                    />
+                  </div>
                 </div>
                 <Button
                   onClick={() => {
@@ -762,24 +825,77 @@ export default function TicketDetailPage() {
             </div>
           </div>
 
-          {/* Audit Info */}
+          {/* Audit Info — queries actual audit_log table for full history */}
           <div className="card p-4">
             <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Audit Trail</h2>
-            <div className="space-y-3 text-xs text-text-tertiary">
-              <div className="flex items-center gap-2">
-                <div className="size-1.5 rounded-full bg-green-400/60 flex-shrink-0" />
-                <span>Created {format(new Date(ticket.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{ticket.created_by_name}</span></span>
-              </div>
-              {ticket.last_updated_by_name && (
-                <div className="flex items-start gap-2">
-                  <div className="size-1.5 rounded-full bg-blue-400/60 flex-shrink-0 mt-1" />
-                  <div>
-                    <span>Updated {format(new Date(ticket.updated_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{ticket.last_updated_by_name}</span></span>
-                    {ticket.last_change_note && (
-                      <p className="text-text-muted mt-0.5">{ticket.last_change_note}</p>
-                    )}
+            <div className="space-y-3 text-xs text-text-tertiary max-h-64 overflow-y-auto">
+              {auditEntries.length > 0 ? (
+                auditEntries.map((entry, i) => {
+                  const isInsert = entry.action === 'INSERT'
+                  const isDelete = entry.action === 'DELETE'
+                  let summary = ''
+                  if (isInsert) {
+                    summary = 'Ticket created'
+                  } else if (isDelete) {
+                    summary = 'Ticket deleted'
+                  } else if (entry.old_data && entry.new_data) {
+                    const changes: string[] = []
+                    if (entry.old_data.status !== entry.new_data.status) {
+                      changes.push(`Status: ${entry.old_data.status} → ${entry.new_data.status}`)
+                    }
+                    if (entry.old_data.my_response !== entry.new_data.my_response) {
+                      changes.push('Response updated')
+                    }
+                    if (entry.old_data.next_step !== entry.new_data.next_step) {
+                      changes.push('Next step updated')
+                    }
+                    if (entry.old_data.issue !== entry.new_data.issue) {
+                      changes.push('Issue updated')
+                    }
+                    if (entry.old_data.need_team_check !== entry.new_data.need_team_check) {
+                      changes.push(entry.new_data.need_team_check ? 'Flagged for team check' : 'Team check flag removed')
+                    }
+                    if (entry.old_data.jira_link !== entry.new_data.jira_link) {
+                      changes.push('Jira link updated')
+                    }
+                    if (entry.old_data.timeline_from_customer !== entry.new_data.timeline_from_customer) {
+                      changes.push('Customer timeline updated')
+                    }
+                    if (entry.old_data.internal_timeline !== entry.new_data.internal_timeline) {
+                      changes.push('Internal timeline updated')
+                    }
+                    summary = changes.length > 0 ? changes.join(', ') : 'Details edited'
+                  } else {
+                    summary = entry.new_data?.last_change_note || 'Updated'
+                  }
+                  return (
+                    <div key={i} className="flex items-start gap-2">
+                      <div className={`size-1.5 rounded-full flex-shrink-0 mt-1 ${isInsert ? 'bg-green-400/60' : isDelete ? 'bg-red-400/60' : 'bg-blue-400/60'}`} />
+                      <div>
+                        <span>{format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{entry.changed_by}</span></span>
+                        <p className="text-text-muted mt-0.5">{summary}</p>
+                      </div>
+                    </div>
+                  )
+                })
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <div className="size-1.5 rounded-full bg-green-400/60 flex-shrink-0" />
+                    <span>Created {format(new Date(ticket.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{ticket.created_by_name}</span></span>
                   </div>
-                </div>
+                  {ticket.last_updated_by_name && (
+                    <div className="flex items-start gap-2">
+                      <div className="size-1.5 rounded-full bg-blue-400/60 flex-shrink-0 mt-1" />
+                      <div>
+                        <span>Updated {format(new Date(ticket.updated_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{ticket.last_updated_by_name}</span></span>
+                        {ticket.last_change_note && (
+                          <p className="text-text-muted mt-0.5">{ticket.last_change_note}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

@@ -304,8 +304,10 @@ export interface JobSheet {
   db_version_before: string | null
 
   service_types: string[]
+  other_service_text: string | null
   issue_detail: string | null
   issue_categories: JobSheetIssueCategory[]
+  other_issue_text: string | null
   backup_status: BackupStatus | null
   service_done: string | null
 

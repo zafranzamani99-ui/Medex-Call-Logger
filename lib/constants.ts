@@ -187,7 +187,7 @@ export const CHANNEL_COLORS: Record<Channel, { bg: string; text: string }> = {
 
 export const JOB_SHEET_SERVICE_TYPES = [
   'ISP1', 'ISP2', 'ISP3', 'MTN', 'AD-HOC/KIOSK',
-  'Delivery', 'Hardware', 'Label', 'Others',
+  'Hardware', 'Label', 'Others',
 ]
 
 export const JOB_SHEET_ISSUE_CATEGORIES = [

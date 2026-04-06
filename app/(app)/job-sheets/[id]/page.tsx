@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { JobSheet, JobSheetChecklistItem, JobSheetIssueCategory, JobSheetImportantDetails, BackupStatus, JobOutcome, PaymentMethod } from '@/lib/types'
-import { JOB_SHEET_SERVICE_TYPES, JOB_SHEET_CHECKLIST_LABELS, JOB_SHEET_ISSUE_CATEGORIES, JOB_SHEET_STATUS_COLORS, DEFAULT_IMPORTANT_DETAILS } from '@/lib/constants'
+import { JOB_SHEET_CHECKLIST_LABELS, JOB_SHEET_ISSUE_CATEGORIES, JOB_SHEET_STATUS_COLORS, DEFAULT_IMPORTANT_DETAILS } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 import { Input, Label, Textarea, Select } from '@/components/ui/Input'
 import Badge from '@/components/ui/Badge'
@@ -70,8 +70,10 @@ export default function JobSheetDetailPage() {
   const [dbVersionBefore, setDbVersionBefore] = useState('')
 
   const [serviceTypes, setServiceTypes] = useState<string[]>([])
+  const [otherServiceText, setOtherServiceText] = useState('')
   const [issueDetail, setIssueDetail] = useState('')
   const [issueCategories, setIssueCategories] = useState<JobSheetIssueCategory[]>([])
+  const [otherIssueText, setOtherIssueText] = useState('')
   const [backupStatus, setBackupStatus] = useState<BackupStatus | ''>('')
   const [serviceDone, setServiceDone] = useState('')
 
@@ -121,7 +123,8 @@ export default function JobSheetDetailPage() {
     setProgramType(js.program_type || '')
     setVersionBefore(js.version_before || '')
     setDbVersionBefore(js.db_version_before || '')
-    setServiceTypes(js.service_types || [])
+    setServiceTypes((js.service_types || []).filter((t: string) => t !== 'Delivery'))
+    setOtherServiceText(js.other_service_text || '')
     setIssueDetail(js.issue_detail || '')
     setBackupStatus((js.backup_status as BackupStatus) || '')
     setServiceDone(js.service_done || '')
@@ -145,6 +148,7 @@ export default function JobSheetDetailPage() {
       ? js.issue_categories
       : JOB_SHEET_ISSUE_CATEGORIES.map(label => ({ label, checked: false }))
     setIssueCategories(ic)
+    setOtherIssueText(js.other_issue_text || '')
 
     // Important details
     setImportantDetails(js.important_details && typeof js.important_details === 'object' && 'main_pc_name' in js.important_details
@@ -168,8 +172,10 @@ export default function JobSheetDetailPage() {
     version_before: versionBefore || null,
     db_version_before: dbVersionBefore || null,
     service_types: serviceTypes,
+    other_service_text: otherServiceText || null,
     issue_detail: issueDetail || null,
     issue_categories: issueCategories,
+    other_issue_text: otherIssueText || null,
     backup_status: backupStatus || null,
     service_done: serviceDone || null,
     suggestion: suggestion || null,
@@ -210,7 +216,7 @@ export default function JobSheetDetailPage() {
     autoSaveRef.current = setTimeout(() => {
       handleSave(undefined, true)
     }, 3000)
-  }, [serviceDate, timeStart, timeEnd, contactPerson, contactTel, doctorName, doctorPhone, clinicEmail, programType, versionBefore, dbVersionBefore, serviceTypes, issueDetail, issueCategories, backupStatus, serviceDone, suggestion, remark, checklist, importantDetails, chargeAmount, paymentMethod, needReceipt, needInvoice, jobOutcome, customerRepName])
+  }, [serviceDate, timeStart, timeEnd, contactPerson, contactTel, doctorName, doctorPhone, clinicEmail, programType, versionBefore, dbVersionBefore, serviceTypes, otherServiceText, issueDetail, issueCategories, otherIssueText, backupStatus, serviceDone, suggestion, remark, checklist, importantDetails, chargeAmount, paymentMethod, needReceipt, needInvoice, jobOutcome, customerRepName])
 
   // Toggle service type
   const toggleServiceType = (type: string) => {
@@ -285,265 +291,285 @@ export default function JobSheetDetailPage() {
         </div>
       </div>
 
-      {/* ===== PRINT LAYOUT — hidden on screen, shown when printing ===== */}
-      <div className="hidden print:block" data-print-only id="print-layout">
+      {/* ===== PRINT LAYOUT v3.0 — pixel-perfect replica of paper SERVICE JOB SHEET ===== */}
+      <div className="hidden print:block" data-print-only id="js-print">
         <style dangerouslySetInnerHTML={{ __html: `
           @media print {
-            #print-layout { font-family: Arial, sans-serif; font-size: 10px; color: #000 !important; }
-            #print-layout table { width: 100%; border-collapse: collapse; }
-            #print-layout td, #print-layout th { border: 1px solid #000; padding: 3px 5px; vertical-align: top; color: #000 !important; }
-            #print-layout .no-border td, #print-layout .no-border th { border: none; }
-            #print-layout .section-title { background: #e8eaf0; font-weight: bold; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; padding: 4px 6px; }
-            #print-layout .label { font-weight: normal; color: #333; white-space: nowrap; width: 1%; }
-            #print-layout .val { font-weight: bold; }
-            #print-layout .cb { width: 12px; height: 12px; border: 1px solid #000; display: inline-block; vertical-align: middle; margin-right: 4px; text-align: center; font-size: 10px; line-height: 12px; }
-            #print-layout .cb-checked { background: #000; color: #fff; }
-            #print-layout .sig-line { border-bottom: 1px solid #000; min-width: 180px; height: 50px; display: inline-block; }
-            #print-layout h1 { font-size: 18px; font-weight: bold; text-align: center; margin: 0; }
-            #print-layout .company-sub { font-size: 8px; color: #555; text-align: center; margin-top: 2px; }
+            @page { size: A4 portrait; margin: 10mm 12mm 8mm 12mm; }
+            * { box-sizing: border-box; }
+            #js-print {
+              font-family: Arial, Helvetica, sans-serif;
+              font-size: 9.5px;
+              color: #000 !important;
+              line-height: 1.25;
+              width: 100%;
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            #js-print table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+            #js-print td { border: 0.7px solid #333; padding: 3px 5px; vertical-align: top; color: #000 !important; overflow: hidden; word-wrap: break-word; }
+            #js-print .nb { border: none !important; }
+            #js-print .bt0 { border-top: none !important; }
+            #js-print .bb0 { border-bottom: none !important; }
+            #js-print .bl0 { border-left: none !important; }
+            #js-print .br0 { border-right: none !important; }
+            #js-print .lbl { font-size: 9px; color: #000; white-space: nowrap; }
+            #js-print .v { font-weight: bold; font-size: 9.5px; color: #1a3a8a !important; }
+            #js-print .shd { background: #e0e3eb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            #js-print .shtl { font-weight: bold; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.3px; padding: 3px 5px; }
+            #js-print .ck { width: 11px; height: 11px; border: 0.8px solid #000; display: inline-block; vertical-align: middle; margin-right: 3px; text-align: center; font-size: 9px; line-height: 11px; font-weight: bold; }
+            #js-print .ck-on { background: #1a1a1a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            #js-print .c { text-align: center; }
+            #js-print .vm { vertical-align: middle; }
+            /* Hide sidebar/nav in print & reset layout */
+            [data-print-hide], nav, aside, header, [role="complementary"] { display: none !important; }
+            body, body > *, main, main > *, main > * > *, [data-main-content] { margin: 0 !important; padding: 0 !important; max-width: 100% !important; width: 100% !important; }
+            #js-print img { max-width: 100%; height: auto; }
           }
         `}} />
 
-        {/* Title */}
-        <table style={{ border: 'none', marginBottom: '8px' }}>
-          <tbody className="no-border">
-            <tr>
-              <td style={{ border: 'none', textAlign: 'center', paddingBottom: '6px' }}>
-                <h1>SERVICE JOB SHEET</h1>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        {/* ── Logo — top right ── */}
+        <div style={{ textAlign: 'right', marginBottom: 2 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/medexone-logo.png" alt="MedexOne Global" style={{ height: 40, display: 'inline-block' }} />
+        </div>
+        {/* ── Title — centered ── */}
+        <div style={{ textAlign: 'center', marginBottom: 8 }}>
+          <div style={{ fontSize: '16px', fontWeight: 'bold', letterSpacing: '2px' }}>SERVICE JOB SHEET</div>
+        </div>
 
-        {/* Top section: Clinic Stamp + Header info */}
-        <table style={{ marginBottom: '0' }}>
+        {/* ── ROW 1: Clinic Stamp + Date/Time/Service/Program ── */}
+        <table style={{ marginBottom: 0 }}>
+          <colgroup>
+            <col style={{ width: '35%' }} />
+            <col style={{ width: '25%' }} />
+            <col style={{ width: '15%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '15%' }} />
+          </colgroup>
           <tbody>
             <tr>
-              <td rowSpan={6} style={{ width: '40%', verticalAlign: 'top' }}>
-                <span className="label">Clinic Stamp</span>
-                <div style={{ minHeight: '80px', paddingTop: '4px' }}>
-                  <span className="val">{clinicName}</span><br/>
-                  <span style={{ fontSize: '9px' }}>{clinicCode}</span>
+              <td rowSpan={5} style={{ verticalAlign: 'top' }}>
+                <span className="lbl">Clinic Stamp</span>
+                <div style={{ minHeight: 45, paddingTop: 2 }}>
+                  <span className="v" style={{ fontSize: '10px' }}>{clinicName}</span><br/>
+                  <span style={{ fontSize: '8px', color: '#1a3a8a' }}>{clinicCode}</span>
                 </div>
               </td>
-              <td className="label">Date</td>
-              <td className="val">{serviceDate ? new Date(serviceDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : ''}</td>
-              <td className="label">JS No</td>
-              <td className="val">{jsNumber}</td>
+              <td className="lbl vm">Date</td>
+              <td className="v vm">{serviceDate ? new Date(serviceDate + 'T00:00:00').toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }) : ''}</td>
+              <td className="lbl vm">JS No</td>
+              <td className="v vm">{jsNumber}</td>
             </tr>
             <tr>
-              <td className="label">Time Start</td>
-              <td className="val">{timeStart}</td>
-              <td className="label">Time End</td>
-              <td className="val">{timeEnd}</td>
+              <td className="lbl vm">Time Start</td>
+              <td className="v vm">{timeStart}</td>
+              <td className="lbl vm">Time End</td>
+              <td className="v vm">{timeEnd}</td>
             </tr>
             <tr>
-              <td className="label">Service by</td>
-              <td colSpan={3} className="val">{serviceBy}</td>
+              <td className="lbl vm">Service by</td>
+              <td colSpan={3} className="v vm">{serviceBy}</td>
             </tr>
             <tr>
-              <td className="label">Medex1Program before update</td>
-              <td colSpan={3} className="val">{programType}</td>
+              <td className="lbl vm">Medexone Program before update</td>
+              <td colSpan={3} className="v vm">{programType}</td>
             </tr>
             <tr>
-              <td className="label">Pro & DB VER before update</td>
-              <td colSpan={3} className="val">{versionBefore}{dbVersionBefore ? ` / ${dbVersionBefore}` : ''}</td>
-            </tr>
-          </tbody>
-        </table>
-
-        {/* Contact Info + Type of Service */}
-        <table style={{ marginBottom: '0' }}>
-          <tbody>
-            <tr>
-              <td className="label" style={{ width: '15%' }}>Contact Person</td>
-              <td className="val" style={{ width: '35%' }}>{contactPerson}</td>
-              <td colSpan={4} rowSpan={1} style={{ textAlign: 'center', fontWeight: 'bold', fontSize: '9px' }}>Type of Service</td>
-            </tr>
-            <tr>
-              <td className="label">Tel No</td>
-              <td className="val">{contactTel}</td>
-              {/* Service types as checkbox grid */}
-              <td style={{ textAlign: 'center' }}>
-                <span className={serviceTypes.includes('ISP1') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('ISP1') ? '\u2713' : ''}</span> ISP1
-              </td>
-              <td style={{ textAlign: 'center' }} colSpan={2}>
-                <span className={serviceTypes.includes('Delivery') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('Delivery') ? '\u2713' : ''}</span> Delivery
-              </td>
-            </tr>
-            <tr>
-              <td className="label">Doctor Name</td>
-              <td className="val">{doctorName}</td>
-              <td style={{ textAlign: 'center' }}>
-                <span className={serviceTypes.includes('ISP2') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('ISP2') ? '\u2713' : ''}</span> ISP2
-              </td>
-              <td style={{ textAlign: 'center' }}>
-                <span className={serviceTypes.includes('Hardware') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('Hardware') ? '\u2713' : ''}</span> Hardware
-              </td>
-            </tr>
-            <tr>
-              <td className="label">Doctor H/P #</td>
-              <td className="val">{doctorPhone}</td>
-              <td style={{ textAlign: 'center' }}>
-                <span className={serviceTypes.includes('ISP3') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('ISP3') ? '\u2713' : ''}</span> ISP3
-              </td>
-              <td style={{ textAlign: 'center' }}>
-                <span className={serviceTypes.includes('Label') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('Label') ? '\u2713' : ''}</span> Label
-              </td>
-            </tr>
-            <tr>
-              <td className="label">Email</td>
-              <td className="val">{clinicEmail}</td>
-              <td style={{ textAlign: 'center' }}>
-                <span className={serviceTypes.includes('MTN') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('MTN') ? '\u2713' : ''}</span> MTN
-              </td>
-              <td style={{ textAlign: 'center' }}>
-                <span className={serviceTypes.includes('Others') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('Others') ? '\u2713' : ''}</span> Others
-              </td>
-            </tr>
-            <tr>
-              <td colSpan={2} style={{ border: 'none' }}></td>
-              <td style={{ textAlign: 'center' }}>
-                <span className={serviceTypes.includes('AD-HOC/KIOSK') ? 'cb cb-checked' : 'cb'}>{serviceTypes.includes('AD-HOC/KIOSK') ? '\u2713' : ''}</span> AD-HOC/KIOSK
-              </td>
-              <td style={{ border: 'none' }}></td>
+              <td className="lbl vm">Pro &amp; DB VER before update</td>
+              <td colSpan={3} className="v vm">{versionBefore}{dbVersionBefore ? ` / ${dbVersionBefore}` : ''}</td>
             </tr>
           </tbody>
         </table>
 
-        {/* Issue section */}
-        <table style={{ marginBottom: '0' }}>
+        {/* ── ROW 2: Contact Info (left) + Type of Service (right) ── */}
+        <table style={{ marginBottom: 0 }}>
+          <colgroup>
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '26%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '20%' }} />
+          </colgroup>
           <tbody>
             <tr>
-              <td colSpan={5} className="section-title">Issue</td>
+              <td className="lbl vm">Contact Person</td>
+              <td className="v vm">{contactPerson}</td>
+              <td colSpan={3} className="c vm shtl">Type of Service</td>
             </tr>
             <tr>
-              <td className="label" style={{ width: '12%' }}>Issue Detail</td>
-              <td className="val" style={{ width: '38%', minHeight: '40px', whiteSpace: 'pre-wrap' }}>{issueDetail}</td>
-              <td style={{ width: '15%', fontSize: '9px', fontWeight: 'bold', textAlign: 'center' }}>Issue</td>
-              <td colSpan={2} style={{ fontSize: '9px', fontWeight: 'bold', textAlign: 'center' }}>Other Issues (chargeable)</td>
+              <td className="lbl vm">Tel No</td>
+              <td className="v vm">{contactTel}</td>
+              <td className="vm"><span className={serviceTypes.includes('ISP1') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('ISP1') ? '\u2713' : ''}</span> ISP1</td>
+              <td className="vm" style={{ fontWeight: 'bold' }}>Delivery</td>
+              <td className="vm"><span className={serviceTypes.includes('Hardware') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('Hardware') ? '\u2713' : ''}</span> Hardware</td>
             </tr>
             <tr>
-              <td colSpan={2} rowSpan={4} style={{ border: 'none' }}></td>
-              <td>
-                <span className={issueCategories.find(c => c.label.includes('Mdx1'))?.checked ? 'cb cb-checked' : 'cb'}>{issueCategories.find(c => c.label.includes('Mdx1'))?.checked ? '\u2713' : ''}</span> Mdx1 Pro / Database / Gprinter / Mycard
-              </td>
-              <td colSpan={2}>
-                <span className={issueCategories.find(c => c.label.includes('Migrate'))?.checked ? 'cb cb-checked' : 'cb'}>{issueCategories.find(c => c.label.includes('Migrate'))?.checked ? '\u2713' : ''}</span> Migrate server
-              </td>
+              <td className="lbl vm">Doctor Name</td>
+              <td className="v vm">{doctorName}</td>
+              <td className="vm"><span className={serviceTypes.includes('ISP2') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('ISP2') ? '\u2713' : ''}</span> ISP2</td>
+              <td className="vm"></td>
+              <td className="vm"><span className={serviceTypes.includes('Label') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('Label') ? '\u2713' : ''}</span> Label</td>
             </tr>
             <tr>
-              <td></td>
-              <td colSpan={2}>
-                <span className={issueCategories.find(c => c.label.includes('Network'))?.checked ? 'cb cb-checked' : 'cb'}>{issueCategories.find(c => c.label.includes('Network'))?.checked ? '\u2713' : ''}</span> Network / Internet
-              </td>
+              <td className="lbl vm">Doctor H/P</td>
+              <td className="v vm">{doctorPhone}</td>
+              <td className="vm"><span className={serviceTypes.includes('ISP3') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('ISP3') ? '\u2713' : ''}</span> ISP3</td>
+              <td className="vm"></td>
+              <td className="vm"><span className={serviceTypes.includes('Others') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('Others') ? '\u2713' : ''}</span> Others{otherServiceText ? <span className="v"> — {otherServiceText}</span> : ''}</td>
             </tr>
             <tr>
-              <td></td>
-              <td colSpan={2}>
-                <span className={issueCategories.find(c => c.label.includes('chargeable'))?.checked ? 'cb cb-checked' : 'cb'}>{issueCategories.find(c => c.label.includes('chargeable'))?.checked ? '\u2713' : ''}</span> Other chargeable
-              </td>
+              <td className="lbl vm">Email</td>
+              <td className="v vm">{clinicEmail}</td>
+              <td className="vm"><span className={serviceTypes.includes('MTN') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('MTN') ? '\u2713' : ''}</span> MTN</td>
+              <td className="vm"></td>
+              <td className="vm"></td>
+            </tr>
+            <tr>
+              <td className="nb" colSpan={2}></td>
+              <td className="vm"><span className={serviceTypes.includes('AD-HOC/KIOSK') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('AD-HOC/KIOSK') ? '\u2713' : ''}</span> AD-HOC</td>
+              <td className="vm"></td>
+              <td className="vm"></td>
+            </tr>
+            <tr>
+              <td className="nb" colSpan={2}></td>
+              <td className="vm"><span className={serviceTypes.includes('AD-HOC/KIOSK') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('AD-HOC/KIOSK') ? '\u2713' : ''}</span> KIOSK</td>
+              <td className="vm"></td>
+              <td className="vm"></td>
             </tr>
           </tbody>
         </table>
 
-        {/* Service Detail */}
-        <table style={{ marginBottom: '0' }}>
+        {/* ── ROW 3: Issue ── */}
+        <table style={{ marginBottom: 0 }}>
+          <colgroup>
+            <col style={{ width: '14%' }} />
+            <col style={{ width: '26%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '20%' }} />
+            <col style={{ width: '20%' }} />
+          </colgroup>
+          <tbody>
+            <tr><td colSpan={5} className="shd shtl">Issue</td></tr>
+            <tr>
+              <td className="lbl">Issue Detail</td>
+              <td className="v" style={{ whiteSpace: 'pre-wrap' }}>{issueDetail}</td>
+              <td className="c shtl">Issue</td>
+              <td colSpan={2} className="c shtl">Other Issues (chargeable)</td>
+            </tr>
+            <tr>
+              <td className="nb" colSpan={2} rowSpan={3}></td>
+              <td className="vm"><span className={issueCategories.find(c => c.label.includes('Mdx1'))?.checked ? 'ck ck-on' : 'ck'}>{issueCategories.find(c => c.label.includes('Mdx1'))?.checked ? '\u2713' : ''}</span> Mdx1 Pro</td>
+              <td className="vm"><span className={issueCategories.find(c => c.label.includes('Migrate'))?.checked ? 'ck ck-on' : 'ck'}>{issueCategories.find(c => c.label.includes('Migrate'))?.checked ? '\u2713' : ''}</span> Migrate server</td>
+              <td className="vm"><span className={issueCategories.find(c => c.label.includes('Other'))?.checked ? 'ck ck-on' : 'ck'}>{issueCategories.find(c => c.label.includes('Other'))?.checked ? '\u2713' : ''}</span> Other{otherIssueText ? <span className="v"> — {otherIssueText}</span> : ''}</td>
+            </tr>
+            <tr>
+              <td className="vm"><span className="ck"></span> Database</td>
+              <td className="vm"><span className={issueCategories.find(c => c.label.includes('Network'))?.checked ? 'ck ck-on' : 'ck'}>{issueCategories.find(c => c.label.includes('Network'))?.checked ? '\u2713' : ''}</span> Network</td>
+              <td className="nb"></td>
+            </tr>
+            <tr>
+              <td className="vm"><span className="ck"></span> Gprinter / Mycard</td>
+              <td className="vm"><span className="ck"></span> Internet</td>
+              <td className="nb"></td>
+            </tr>
+          </tbody>
+        </table>
+
+        {/* ── ROW 4: Service Detail ── */}
+        <table style={{ marginBottom: 0 }}>
+          <colgroup><col style={{ width: '14%' }} /><col style={{ width: '86%' }} /></colgroup>
           <tbody>
             <tr>
-              <td className="label" style={{ width: '15%' }}>Service Detail</td>
-              <td className="val" style={{ minHeight: '50px', whiteSpace: 'pre-wrap' }}>
-                {backupStatus && <>- BACKUP STATUS ({backupStatus.toUpperCase()}) : OK<br/></>}
+              <td className="lbl" style={{ verticalAlign: 'top' }}>Service Detail</td>
+              <td className="v" style={{ whiteSpace: 'pre-wrap', height: 40 }}>
+                {backupStatus && <>- BACKUP STATUS ({backupStatus.toUpperCase()}) : OK{'\n'}</>}
                 {serviceDone}
               </td>
             </tr>
           </tbody>
         </table>
 
-        {/* Suggestion / Remark */}
-        <table style={{ marginBottom: '0' }}>
+        {/* ── ROW 5: Suggestion + Remark ── */}
+        <table style={{ marginBottom: 0 }}>
+          <colgroup><col style={{ width: '14%' }} /><col style={{ width: '36%' }} /><col style={{ width: '10%' }} /><col style={{ width: '40%' }} /></colgroup>
           <tbody>
             <tr>
-              <td className="label" style={{ width: '15%' }}>Suggestion</td>
-              <td style={{ width: '35%', whiteSpace: 'pre-wrap' }} className="val">{suggestion}</td>
-              <td className="label" style={{ width: '10%' }}>Remark</td>
-              <td style={{ whiteSpace: 'pre-wrap' }} className="val">{remark}</td>
+              <td className="lbl" style={{ verticalAlign: 'top' }}>Suggestion</td>
+              <td className="v" style={{ whiteSpace: 'pre-wrap', height: 30 }}>{suggestion}</td>
+              <td className="lbl" style={{ verticalAlign: 'top' }}>Remark</td>
+              <td className="v" style={{ whiteSpace: 'pre-wrap', height: 30 }}>{remark}</td>
             </tr>
           </tbody>
         </table>
 
-        {/* Checklist + Important Details — side by side */}
-        <table style={{ marginBottom: '0' }}>
+        {/* ── ROW 6: Checklist (left) + Important Details + Charges (right) ── */}
+        <table style={{ marginBottom: 0 }}>
+          <colgroup><col style={{ width: '50%' }} /><col style={{ width: '50%' }} /></colgroup>
           <tbody>
             <tr>
               {/* LEFT: Checklist */}
-              <td style={{ width: '50%', verticalAlign: 'top', padding: 0 }}>
-                <table style={{ width: '100%', marginBottom: 0 }}>
+              <td style={{ padding: 0, verticalAlign: 'top' }}>
+                <table style={{ marginBottom: 0 }}>
+                  <colgroup><col style={{ width: '70%' }} /><col style={{ width: '7%' }} /><col style={{ width: '23%' }} /></colgroup>
                   <tbody>
-                    <tr><td colSpan={3} className="section-title">CHECKLIST</td></tr>
+                    <tr><td colSpan={3} className="shd shtl">CHECKLIST</td></tr>
                     {checklist.map((item, idx) => (
                       <tr key={idx}>
-                        <td style={{ width: '70%' }}>
-                          {item.label} =
+                        <td style={{ fontSize: '8px', padding: '1.5px 4px' }}>{item.label} =</td>
+                        <td className="c vm" style={{ padding: '1.5px 2px' }}>
+                          <span className={item.checked ? 'ck ck-on' : 'ck'}>{item.checked ? '\u2713' : ''}</span>
                         </td>
-                        <td style={{ textAlign: 'center', width: '10%' }}>
-                          <span className={item.checked ? 'cb cb-checked' : 'cb'}>{item.checked ? '\u2713' : ''}</span>
-                        </td>
-                        <td className="val">{item.notes}</td>
+                        <td className="v" style={{ fontSize: '8px', padding: '1.5px 4px' }}>{item.notes}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </td>
-              {/* RIGHT: Important Details */}
-              <td style={{ width: '50%', verticalAlign: 'top', padding: 0 }}>
-                <table style={{ width: '100%', marginBottom: 0 }}>
+              {/* RIGHT: Important Details + Charges */}
+              <td style={{ padding: 0, verticalAlign: 'top' }}>
+                <table style={{ marginBottom: 0 }}>
+                  <colgroup><col style={{ width: '55%' }} /><col style={{ width: '45%' }} /></colgroup>
                   <tbody>
-                    <tr><td colSpan={2} className="section-title">IMPORTANT DETAILS: (MUST FILL IN WHEN ISP/MTN VISIT)</td></tr>
-                    <tr><td className="label">Main PC =</td><td className="val">{importantDetails.main_pc_name}</td></tr>
+                    <tr><td colSpan={2} className="shd shtl" style={{ fontSize: '7.5px' }}>IMPORTANT DETAILS: (MUST FILL IN WHEN ISP/MTN VISIT)</td></tr>
+                    <tr><td style={{ fontSize: '8px' }}>Main PC =</td><td className="v" style={{ fontSize: '8px' }}>{importantDetails.main_pc_name}</td></tr>
                     <tr>
-                      <td className="label">SPACE AVAILABLE</td>
-                      <td>
-                        <strong>C (SSD/HDD):</strong> {importantDetails.space_c}&nbsp;&nbsp;&nbsp;
-                        <strong>D:</strong> {importantDetails.space_d}
+                      <td style={{ fontSize: '8px' }}>SPACE AVAILABLE</td>
+                      <td style={{ fontSize: '8px' }}><strong>C (SSD/HDD):</strong> <span style={{ color: '#1a3a8a' }}>{importantDetails.space_c}</span></td>
+                    </tr>
+                    <tr><td className="nb"></td><td style={{ fontSize: '8px' }}><strong>D:</strong> <span style={{ color: '#1a3a8a' }}>{importantDetails.space_d}</span></td></tr>
+                    <tr>
+                      <td colSpan={2} style={{ fontSize: '8px' }}>
+                        <span className={importantDetails.auto_backup_30days ? 'ck ck-on' : 'ck'}>{importantDetails.auto_backup_30days ? '\u2713' : ''}</span> Auto-Backup &ndash; 30days. Image?
                       </td>
                     </tr>
+                    <tr><td style={{ fontSize: '8px' }}>Ext. HDD Backup: Y/N</td><td className="v" style={{ fontSize: '8px' }}>{importantDetails.ext_hdd_backup ? 'Y' : 'N'}</td></tr>
+                    <tr><td colSpan={2} style={{ fontSize: '8px' }}>Service DB &ndash; backup &amp; restore. Size</td></tr>
                     <tr>
-                      <td colSpan={2}>
-                        <span className={importantDetails.auto_backup_30days ? 'cb cb-checked' : 'cb'}>{importantDetails.auto_backup_30days ? '\u2713' : ''}</span> Auto-Backup - 30days. Image?
-                      </td>
-                    </tr>
-                    <tr><td className="label">Ext. HDD Backup: Y/N</td><td className="val">{importantDetails.ext_hdd_backup ? 'Y' : 'N'}</td></tr>
-                    <tr>
-                      <td colSpan={2}>
-                        Service DB - backup & restore. Size&nbsp;&nbsp;
-                        <strong>Before:</strong> {importantDetails.service_db_size_before}&nbsp;&nbsp;
-                        <strong>After:</strong> {importantDetails.service_db_size_after}
-                      </td>
+                      <td style={{ fontSize: '8px' }}>Before: <span className="v" style={{ fontSize: '8px' }}>{importantDetails.service_db_size_before}</span></td>
+                      <td style={{ fontSize: '8px' }}>After: <span className="v" style={{ fontSize: '8px' }}>{importantDetails.service_db_size_after}</span></td>
                     </tr>
                     <tr>
-                      <td colSpan={2}>
-                        Ultraviewer/Anydesk:&nbsp;&nbsp;
-                        <strong>ID:</strong> {importantDetails.ultraviewer_id || importantDetails.anydesk_id}&nbsp;&nbsp;
-                        <strong>PW:</strong> {importantDetails.ultraviewer_pw || importantDetails.anydesk_pw}
-                      </td>
+                      <td style={{ fontSize: '8px' }}>Ultraviewer/Anydesk :</td>
+                      <td style={{ fontSize: '8px' }}>PW- <span className="v" style={{ fontSize: '8px' }}>{importantDetails.ultraviewer_pw || importantDetails.anydesk_pw}</span></td>
+                    </tr>
+                    <tr><td colSpan={2} style={{ fontSize: '8px' }}><span className="ck"></span> RAM: <span className="v" style={{ fontSize: '8px' }}>{importantDetails.ram}</span></td></tr>
+                    <tr><td colSpan={2} style={{ fontSize: '8px' }}><span className="ck"></span> PROCESSOR : <span className="v" style={{ fontSize: '8px' }}>{importantDetails.processor}</span></td></tr>
+                    <tr>
+                      <td style={{ fontSize: '8px' }}><span className={importantDetails.need_server ? 'ck ck-on' : 'ck'}>{importantDetails.need_server ? '\u2713' : ''}</span> Need SERVER?</td>
+                      <td style={{ fontSize: '8px' }}><span className={importantDetails.brief_doctor ? 'ck ck-on' : 'ck'}>{importantDetails.brief_doctor ? '\u2713' : ''}</span> Brief Doctor?</td>
+                    </tr>
+                    {/* CHARGES — inside right column */}
+                    <tr>
+                      <td className="shd shtl vm">CHARGES:</td>
+                      <td className="v vm">{chargeAmount ? `RM ${chargeAmount}` : 'RM'}</td>
                     </tr>
                     <tr>
-                      <td colSpan={2}>
-                        <span className="cb"></span> RAM: <strong>{importantDetails.ram}</strong>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td colSpan={2}>
-                        <span className="cb"></span> PROCESSOR: <strong>{importantDetails.processor}</strong>
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>
-                        <span className={importantDetails.need_server ? 'cb cb-checked' : 'cb'}>{importantDetails.need_server ? '\u2713' : ''}</span> Need SERVER?
-                      </td>
-                      <td>
-                        <span className={importantDetails.brief_doctor ? 'cb cb-checked' : 'cb'}>{importantDetails.brief_doctor ? '\u2713' : ''}</span> Brief Doctor?
+                      <td colSpan={2} style={{ fontSize: '8px', lineHeight: 1.5 }}>
+                        <span className={paymentMethod === 'COD' || paymentMethod === 'Cheque' || paymentMethod === 'Online Transfer' ? 'ck ck-on' : 'ck'}>{paymentMethod === 'COD' || paymentMethod === 'Cheque' || paymentMethod === 'Online Transfer' ? '\u2713' : ''}</span> COD, collect CHEQUE / ONLINE TRANSFER<br/>
+                        <span className={paymentMethod === 'Credit Card' ? 'ck ck-on' : 'ck'}>{paymentMethod === 'Credit Card' ? '\u2713' : ''}</span> Credit Card Machine Payment<br/>
+                        <span className={needReceipt ? 'ck ck-on' : 'ck'}>{needReceipt ? '\u2713' : ''}</span> Need Official Receipt (By accounts)<br/>
+                        <span className={needInvoice ? 'ck ck-on' : 'ck'}>{needInvoice ? '\u2713' : ''}</span> Need Invoice
                       </td>
                     </tr>
                   </tbody>
@@ -553,56 +579,37 @@ export default function JobSheetDetailPage() {
           </tbody>
         </table>
 
-        {/* Charges */}
-        <table style={{ marginBottom: '0' }}>
+        {/* ── ROW 7: Sign-off ── */}
+        <table style={{ marginBottom: 0 }}>
+          <colgroup><col style={{ width: '50%' }} /><col style={{ width: '50%' }} /></colgroup>
           <tbody>
             <tr>
-              <td className="section-title" style={{ width: '12%' }}>CHARGES:</td>
-              <td className="val" style={{ width: '15%' }}>{chargeAmount ? `RM ${chargeAmount}` : ''}</td>
-              <td colSpan={2}>
-                <span className={paymentMethod === 'COD' ? 'cb cb-checked' : 'cb'}>{paymentMethod === 'COD' ? '\u2713' : ''}</span> COD, collect CHEQUE / ONLINE TRANSFER<br/>
-                <span className={paymentMethod === 'Credit Card' ? 'cb cb-checked' : 'cb'}>{paymentMethod === 'Credit Card' ? '\u2713' : ''}</span> Credit Card Machine Payment<br/>
-                <span className={needReceipt ? 'cb cb-checked' : 'cb'}>{needReceipt ? '\u2713' : ''}</span> Need Official Receipt (by accounts)<br/>
-                <span className={needInvoice ? 'cb cb-checked' : 'cb'}>{needInvoice ? '\u2713' : ''}</span> Need Invoice
-              </td>
-            </tr>
-          </tbody>
-        </table>
-
-        {/* Sign-off */}
-        <table style={{ marginBottom: '4px' }}>
-          <tbody>
-            <tr>
-              <td style={{ width: '50%' }}>
-                <span className={jobOutcome === 'completed' ? 'cb cb-checked' : 'cb'}>{jobOutcome === 'completed' ? '\u2713' : ''}</span> JOB COMPLETED
+              <td className="vm" style={{ padding: '6px 8px' }}>
+                <span className={jobOutcome === 'completed' ? 'ck ck-on' : 'ck'}>{jobOutcome === 'completed' ? '\u2713' : ''}</span> JOB COMPLETED
                 &nbsp;&nbsp;&nbsp;
-                <span className={jobOutcome === 'to_be_continued' ? 'cb cb-checked' : 'cb'}>{jobOutcome === 'to_be_continued' ? '\u2713' : ''}</span> TO BE CONTINUED
+                <span className={jobOutcome === 'to_be_continued' ? 'ck ck-on' : 'ck'}>{jobOutcome === 'to_be_continued' ? '\u2713' : ''}</span> TO BE CONTINUED
               </td>
-              <td style={{ width: '50%', fontSize: '9px' }}>
-                <span className={jobOutcome === 'completed' ? 'cb cb-checked' : 'cb'}>{jobOutcome === 'completed' ? '\u2713' : ''}</span> THE WORK DETAILED ABOVE HAD BEEN CARRIED OUT TO MY SATISFACTION
+              <td className="vm" style={{ fontSize: '8.5px', padding: '6px 8px' }}>
+                <span className={jobOutcome === 'completed' ? 'ck ck-on' : 'ck'}>{jobOutcome === 'completed' ? '\u2713' : ''}</span> THE WORK DETAILED ABOVE HAD BEEN CARRIED OUT TO MY SATISFACTION
               </td>
             </tr>
             <tr>
-              <td style={{ height: '60px', verticalAlign: 'bottom', textAlign: 'center' }}>
-                <div style={{ borderTop: '1px solid #000', display: 'inline-block', minWidth: '200px', paddingTop: '4px' }}>
-                  <strong style={{ fontStyle: 'italic' }}>{serviceBy}</strong><br/>
-                  <span style={{ fontSize: '8px' }}>SERVICE PERFORMED BY</span>
-                </div>
+              <td style={{ height: 100, verticalAlign: 'bottom', textAlign: 'center', padding: '6px 8px 8px' }}>
+                <div style={{ fontStyle: 'italic', fontWeight: 'bold', fontSize: '13px', color: '#1a3a8a', marginBottom: 5 }}>{serviceBy}</div>
+                <div style={{ borderTop: '1.5px solid #000', display: 'inline-block', minWidth: 180, paddingTop: 3, fontSize: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>SERVICE PERFORMED BY</div>
               </td>
-              <td style={{ height: '60px', verticalAlign: 'bottom', textAlign: 'center' }}>
-                <div style={{ borderTop: '1px solid #000', display: 'inline-block', minWidth: '200px', paddingTop: '4px' }}>
-                  <strong>{customerRepName}</strong><br/>
-                  <span style={{ fontSize: '8px' }}>CUSTOMER&apos;S REPRESENTATIVE</span>
-                </div>
+              <td style={{ height: 100, verticalAlign: 'bottom', textAlign: 'center', padding: '6px 8px 8px' }}>
+                <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#1a3a8a', marginBottom: 5 }}>{customerRepName}</div>
+                <div style={{ borderTop: '1.5px solid #000', display: 'inline-block', minWidth: 180, paddingTop: 3, fontSize: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>CUSTOMER&apos;S REPRESENTATIVE</div>
               </td>
             </tr>
           </tbody>
         </table>
 
-        {/* Footer */}
-        <div style={{ textAlign: 'center', fontSize: '7px', color: '#666', marginTop: '8px', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
-          <strong>MEDEXONE GLOBAL SDN. BHD.</strong> (Company No:201301042612 (1064130-X))<br/>
-          Unit, Block G, Level 6, Pusat Dagangan Phileo Damansara 1, No. 9 Jalan 16/11, 46350 Petaling Jaya, Selangor, Malaysia.
+        {/* ── FOOTER ── */}
+        <div style={{ marginTop: 18, textAlign: 'left' }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/footer.jpg" alt="MedexOne Global Footer" style={{ maxWidth: '70%', width: '70%', height: 'auto' }} />
         </div>
       </div>
 
@@ -654,7 +661,7 @@ export default function JobSheetDetailPage() {
               <Input type="text" value={doctorName} onChange={(e) => { setDoctorName(e.target.value); scheduleAutoSave() }} placeholder="Doctor name" />
             </div>
             <div>
-              <Label>Doctor H/P #</Label>
+              <Label>Doctor H/P</Label>
               <Input type="text" value={doctorPhone} onChange={(e) => { setDoctorPhone(e.target.value); scheduleAutoSave() }} placeholder="Doctor phone" />
             </div>
             <div className="col-span-2">
@@ -667,11 +674,8 @@ export default function JobSheetDetailPage() {
         {/* 3. Program Information */}
         <Section title="Program Information">
           <div className="mb-3">
-            <Label>Medex1 Program</Label>
-            <div className="flex gap-2 mt-1">
-              <Pill label="GP" active={programType === 'GP'} onClick={() => { setProgramType(programType === 'GP' ? '' : 'GP'); scheduleAutoSave() }} />
-              <Pill label="Specialist" active={programType === 'Specialist'} onClick={() => { setProgramType(programType === 'Specialist' ? '' : 'Specialist'); scheduleAutoSave() }} />
-            </div>
+            <Label>Medexone Program</Label>
+            <Input type="text" value={programType} onChange={(e) => { setProgramType(e.target.value); scheduleAutoSave() }} placeholder="e.g. GP, MHIS, DENTAL, GP+IP" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -688,7 +692,7 @@ export default function JobSheetDetailPage() {
         {/* 4. Type of Service */}
         <Section title="Type of Service">
           <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-            {JOB_SHEET_SERVICE_TYPES.map(type => (
+            {['ISP1', 'ISP2', 'ISP3', 'MTN', 'AD-HOC/KIOSK'].map(type => (
               <label key={type} className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -699,6 +703,31 @@ export default function JobSheetDetailPage() {
                 <span className="text-sm text-text-secondary">{type}</span>
               </label>
             ))}
+          </div>
+          <div className="mt-3 border-t border-border pt-3">
+            <Label>Delivery</Label>
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {['Hardware', 'Label', 'Others'].map(type => (
+                <label key={type} className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={serviceTypes.includes(type)}
+                    onChange={() => toggleServiceType(type)}
+                    className="rounded border-border text-accent focus:ring-accent/30 bg-surface-inset"
+                  />
+                  <span className="text-sm text-text-secondary">{type}</span>
+                </label>
+              ))}
+            </div>
+            {serviceTypes.includes('Others') && (
+              <input
+                type="text"
+                value={otherServiceText}
+                onChange={e => setOtherServiceText(e.target.value)}
+                placeholder="Specify what to deliver (e.g. Printer)"
+                className="mt-2 w-full rounded border border-border bg-surface-inset px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            )}
           </div>
         </Section>
 
@@ -724,6 +753,15 @@ export default function JobSheetDetailPage() {
                   </label>
                 ))}
               </div>
+              {issueCategories.find(c => c.label.includes('Other'))?.checked && (
+                <input
+                  type="text"
+                  value={otherIssueText}
+                  onChange={e => setOtherIssueText(e.target.value)}
+                  placeholder="Specify other issue (e.g. Printer)"
+                  className="mt-2 w-full rounded border border-border bg-surface-inset px-3 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+              )}
             </div>
           </div>
         </Section>

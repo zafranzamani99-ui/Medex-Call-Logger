@@ -176,6 +176,7 @@ export default function LogCallPage() {
       if (saved) {
         const data = JSON.parse(saved) as CallLogDraft
         if (data.selectedClinic || data.pic || data.issue || data.callerTel) {
+          pendingRestoreRef.current = data
           setShowAutoRestore(true)
         }
       }
@@ -183,36 +184,33 @@ export default function LogCallPage() {
   }, [])
 
   const handleAutoRestore = (restore: boolean) => {
-    if (restore) {
-      try {
-        const saved = localStorage.getItem(AUTOSAVE_KEY)
-        if (saved) {
-          const draft = JSON.parse(saved) as CallLogDraft
-          setSelectedClinic(draft.selectedClinic)
-          setCallerTel(draft.callerTel)
-          setPic(draft.pic)
-          setClinicWa(draft.clinicWa || '')
-          setCallDuration(draft.callDuration)
-          setIssueCategory(draft.issueCategory || null)
-          setIssueType(draft.issueType as IssueType | null)
-          setIssue(draft.issue)
-          setMyResponse(draft.myResponse)
-          setNextStep(draft.nextStep)
-          setTimelineFromCustomer(draft.timelineFromCustomer)
-          setInternalTimeline(draft.internalTimeline)
-          setNeedTeamCheck(draft.needTeamCheck)
-          setStatus(draft.status)
-          setJiraLink(draft.jiraLink)
-          toast('Form restored')
-        }
-      } catch { /* ignore */ }
+    if (restore && pendingRestoreRef.current) {
+      const draft = pendingRestoreRef.current
+      setSelectedClinic(draft.selectedClinic)
+      setCallerTel(draft.callerTel)
+      setPic(draft.pic)
+      setClinicWa(draft.clinicWa || '')
+      setCallDuration(draft.callDuration)
+      setIssueCategory(draft.issueCategory || null)
+      setIssueType(draft.issueType as IssueType | null)
+      setIssue(draft.issue)
+      setMyResponse(draft.myResponse)
+      setNextStep(draft.nextStep)
+      setTimelineFromCustomer(draft.timelineFromCustomer)
+      setInternalTimeline(draft.internalTimeline)
+      setNeedTeamCheck(draft.needTeamCheck)
+      setStatus(draft.status)
+      setJiraLink(draft.jiraLink)
+      toast('Form restored')
     }
+    pendingRestoreRef.current = null
     localStorage.removeItem(AUTOSAVE_KEY)
     setShowAutoRestore(false)
   }
 
   // Auto-save
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingRestoreRef = useRef<CallLogDraft | null>(null)
 
   const getFormSnapshot = useCallback((): CallLogDraft | null => {
     if (!selectedClinic && !pic && !issue && !callerTel) return null
@@ -237,8 +235,15 @@ export default function LogCallPage() {
       } else {
         localStorage.removeItem(AUTOSAVE_KEY)
       }
-    }, 5000)
-    return () => { if (autoSaveRef.current) clearTimeout(autoSaveRef.current) }
+    }, 1500)
+    return () => {
+      if (autoSaveRef.current) clearTimeout(autoSaveRef.current)
+      // Save immediately on unmount — catches SPA navigation
+      const snapshot = getFormSnapshot()
+      if (snapshot) {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snapshot))
+      }
+    }
   }, [getFormSnapshot])
 
   useEffect(() => {
@@ -534,6 +539,7 @@ export default function LogCallPage() {
     setError('')
     setFieldErrors({})
     setActiveDraftId(null)
+    localStorage.removeItem(AUTOSAVE_KEY)
   }
 
   const handleSaveDraft = () => {
@@ -650,7 +656,7 @@ export default function LogCallPage() {
                   : 'bg-white/[0.03] text-text-secondary border border-border hover:border-text-muted hover:text-text-primary'
               }`}
             >
-              <span className="max-w-[120px] truncate">{draft.label}</span>
+              <span className="truncate">{draft.label}</span>
               <span className="text-text-muted text-[10px]">{format(new Date(draft.savedAt), 'HH:mm')}</span>
               <span
                 role="button"
