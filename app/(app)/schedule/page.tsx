@@ -845,7 +845,7 @@ export default function SchedulePage() {
                             </div>
                           </div>
                           {/* Type badge */}
-                          <span className={`text-[10px] px-2 py-0.5 rounded-lg max-w-[180px] text-right leading-relaxed mt-0.5 ${colors.bg} ${colors.text}`}>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-lg leading-relaxed max-w-[160px] mt-0.5 ${colors.bg} ${colors.text}`}>
                             {s.schedule_type}{s.custom_type ? `: ${s.custom_type}` : ''}
                           </span>
                         </div>
