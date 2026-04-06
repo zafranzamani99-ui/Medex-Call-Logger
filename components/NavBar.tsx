@@ -49,7 +49,7 @@ const DATA_ITEMS = [
     icon: <svg className="size-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>,
   },
   {
-    href: '/job-sheets', label: 'Job Sheets', dotKey: null,
+    href: '/job-sheets', label: 'Job Sheets', dotKey: null, beta: true,
     icon: <svg className="size-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>,
   },
 ]
@@ -139,7 +139,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
         </span>
         {!isCollapsed && (
           <>
-            <span className="flex-1">{item.label}</span>
+            <span className="flex-1">{item.label}{('beta' in item && item.beta) && <span className="ml-1.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400/80 bg-amber-400/10 px-1.5 py-0.5 rounded">beta</span>}</span>
             {dotCount > 0 && (
               <span className="text-[10px] tabular-nums font-medium text-text-muted bg-white/[0.06] px-1.5 py-0.5 rounded-md">
                 {dotCount}
@@ -400,6 +400,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
               >
                 {item.icon}
                 <span>{item.label}</span>
+                {item.label === 'Job Sheets' && <span className="text-[9px] font-semibold uppercase tracking-wider text-amber-400/80 bg-amber-400/10 px-1.5 py-0.5 rounded">beta</span>}
               </Link>
             ))}
             <button
