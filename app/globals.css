@@ -288,7 +288,7 @@ input[type="date"]:hover, input[type="date"]:focus, input[type="date"]:active {
 }
 
 /* Light theme overrides for dark-first utility classes */
-[data-theme="light"] .text-white { color: var(--foreground); }
+[data-theme="light"] .text-white:not(button):not([class*="bg-indigo"]):not([class*="bg-green"]):not([class*="bg-red"]):not([class*="bg-accent"]):not([class*="bg-blue"]) { color: var(--foreground); }
 [data-theme="light"] .text-zinc-300 { color: #3f3f46; }
 [data-theme="light"] .text-zinc-400 { color: #4b4f6b; }
 [data-theme="light"] .text-zinc-200 { color: #27272a; }

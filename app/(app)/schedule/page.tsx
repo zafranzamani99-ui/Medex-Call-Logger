@@ -22,7 +22,7 @@ import { useToast } from '@/components/ui/Toast'
 
 // Parse time strings like "8:00AM", "1:00PM", "2:30PM" into minutes for sorting
 function parseTimeToMinutes(t: string): number {
-  const match = t.match(/^(\d{1,2}):?(\d{2})?\s*(AM|PM)$/i)
+  const match = t.match(/^(\d{1,2})[:.]?(\d{2})?\s*(AM|PM)$/i)
   if (!match) return 0
   let hours = parseInt(match[1])
   const mins = parseInt(match[2] || '0')
@@ -845,7 +845,7 @@ export default function SchedulePage() {
                             </div>
                           </div>
                           {/* Type badge */}
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5 ${colors.bg} ${colors.text}`}>
+                          <span className={`text-[10px] px-2 py-0.5 rounded-lg max-w-[180px] text-right leading-relaxed mt-0.5 ${colors.bg} ${colors.text}`}>
                             {s.schedule_type}{s.custom_type ? `: ${s.custom_type}` : ''}
                           </span>
                         </div>

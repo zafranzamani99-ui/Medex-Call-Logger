@@ -150,13 +150,9 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
     <>
       {/* ===== Desktop Sidebar ===== */}
       <aside
-        className={`hidden md:flex flex-col fixed top-0 left-0 h-dvh z-40 transition-[width] duration-200 will-change-[width] ${
+        className={`hidden md:flex flex-col fixed top-0 left-0 h-dvh z-40 transition-[width] duration-200 will-change-[width] bg-surface border-r border-border ${
           collapsed ? 'w-[60px]' : 'w-[220px]'
         }`}
-        style={{
-          background: 'linear-gradient(180deg, #0e1018 0%, #0a0c12 100%)',
-          borderRight: '1px solid rgba(255,255,255,0.04)',
-        }}
       >
         {/* Logo + collapse */}
         <div className="flex items-center justify-between h-14 px-4 flex-shrink-0">
@@ -210,7 +206,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
           </div>
 
           {/* Data group */}
-          <div className="mt-5 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+          <div className="mt-5 pt-4 border-t border-border">
             {!collapsed && (
               <span className="px-3 text-[10px] font-semibold text-text-muted uppercase tracking-[0.08em] mb-1.5 block">
                 Data
@@ -222,7 +218,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
           </div>
 
           {/* System group */}
-          <div className="mt-5 pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+          <div className="mt-5 pt-4 border-t border-border">
             {!collapsed && (
               <span className="px-3 text-[10px] font-semibold text-text-muted uppercase tracking-[0.08em] mb-1.5 block">
                 System
@@ -236,7 +232,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
 
         {/* Quick stats at bottom */}
         {!collapsed && (
-          <div className="px-4 py-3 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+          <div className="px-4 py-3 flex-shrink-0 border-t border-border">
             <div className="flex items-center justify-between text-[11px]">
               <span className="text-text-muted">Today</span>
               <span className="text-text-secondary tabular-nums font-medium">
@@ -253,7 +249,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
         )}
 
         {/* User section */}
-        <div className="p-3 flex-shrink-0" style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+        <div className="p-3 flex-shrink-0 border-t border-border">
           {collapsed ? (
             <button
               onClick={handleLogout}
@@ -289,12 +285,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
       </aside>
 
       {/* ===== Mobile Top Bar ===== */}
-      <header className="md:hidden sticky top-0 z-40 safe-top" style={{
-        background: 'rgba(11, 13, 20, 0.85)',
-        backdropFilter: 'blur(12px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(12px) saturate(180%)',
-        borderBottom: '1px solid rgba(255,255,255,0.04)',
-      }}>
+      <header className="md:hidden sticky top-0 z-40 safe-top bg-surface/85 backdrop-blur-xl border-b border-border">
         <div className="flex items-center justify-between h-12 px-4">
           <Link href="/" className="flex items-center gap-2">
             <div className="size-6 rounded-md bg-indigo-500/15 flex items-center justify-center">
@@ -316,12 +307,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
       </header>
 
       {/* ===== Mobile Bottom Tab Bar ===== */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom" style={{
-        background: 'rgba(11, 13, 20, 0.85)',
-        backdropFilter: 'blur(12px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(12px) saturate(180%)',
-        borderTop: '1px solid rgba(255,255,255,0.04)',
-      }}>
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 safe-bottom bg-surface/85 backdrop-blur-xl border-t border-border">
         <div className="flex items-end justify-around h-16 px-1">
           {MOBILE_TABS.map((item) => {
             if (item.href === 'more') {
@@ -395,10 +381,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
             className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-40"
             onClick={() => setMoreOpen(false)}
           />
-          <div className="md:hidden fixed bottom-16 left-2 right-2 z-50 rounded-2xl shadow-theme-lg px-2 py-3 safe-bottom animate-slideUp" style={{
-            background: 'linear-gradient(180deg, #151720 0%, #111318 100%)',
-            border: '1px solid rgba(255,255,255,0.06)',
-          }}>
+          <div className="md:hidden fixed bottom-16 left-2 right-2 z-50 rounded-2xl shadow-theme-lg px-2 py-3 safe-bottom animate-slideUp bg-surface-raised border border-border">
             {MORE_ITEMS.map((item) => (
               <Link
                 key={item.href}
@@ -416,8 +399,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
             ))}
             <button
               onClick={() => { toggleTheme(); setMoreOpen(false) }}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-text-tertiary hover:text-text-primary hover:bg-white/[0.03] transition-colors w-full mt-1"
-              style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-text-tertiary hover:text-text-primary hover:bg-surface-raised transition-colors w-full mt-1 border-t border-border"
             >
               {currentTheme === 'dark' ? (
                 <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" /></svg>

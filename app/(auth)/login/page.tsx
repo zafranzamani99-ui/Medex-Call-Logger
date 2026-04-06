@@ -40,12 +40,12 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-dvh flex items-center justify-center px-4 relative overflow-hidden" style={{
-      background: 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.12), transparent 70%), #0b0d14',
+    <div className="min-h-dvh flex items-center justify-center px-4 relative overflow-hidden bg-background" style={{
+      backgroundImage: 'radial-gradient(ellipse 80% 50% at 50% -20%, rgba(99, 102, 241, 0.12), transparent 70%)',
     }}>
       {/* Subtle grid pattern */}
-      <div className="absolute inset-0 opacity-[0.015]" style={{
-        backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)',
+      <div className="absolute inset-0 opacity-[0.03] dark:opacity-[0.015]" style={{
+        backgroundImage: 'linear-gradient(var(--text-muted) 1px, transparent 1px), linear-gradient(90deg, var(--text-muted) 1px, transparent 1px)',
         backgroundSize: '64px 64px',
       }} />
 
@@ -64,11 +64,7 @@ export default function LoginPage() {
         </div>
 
         {/* Login Form */}
-        <div className="card p-7" style={{
-          background: 'linear-gradient(180deg, rgba(17, 19, 24, 0.95) 0%, rgba(17, 19, 24, 1) 100%)',
-          border: '1px solid rgba(255,255,255,0.06)',
-          boxShadow: '0 16px 48px -8px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255,255,255,0.03)',
-        }}>
+        <div className="card p-7 shadow-theme-lg">
           <form onSubmit={handleLogin} className="space-y-4">
             {error && (
               <div className="bg-red-500/8 border border-red-500/15 rounded-lg px-3.5 py-2.5 text-red-400 text-[13px]">
@@ -87,7 +83,7 @@ export default function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                className="w-full px-3 py-2.5 bg-surface-inset border border-border rounded-lg text-white text-[13px]
+                className="w-full px-3 py-2.5 bg-surface-inset border border-border rounded-lg text-text-primary text-[13px]
                            placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-[var(--ring)]
                            focus:border-transparent focus-glow transition-all"
                 placeholder="agent@medex.com"
@@ -105,7 +101,7 @@ export default function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete="current-password"
-                className="w-full px-3 py-2.5 bg-surface-inset border border-border rounded-lg text-white text-[13px]
+                className="w-full px-3 py-2.5 bg-surface-inset border border-border rounded-lg text-text-primary text-[13px]
                            placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-[var(--ring)]
                            focus:border-transparent focus-glow transition-all"
                 placeholder="••••••••"
@@ -115,11 +111,9 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50
-                         text-white text-[13px] font-semibold rounded-lg transition-all mt-1"
-              style={{
-                boxShadow: '0 1px 2px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
-              }}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50
+                         text-white text-[13px] font-semibold rounded-lg transition-all mt-1 shadow-theme-sm
+                         active:translate-y-px active:shadow-none"
             >
               {loading ? 'Signing in...' : 'Continue'}
             </button>
