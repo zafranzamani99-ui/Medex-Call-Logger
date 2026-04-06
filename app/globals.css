@@ -328,3 +328,120 @@ input[type="date"]:hover, input[type="date"]:focus, input[type="date"]:active {
 /* Safe area insets */
 .safe-top { padding-top: env(safe-area-inset-top); }
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+
+/* ---- Job Sheet Print Styles ---- */
+@media print {
+  @page {
+    size: A4;
+    margin: 15mm;
+  }
+
+  /* Hide navigation, sidebar, bottom bar */
+  [data-print-hide],
+  nav,
+  aside,
+  .safe-bottom {
+    display: none !important;
+  }
+
+  /* Show print-only elements (e.g., print header) */
+  [data-print-only] {
+    display: block !important;
+  }
+
+  /* Override dark theme to white */
+  body,
+  html {
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Remove sidebar margin on main */
+  main,
+  [data-main-content] {
+    margin-left: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+
+  /* Cards become bordered boxes */
+  .card,
+  [data-js-section] {
+    background: #fff !important;
+    border: 1px solid #ccc !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 8px !important;
+    border-radius: 4px !important;
+  }
+
+  /* Inputs become plain text */
+  input,
+  textarea,
+  select {
+    border: none !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 2px 0 !important;
+    color: #000 !important;
+    font-size: 11px !important;
+  }
+
+  /* Labels */
+  label {
+    color: #333 !important;
+    font-size: 10px !important;
+  }
+
+  /* Text colors override */
+  * {
+    color: #000 !important;
+  }
+
+  /* Keep badge/pill colors visible */
+  [class*="bg-green-"],
+  [class*="bg-blue-"],
+  [class*="bg-amber-"],
+  [class*="bg-red-"],
+  [class*="bg-violet-"],
+  [class*="bg-cyan-"],
+  [class*="bg-emerald-"],
+  [class*="bg-indigo-"] {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Checkboxes remain visible */
+  input[type="checkbox"] {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+    border: 1px solid #999 !important;
+    width: 14px !important;
+    height: 14px !important;
+  }
+
+  /* Signature line */
+  .print-signature {
+    border-bottom: 1px solid #000;
+    min-width: 200px;
+    height: 40px;
+    display: inline-block;
+  }
+
+  /* Section headers */
+  [data-js-section] h3 {
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    border-bottom: 1px solid #ddd !important;
+    padding-bottom: 4px !important;
+    margin-bottom: 8px !important;
+  }
+
+  /* Compact spacing */
+  .pb-20 {
+    padding-bottom: 0 !important;
+  }
+}

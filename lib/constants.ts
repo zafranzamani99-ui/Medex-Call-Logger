@@ -182,3 +182,58 @@ export const CHANNEL_COLORS: Record<Channel, { bg: string; text: string }> = {
   'Email':     { bg: 'bg-purple-500/20', text: 'text-purple-400' },
   'Internal':  { bg: 'bg-gray-500/20', text: 'text-gray-400' },
 }
+
+// ---- Job Sheet constants ----
+
+export const JOB_SHEET_SERVICE_TYPES = [
+  'ISP1', 'ISP2', 'ISP3', 'MTN', 'AD-HOC/KIOSK',
+  'Delivery', 'Hardware', 'Label', 'Others',
+]
+
+export const JOB_SHEET_ISSUE_CATEGORIES = [
+  'Mdx1 Pro/Database/Gprinter/Mycard',
+  'Migrate server',
+  'Network/Internet',
+  'Other chargeable',
+]
+
+export const JOB_SHEET_CHECKLIST_LABELS = [
+  'Total Workstation',
+  'Install/Update Program Version No',
+  'Database Version (after update)',
+  'Apply License Key',
+  'Open port tcp: 3050 and udp: 9050',
+  'Change Referral Letter Header',
+  'Install Ultraviewer/Anydesk',
+  'Download handwriting language',
+  'Share MDO_SERVER and setting directory',
+  'Create System Shortcut and rename "Clinisys"',
+  'Turn on sharing folder',
+  'Setting region – English (Malaysia)',
+  'Install Gprinter (*if any)',
+  'Install Mycard Reader (*if any)',
+  'Full Training',
+]
+
+export const JOB_SHEET_STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+  draft:     { bg: 'bg-amber-500/20', text: 'text-amber-400' },
+  completed: { bg: 'bg-green-500/20', text: 'text-green-400' },
+}
+
+export const DEFAULT_IMPORTANT_DETAILS = {
+  main_pc_name: '',
+  space_c: '',
+  space_d: '',
+  auto_backup_30days: false,
+  ext_hdd_backup: false,
+  service_db_size_before: '',
+  service_db_size_after: '',
+  ultraviewer_id: '',
+  ultraviewer_pw: '',
+  anydesk_id: '',
+  anydesk_pw: '',
+  ram: '',
+  processor: '',
+  need_server: false,
+  brief_doctor: false,
+}

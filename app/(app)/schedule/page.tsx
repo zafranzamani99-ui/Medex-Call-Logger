@@ -228,7 +228,6 @@ export default function SchedulePage() {
   // Open detail modal — if in_progress, also fetch clinic details for Work Panel
   const handleChipClick = async (schedule: Schedule) => {
     setSelectedSchedule(schedule)
-    setDayDetailDate(null) // close day detail if open
     setShowDetailModal(true)
     setShowWorkPanel(schedule.status === 'in_progress')
     if (schedule.status === 'in_progress') {
@@ -830,16 +829,14 @@ export default function SchedulePage() {
                                 {s.pic}{(s.pic && (clinicPhones[s.clinic_code] || s.clinic_wa)) ? ' · ' : ''}{clinicPhones[s.clinic_code] || ''}{clinicPhones[s.clinic_code] && s.clinic_wa ? ' · ' : ''}{s.clinic_wa ? `WhatsApp: ${s.clinic_wa}` : ''}
                               </div>
                             )}
-                            {/* Agent + PIC Support + Mode + Duration */}
+                            {/* PIC Support + Mode + Duration */}
                             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                              <span className="text-xs text-text-secondary">{agentDisplayName(s)}</span>
                               {s.pic_support && (
                                 <>
-                                  <span className="text-zinc-600">·</span>
                                   <span className="text-xs text-blue-400">PIC: {s.pic_support}</span>
+                                  <span className="text-zinc-600">·</span>
                                 </>
                               )}
-                              <span className="text-zinc-600">·</span>
                               <span className={`text-xs ${isRemote ? 'text-purple-400' : 'text-emerald-400'}`}>
                                 {isRemote ? 'Remote' : 'Onsite'}
                               </span>
@@ -1237,6 +1234,26 @@ export default function SchedulePage() {
                         </svg>
                         View Ticket
                       </button>
+                      {/* Job Sheet */}
+                      <button
+                        onClick={() => {
+                          sessionStorage.setItem('js-prefill', JSON.stringify({
+                            schedule_id: selectedSchedule.id,
+                            clinic_code: selectedSchedule.clinic_code,
+                            clinic_name: selectedSchedule.clinic_name,
+                            contact_person: selectedSchedule.pic || '',
+                            contact_tel: selectedSchedule.clinic_wa || '',
+                            service_date: selectedSchedule.schedule_date,
+                          }))
+                          router.push('/job-sheets?create=1')
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20"
+                      >
+                        <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                        Job Sheet
+                      </button>
                       {/* Email */}
                       {(() => {
                         const email = workClinic?.email_main
@@ -1324,10 +1341,6 @@ export default function SchedulePage() {
                         )}
                       </div>
                       <div>
-                        <span className="text-text-tertiary text-xs">Staff</span>
-                        <p className="text-text-primary">{agentDisplayName(selectedSchedule)}</p>
-                      </div>
-                      <div>
                         <span className="text-text-tertiary text-xs">Mode</span>
                         <p className={`font-medium ${selectedSchedule.mode === 'Remote' ? 'text-purple-400' : 'text-emerald-400'}`}>
                           {selectedSchedule.mode || 'Onsite'}
@@ -1362,6 +1375,11 @@ export default function SchedulePage() {
                     )}
                   </>
                 )}
+              </div>
+
+              {/* Audit line */}
+              <div className="px-4 py-1.5 text-[11px] text-text-muted">
+                Logged by {agentDisplayName(selectedSchedule)} · {new Date(selectedSchedule.created_at).toLocaleDateString('en-GB')}
               </div>
 
               {/* Actions */}

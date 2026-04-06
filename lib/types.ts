@@ -243,3 +243,89 @@ export interface Schedule {
   created_at: string
   updated_at: string
 }
+
+// ---- Job Sheet types ----
+
+export type JobSheetStatus = 'draft' | 'completed'
+export type JobOutcome = 'completed' | 'to_be_continued'
+export type PaymentMethod = 'COD' | 'Cheque' | 'Online Transfer' | 'Credit Card'
+export type BackupStatus = 'Yes' | 'No' | 'N/A'
+
+export interface JobSheetChecklistItem {
+  label: string
+  checked: boolean
+  notes: string
+}
+
+export interface JobSheetIssueCategory {
+  label: string
+  checked: boolean
+}
+
+export interface JobSheetImportantDetails {
+  main_pc_name: string
+  space_c: string
+  space_d: string
+  auto_backup_30days: boolean
+  ext_hdd_backup: boolean
+  service_db_size_before: string
+  service_db_size_after: string
+  ultraviewer_id: string
+  ultraviewer_pw: string
+  anydesk_id: string
+  anydesk_pw: string
+  ram: string
+  processor: string
+  need_server: boolean
+  brief_doctor: boolean
+}
+
+export interface JobSheet {
+  id: string
+  js_number: string
+  status: JobSheetStatus
+
+  service_date: string
+  time_start: string | null
+  time_end: string | null
+  service_by: string
+  service_by_id: string | null
+
+  clinic_code: string
+  clinic_name: string
+  contact_person: string | null
+  contact_tel: string | null
+  doctor_name: string | null
+  doctor_phone: string | null
+  clinic_email: string | null
+
+  program_type: string | null
+  version_before: string | null
+  db_version_before: string | null
+
+  service_types: string[]
+  issue_detail: string | null
+  issue_categories: JobSheetIssueCategory[]
+  backup_status: BackupStatus | null
+  service_done: string | null
+
+  suggestion: string | null
+  remark: string | null
+
+  checklist: JobSheetChecklistItem[]
+  important_details: JobSheetImportantDetails
+
+  charge_amount: number | null
+  payment_method: PaymentMethod | null
+  need_receipt: boolean
+  need_invoice: boolean
+
+  job_outcome: JobOutcome
+  customer_rep_name: string | null
+
+  schedule_id: string | null
+  created_by: string | null
+  created_by_name: string
+  created_at: string
+  updated_at: string
+}
