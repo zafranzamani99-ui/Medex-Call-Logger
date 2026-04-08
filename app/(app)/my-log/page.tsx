@@ -48,11 +48,13 @@ export default function MyLogPage() {
       }
     }
     loadUser()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Fetch data when user or date range changes
   useEffect(() => {
     if (userName) fetchData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userName, dateRange])
 
   const getDateFilter = (): string | null => {

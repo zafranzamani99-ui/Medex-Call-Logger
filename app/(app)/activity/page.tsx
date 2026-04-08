@@ -161,6 +161,7 @@ export default function ActivityPage() {
 
   useEffect(() => {
     fetchEntries()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, actionFilter, agentFilter])
 
   const fetchEntries = async () => {

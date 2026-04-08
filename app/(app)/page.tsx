@@ -114,6 +114,7 @@ export default function DashboardPage() {
     fetchData()
     fetchUpcomingSchedules()
     fetchActiveWork()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -126,6 +127,7 @@ export default function DashboardPage() {
   const debouncedFetch = useCallback(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => fetchData(), 500)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   useEffect(() => {
@@ -147,6 +149,7 @@ export default function DashboardPage() {
       supabase.removeChannel(channel)
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const todayStr = format(startOfDay(new Date()), 'yyyy-MM-dd')

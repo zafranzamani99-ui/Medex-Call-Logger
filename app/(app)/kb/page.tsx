@@ -51,6 +51,7 @@ export default function KBPage() {
   useEffect(() => {
     fetchEntries()
     getUser()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // "/" keyboard shortcut — focus search

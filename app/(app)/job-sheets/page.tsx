@@ -86,6 +86,7 @@ export default function JobSheetsPage() {
     }
     init()
     fetchJobSheets()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const fetchJobSheets = async () => {

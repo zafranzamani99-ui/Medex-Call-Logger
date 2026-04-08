@@ -54,9 +54,7 @@ export default function SchedulePage() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [schedules, setSchedules] = useState<Schedule[]>([])
 
-  // Filter — defaults to current user (set in init)
-  const [filterAgent, setFilterAgent] = useState<string>('')
-  const [filterMode, setFilterMode] = useState<'agent' | 'pic'>('agent')
+  // Filter by PIC
   const [filterPic, setFilterPic] = useState<string>('all')
   const [filterReady, setFilterReady] = useState(false)
   const [agents, setAgents] = useState<{ id: string; name: string }[]>([])
@@ -139,11 +137,13 @@ export default function SchedulePage() {
       if (profiles) setAgents(profiles.map((p: { id: string; display_name: string }) => ({ id: p.id, name: p.display_name })))
     }
     init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Fetch schedules for current month (wait until filter is initialized)
   useEffect(() => {
     if (filterReady) fetchSchedules()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentMonth, filterPic, filterReady])
 
   const fetchSchedules = async () => {

@@ -79,6 +79,7 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
       setLoading(false)
     }
     loadClinics()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // WHY: useMemo prevents Fuse from rebuilding its inverted index on every render.
@@ -103,6 +104,7 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
     const fuseResults = fuse.search(query)
     setResults(fuseResults.map((r) => r.item).slice(0, 15)) // Cap at 15 results
     setShowDropdown(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, clinics])
 
   // Close dropdown on outside click

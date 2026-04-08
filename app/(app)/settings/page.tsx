@@ -32,6 +32,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     loadPageData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // WHY: All 4 queries run in PARALLEL instead of sequential.

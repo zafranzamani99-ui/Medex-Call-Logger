@@ -72,6 +72,7 @@ export default function TicketDetailPage() {
       if (profile) setUserName(profile.display_name)
     }
     getUser()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const fetchTicket = async () => {
@@ -105,6 +106,7 @@ export default function TicketDetailPage() {
     setLoading(false)
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchTicket() }, [ticketId])
 
   // KB generation via AI
@@ -482,6 +484,7 @@ export default function TicketDetailPage() {
                   <div className="flex gap-2 mt-2">
                     {ticket.attachment_urls.map((url, idx) => (
                       <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={url} alt={`Attachment ${idx + 1}`} className="size-20 object-cover rounded-lg border border-border hover:border-accent transition-colors" />
                       </a>
                     ))}

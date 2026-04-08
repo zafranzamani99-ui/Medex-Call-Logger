@@ -179,6 +179,7 @@ export default function HistoryPage() {
       setLoading(false)
     }
     fetchTickets()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Apply filters

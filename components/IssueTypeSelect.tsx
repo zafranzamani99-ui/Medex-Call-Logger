@@ -32,6 +32,7 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
       }
     }
     loadCustomTypes()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // All types = defaults + custom (deduplicated)

@@ -93,6 +93,7 @@ export default function JobSheetDetailPage() {
 
   useEffect(() => {
     fetchJobSheet()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
   const fetchJobSheet = async () => {
@@ -216,6 +217,7 @@ export default function JobSheetDetailPage() {
     autoSaveRef.current = setTimeout(() => {
       handleSave(undefined, true)
     }, 3000)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceDate, timeStart, timeEnd, contactPerson, contactTel, doctorName, doctorPhone, clinicEmail, programType, versionBefore, dbVersionBefore, serviceTypes, otherServiceText, issueDetail, issueCategories, otherIssueText, backupStatus, serviceDone, suggestion, remark, checklist, importantDetails, chargeAmount, paymentMethod, needReceipt, needInvoice, jobOutcome, customerRepName])
 
   // Toggle service type

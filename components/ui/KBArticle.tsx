@@ -179,6 +179,7 @@ export default function KBArticle({ fix, imageUrls }: { fix: string; imageUrls?:
           <div className="flex gap-2 flex-wrap">
             {imageUrls.map((url, idx) => (
               <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={url}
                   alt={`Screenshot ${idx + 1}`}

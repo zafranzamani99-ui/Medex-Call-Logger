@@ -52,6 +52,7 @@ export default function TimelineBuilder({
         formattedString,
       })
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entryDate, channel, notes, formattedString])
 
   const channelOptions = CHANNELS.map((c) => ({

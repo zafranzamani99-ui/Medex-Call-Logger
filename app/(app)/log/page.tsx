@@ -186,6 +186,7 @@ export default function LogCallPage() {
         }
       }
     } catch { /* ignore corrupt autosave */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleAutoRestore = (restore: boolean) => {
@@ -488,6 +489,7 @@ export default function LogCallPage() {
     submittedRef.current = true
     localStorage.removeItem(AUTOSAVE_KEY)
     router.push(`/tickets/${ticket.id}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, callerTel, callDuration,
       myResponse, nextStep, timelineFromCustomer, internalTimeline, needTeamCheck,
       timelineData, userId, userName, router, supabase, activeDraftId, drafts,
@@ -988,6 +990,7 @@ export default function LogCallPage() {
                 <div className="flex gap-2 mt-2">
                   {attachments.map((url, idx) => (
                     <div key={idx} className="relative group">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={url}
                         alt={`Attachment ${idx + 1}`}
@@ -1441,6 +1444,7 @@ export default function LogCallPage() {
           className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setLightboxUrl(null)}
         >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={lightboxUrl}
             alt="Attachment preview"
