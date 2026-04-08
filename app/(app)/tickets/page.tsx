@@ -737,6 +737,7 @@ export default function HistoryPage() {
                           <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic || ''}</span></p>
                           <p><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
                           <p><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response || ''}</span></p>
+                          {ticket.call_duration && <p><span className="text-violet-400 font-medium">DURATION:</span> <span className="text-text-secondary">{getDurationLabel(ticket.call_duration)}</span></p>}
                           <p><span className="text-orange-400 font-medium">TIMELINE:</span> <span className="text-text-secondary">{ticket.timeline_from_customer || ''}</span></p>
                           <p><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline || ''}</span></p>
                         </div>

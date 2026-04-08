@@ -240,6 +240,7 @@ export interface Schedule {
   completed_at: string | null
   actual_duration_minutes: number | null
   pic_support: string | null
+  reschedule_reason: string | null
   created_at: string
   updated_at: string
 }

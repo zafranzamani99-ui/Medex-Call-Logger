@@ -105,6 +105,11 @@ export default function LogCallPage() {
   const [showWADraft, setShowWADraft] = useState(false)
   const [showLicenseKeyModal, setShowLicenseKeyModal] = useState(false)
   const responseRef = useRef<HTMLTextAreaElement>(null)
+  const clinicRef = useRef<HTMLDivElement>(null)
+  const issueTypeRef = useRef<HTMLDivElement>(null)
+  const issueRef = useRef<HTMLDivElement>(null)
+  const statusRef = useRef<HTMLDivElement>(null)
+  const jiraLinkRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
   const [drafts, setDrafts] = useState<CallLogDraft[]>([])
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
@@ -211,8 +216,10 @@ export default function LogCallPage() {
   // Auto-save
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingRestoreRef = useRef<CallLogDraft | null>(null)
+  const submittedRef = useRef(false)
 
   const getFormSnapshot = useCallback((): CallLogDraft | null => {
+    if (submittedRef.current) return null
     if (!selectedClinic && !pic && !issue && !callerTel) return null
     return {
       id: 'autosave',
@@ -375,6 +382,23 @@ export default function LogCallPage() {
       if (errors.status) missing.push('status')
       if (errors.jiraLink) missing.push('Jira link')
       setError(`Required: ${missing.join(', ')}`)
+
+      // Scroll to first errored field
+      const fieldOrder: { key: string; ref: React.RefObject<HTMLDivElement | null> }[] = [
+        { key: 'clinic', ref: clinicRef },
+        { key: 'issueType', ref: issueTypeRef },
+        { key: 'issue', ref: issueRef },
+        { key: 'status', ref: statusRef },
+        { key: 'jiraLink', ref: jiraLinkRef },
+      ]
+      const firstError = fieldOrder.find(f => errors[f.key])
+      if (firstError?.ref.current) {
+        firstError.ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        setTimeout(() => {
+          const input = firstError.ref.current?.querySelector('input, textarea, select')
+          if (input) (input as HTMLElement).focus()
+        }, 400)
+      }
       return
     }
 
@@ -461,6 +485,7 @@ export default function LogCallPage() {
       setDrafts(updated)
     }
 
+    submittedRef.current = true
     localStorage.removeItem(AUTOSAVE_KEY)
     router.push(`/tickets/${ticket.id}`)
   }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, callerTel, callDuration,
@@ -711,7 +736,7 @@ export default function LogCallPage() {
             </div>
 
             {/* Clinic Search */}
-            <div className={fieldErrors.clinic ? 'ring-1 ring-red-500/50 rounded-lg' : ''}>
+            <div ref={clinicRef} className={fieldErrors.clinic ? 'ring-1 ring-red-500/50 rounded-lg' : ''}>
               <ClinicSearch onSelect={handleClinicSelect} onOpenTickets={handleOpenTickets} value={selectedClinic} />
             </div>
 
@@ -835,7 +860,7 @@ export default function LogCallPage() {
             />
 
             {/* Issue Type */}
-            <div className={fieldErrors.issueType ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
+            <div ref={issueTypeRef} className={fieldErrors.issueType ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
               <IssueTypeSelect
                 value={issueType}
                 onChange={(v) => {
@@ -919,7 +944,7 @@ export default function LogCallPage() {
             )}
 
             {/* Issue — required */}
-            <div>
+            <div ref={issueRef}>
               <Label required>Issue</Label>
               <Textarea
                 value={issue}
@@ -1080,7 +1105,7 @@ export default function LogCallPage() {
             </div>
 
             {/* Status */}
-            <div className={fieldErrors.status ? 'ring-1 ring-red-500/50 rounded-lg p-1 -m-1' : ''}>
+            <div ref={statusRef} className={fieldErrors.status ? 'ring-1 ring-red-500/50 rounded-lg p-1 -m-1' : ''}>
               <PillSelector
                 label="Status"
                 required
@@ -1095,7 +1120,7 @@ export default function LogCallPage() {
 
             {/* Jira Link */}
             {status === 'Escalated' && (
-              <div>
+              <div ref={jiraLinkRef}>
                 <Label required>Jira Link</Label>
                 <Input
                   type="url"

@@ -37,7 +37,7 @@ const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
   in_progress: { bg: 'bg-amber-500/20', text: 'text-amber-400' },
   completed: { bg: 'bg-green-500/20', text: 'text-green-400' },
   cancelled: { bg: 'bg-zinc-500/20', text: 'text-zinc-400' },
-  rescheduled: { bg: 'bg-violet-500/20', text: 'text-violet-400' },
+  rescheduled: { bg: 'bg-red-500/20', text: 'text-red-400' },
   no_answer: { bg: 'bg-orange-500/20', text: 'text-orange-400' },
 }
 
@@ -56,6 +56,8 @@ export default function SchedulePage() {
 
   // Filter — defaults to current user (set in init)
   const [filterAgent, setFilterAgent] = useState<string>('')
+  const [filterMode, setFilterMode] = useState<'agent' | 'pic'>('agent')
+  const [filterPic, setFilterPic] = useState<string>('all')
   const [filterReady, setFilterReady] = useState(false)
   const [agents, setAgents] = useState<{ id: string; name: string }[]>([])
 
@@ -95,6 +97,12 @@ export default function SchedulePage() {
   // Clinic phone lookup (clinic_code → phone)
   const [clinicPhones, setClinicPhones] = useState<Record<string, string>>({})
 
+  // Reschedule reason modal state
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false)
+  const [rescheduleTarget, setRescheduleTarget] = useState<Schedule | null>(null)
+  const [rescheduleReason, setRescheduleReason] = useState('')
+  const [rescheduleCustomReason, setRescheduleCustomReason] = useState('')
+
   // Add form state
   const [formClinic, setFormClinic] = useState<Clinic | null>(null)
   const [formPic, setFormPic] = useState('')
@@ -109,21 +117,18 @@ export default function SchedulePage() {
   const [formPicSupport, setFormPicSupport] = useState('')
   const [formSaving, setFormSaving] = useState(false)
 
-  // Get user on mount — default filter to current user
+  // Get user on mount
   useEffect(() => {
     async function init() {
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
         setUserId(session.user.id)
-        setFilterAgent(session.user.id) // default to "My Schedules"
         const { data: profile } = await supabase
           .from('profiles')
           .select('display_name')
           .eq('id', session.user.id)
           .single()
         if (profile) setUserName(profile.display_name)
-      } else {
-        setFilterAgent('all') // fallback if no session
       }
       setFilterReady(true)
       // Load all agents for filter
@@ -139,7 +144,7 @@ export default function SchedulePage() {
   // Fetch schedules for current month (wait until filter is initialized)
   useEffect(() => {
     if (filterReady) fetchSchedules()
-  }, [currentMonth, filterAgent, filterReady])
+  }, [currentMonth, filterPic, filterReady])
 
   const fetchSchedules = async () => {
     const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd')
@@ -153,8 +158,8 @@ export default function SchedulePage() {
       .order('schedule_date')
       .order('schedule_time')
 
-    if (filterAgent !== 'all') {
-      query = query.eq('agent_id', filterAgent)
+    if (filterPic !== 'all') {
+      query = query.eq('pic_support', filterPic)
     }
 
     const { data } = await query
@@ -224,6 +229,18 @@ export default function SchedulePage() {
   const goToPrev = () => setCurrentMonth(subMonths(currentMonth, 1))
   const goToNext = () => setCurrentMonth(addMonths(currentMonth, 1))
   const goToToday = () => setCurrentMonth(new Date())
+
+  // Click on a date cell — open day detail if has schedules, otherwise open add form pre-filled
+  const handleDateClick = (dateKey: string) => {
+    const daySchedules = schedulesByDate[dateKey] || []
+    if (daySchedules.length > 0) {
+      setDayDetailDate(dateKey)
+    } else {
+      resetForm()
+      setFormDate(dateKey)
+      setShowAddModal(true)
+    }
+  }
 
   // Open detail modal — if in_progress, also fetch clinic details for Work Panel
   const handleChipClick = async (schedule: Schedule) => {
@@ -312,10 +329,18 @@ export default function SchedulePage() {
     toast(`Schedule ${newStatus}`)
   }
 
+  // Open reschedule reason modal
+  const promptReschedule = (s: Schedule) => {
+    setRescheduleTarget(s)
+    setRescheduleReason('')
+    setRescheduleCustomReason('')
+    setShowRescheduleModal(true)
+  }
+
   // Reschedule — mark old as rescheduled, open add form pre-filled
-  const handleReschedule = async (s: Schedule) => {
+  const handleReschedule = async (s: Schedule, reason: string) => {
     const now = new Date().toISOString()
-    const updatePayload: Record<string, unknown> = { status: 'rescheduled', updated_at: now }
+    const updatePayload: Record<string, unknown> = { status: 'rescheduled', updated_at: now, reschedule_reason: reason }
     if (s.started_at) {
       updatePayload.completed_at = now
       updatePayload.actual_duration_minutes = Math.round(
@@ -324,12 +349,12 @@ export default function SchedulePage() {
     }
     const { error: reschErr } = await supabase.from('schedules').update(updatePayload).eq('id', s.id)
     if (reschErr) {
-      await supabase.from('schedules').update({ status: 'rescheduled', updated_at: now }).eq('id', s.id)
+      await supabase.from('schedules').update({ status: 'rescheduled', updated_at: now, reschedule_reason: reason }).eq('id', s.id)
     }
     // Log timeline entry
     const ticketId = await ensureTicket(s)
     if (ticketId) {
-      await addTimelineEntry(ticketId, `Rescheduled: ${s.clinic_name} — was ${s.schedule_date.split('-').reverse().join('-')} at ${s.schedule_time}`)
+      await addTimelineEntry(ticketId, `Rescheduled: ${s.clinic_name} — was ${s.schedule_date.split('-').reverse().join('-')} at ${s.schedule_time}. Reason: ${reason}`)
     }
     // Pre-fill add form with all details from old schedule
     if (s.clinic_code && s.clinic_code !== 'MANUAL') {
@@ -349,8 +374,10 @@ export default function SchedulePage() {
     setFormCustomType(s.custom_type || '')
     setFormMode((s.mode as 'Remote' | 'Onsite') || 'Remote')
     setFormNotes(s.notes || '')
-    setSchedules(prev => prev.map(sch => sch.id === s.id ? { ...sch, status: 'rescheduled' as const, updated_at: now } : sch))
+    setSchedules(prev => prev.map(sch => sch.id === s.id ? { ...sch, status: 'rescheduled' as const, reschedule_reason: reason, updated_at: now } : sch))
     setShowDetailModal(false)
+    setShowRescheduleModal(false)
+    setRescheduleTarget(null)
     setShowAddModal(true)
     fetchSchedules()
     toast('Old schedule marked as rescheduled — pick a new date/time')
@@ -621,15 +648,15 @@ export default function SchedulePage() {
           <p className="text-[13px] text-text-tertiary mt-0.5">Manage appointments and visits</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Agent filter */}
+          {/* PIC filter */}
           <select
-            value={filterAgent}
-            onChange={(e) => setFilterAgent(e.target.value)}
+            value={filterPic}
+            onChange={(e) => setFilterPic(e.target.value)}
             className="px-3 py-1.5 bg-surface border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-blue-500/50"
           >
-            <option value="all">All Staff</option>
+            <option value="all">All PIC</option>
             {agents.map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
+              <option key={a.id} value={a.name}>{a.name}</option>
             ))}
           </select>
           <Button size="sm" onClick={() => { resetForm(); setShowAddModal(true) }}>
@@ -685,11 +712,11 @@ export default function SchedulePage() {
             return (
               <div
                 key={i}
-                onClick={() => inMonth && daySchedules.length > 0 && setDayDetailDate(dateKey)}
-                className={`min-h-[120px] sm:min-h-[160px] border-b border-r border-border p-1.5 ${
+                onClick={() => inMonth && handleDateClick(dateKey)}
+                className={`group min-h-[120px] sm:min-h-[160px] border-b border-r border-border p-1.5 ${
                   !inMonth ? 'bg-zinc-900/30' : 'bg-background'
                 } ${today ? 'ring-1 ring-inset ring-accent/40' : ''} ${
-                  inMonth && daySchedules.length > 0 ? 'cursor-pointer hover:bg-surface-raised/50 transition-colors' : ''
+                  inMonth ? 'cursor-pointer hover:bg-surface-raised/50 transition-colors' : ''
                 }`}
               >
                 {/* Date number */}
@@ -717,19 +744,29 @@ export default function SchedulePage() {
                     return (
                       <div
                         key={s.id}
+                        title={isRescheduled && s.reschedule_reason ? `Rescheduled: ${s.reschedule_reason}` : undefined}
                         className={`w-full text-left px-1.5 py-0.5 rounded text-[10px] sm:text-xs ${
-                          isInProgress ? 'bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40' : `${colors.bg} ${colors.text}`
-                        } ${isStruck ? 'line-through' : ''} ${isCancelled || isRescheduled ? 'opacity-50' : ''} ${isCompleted ? 'opacity-70' : ''}`}
+                          isInProgress ? 'bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40'
+                            : isRescheduled ? 'bg-red-500/20 text-red-400'
+                            : `${colors.bg} ${colors.text}`
+                        } ${isStruck ? 'line-through' : ''} ${isCancelled ? 'opacity-50' : ''} ${isRescheduled ? 'opacity-60' : ''} ${isCompleted ? 'opacity-70' : ''}`}
                       >
                         {isInProgress && <span className="inline-block size-1.5 rounded-full bg-amber-400 animate-pulse mr-0.5 align-middle" />}
                         {isPastTime && <span className="text-amber-400 mr-0.5">!</span>}
                         {isNoAnswer && <span className="text-orange-400 mr-0.5">!</span>}
+                        {isRescheduled && <span className="text-red-400 mr-0.5 no-underline" style={{ textDecoration: 'none' }}>↻</span>}
                         <span className="hidden sm:inline">{s.schedule_time} </span>
                         {s.clinic_name}
                       </div>
                     )
                   })}
                 </div>
+                {/* "+" hint on hover for empty dates */}
+                {inMonth && daySchedules.length === 0 && (
+                  <div className="flex-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-text-muted text-lg">+</span>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -800,8 +837,8 @@ export default function SchedulePage() {
                         key={s.id}
                         onClick={() => handleChipClick(s)}
                         className={`w-full text-left px-5 py-3 hover:bg-surface-raised/60 transition-colors ${
-                          isCancelled || isRescheduled ? 'opacity-40' : ''
-                        } ${isCompleted ? 'opacity-60' : ''} ${isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''}`}
+                          isCancelled ? 'opacity-40' : ''
+                        } ${isCompleted ? 'opacity-60' : ''} ${isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${isRescheduled ? 'bg-red-500/5 border-l-2 border-l-red-400' : ''}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
@@ -822,6 +859,7 @@ export default function SchedulePage() {
                               )}
                               <span className="font-mono text-xs flex-shrink-0 text-accent">{s.schedule_time}</span>
                               <span className={`text-sm text-text-primary font-medium ${isStruck ? 'line-through' : ''}`}>{s.clinic_name}</span>
+                              {s.pic_support && <span className="text-xs text-blue-400">· {s.pic_support}</span>}
                             </div>
                             {/* PIC + Phone + WA */}
                             {(s.pic || clinicPhones[s.clinic_code] || s.clinic_wa) && (
@@ -829,14 +867,12 @@ export default function SchedulePage() {
                                 {s.pic}{(s.pic && (clinicPhones[s.clinic_code] || s.clinic_wa)) ? ' · ' : ''}{clinicPhones[s.clinic_code] || ''}{clinicPhones[s.clinic_code] && s.clinic_wa ? ' · ' : ''}{s.clinic_wa ? `WhatsApp: ${s.clinic_wa}` : ''}
                               </div>
                             )}
-                            {/* PIC Support + Mode + Duration */}
+                            {/* Reschedule reason */}
+                            {isRescheduled && s.reschedule_reason && (
+                              <div className="text-xs text-red-400 mt-0.5 ml-[4.5rem]">Rescheduled: {s.reschedule_reason}</div>
+                            )}
+                            {/* Mode + Duration */}
                             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                              {s.pic_support && (
-                                <>
-                                  <span className="text-xs text-blue-400">PIC: {s.pic_support}</span>
-                                  <span className="text-zinc-600">·</span>
-                                </>
-                              )}
                               <span className={`text-xs ${isRemote ? 'text-purple-400' : 'text-emerald-400'}`}>
                                 {isRemote ? 'Remote' : 'Onsite'}
                               </span>
@@ -862,6 +898,20 @@ export default function SchedulePage() {
                       </button>
                     )
                   })}
+                  {/* Add Schedule button at bottom of day list */}
+                  <div className="px-5 py-3 border-t border-border">
+                    <button
+                      onClick={() => {
+                        setDayDetailDate(null)
+                        resetForm()
+                        setFormDate(dayDetailDate!)
+                        setShowAddModal(true)
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-border text-xs text-text-tertiary hover:text-text-primary hover:border-accent/40 transition-colors"
+                    >
+                      <span className="text-sm">+</span> Add Schedule
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1366,6 +1416,12 @@ export default function SchedulePage() {
                         <p className="text-sm text-text-primary">{selectedSchedule.notes}</p>
                       </div>
                     )}
+                    {selectedSchedule.status === 'rescheduled' && selectedSchedule.reschedule_reason && (
+                      <div>
+                        <span className="text-text-tertiary text-xs">Reschedule Reason</span>
+                        <p className="text-sm text-red-400">{selectedSchedule.reschedule_reason}</p>
+                      </div>
+                    )}
                     {selectedSchedule.source_ticket_id && (
                       <a
                         href={`/tickets/${selectedSchedule.source_ticket_id}`}
@@ -1435,7 +1491,7 @@ export default function SchedulePage() {
                           <Button size="sm" variant="secondary" onClick={() => handleNoAnswer(selectedSchedule)}>
                             No Answer
                           </Button>
-                          <Button size="sm" variant="secondary" onClick={() => handleReschedule(selectedSchedule)}>
+                          <Button size="sm" variant="secondary" onClick={() => promptReschedule(selectedSchedule)}>
                             Reschedule
                           </Button>
                         </>
@@ -1445,7 +1501,7 @@ export default function SchedulePage() {
                           <Button size="sm" variant="secondary" onClick={() => handleNoAnswer(selectedSchedule)}>
                             No Answer
                           </Button>
-                          <Button size="sm" variant="secondary" onClick={() => handleReschedule(selectedSchedule)}>
+                          <Button size="sm" variant="secondary" onClick={() => promptReschedule(selectedSchedule)}>
                             Reschedule
                           </Button>
                         </>
@@ -1455,7 +1511,7 @@ export default function SchedulePage() {
                           <Button size="sm" variant="secondary" onClick={() => handleNoAnswer(selectedSchedule)}>
                             No Answer Again
                           </Button>
-                          <Button size="sm" variant="secondary" onClick={() => handleReschedule(selectedSchedule)}>
+                          <Button size="sm" variant="secondary" onClick={() => promptReschedule(selectedSchedule)}>
                             Reschedule
                           </Button>
                           <Button size="sm" variant="secondary" onClick={() => handleStatusChange(selectedSchedule.id, 'scheduled')}>
@@ -1486,6 +1542,64 @@ export default function SchedulePage() {
           </div>
         </>
       )}
+
+      {/* ===== Reschedule Reason Modal ===== */}
+      {showRescheduleModal && rescheduleTarget && (() => {
+        const REASON_PRESETS = ['No Answer', 'Clinic Busy', 'Agent Unavailable', 'Clinic Requested', 'Others']
+        const currentReason = rescheduleReason === 'Others' ? rescheduleCustomReason.trim() : rescheduleReason
+        return (
+          <>
+            <div className="fixed inset-0 bg-black/60 z-[70]" onClick={() => { setShowRescheduleModal(false); setRescheduleTarget(null) }} />
+            <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
+              <div className="bg-surface border border-border rounded-xl w-full max-w-sm pointer-events-auto shadow-xl">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                  <h3 className="font-semibold text-text-primary text-sm">Why are you rescheduling?</h3>
+                  <button onClick={() => { setShowRescheduleModal(false); setRescheduleTarget(null) }} className="text-text-tertiary hover:text-text-primary p-1 -mr-1">
+                    <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="p-4 space-y-3">
+                  <div className="flex flex-wrap gap-2">
+                    {REASON_PRESETS.map(r => (
+                      <button
+                        key={r}
+                        onClick={() => setRescheduleReason(rescheduleReason === r ? '' : r)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                          rescheduleReason === r
+                            ? 'bg-violet-500/30 text-violet-300 ring-1 ring-violet-500/50'
+                            : 'bg-surface-raised text-text-secondary hover:text-text-primary hover:bg-surface-raised/80'
+                        }`}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                  {rescheduleReason === 'Others' && (
+                    <input
+                      type="text"
+                      value={rescheduleCustomReason}
+                      onChange={e => setRescheduleCustomReason(e.target.value)}
+                      placeholder="Type reason..."
+                      autoFocus
+                      className="w-full px-3 py-2 rounded-lg bg-surface-inset border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  )}
+                  <Button
+                    size="sm"
+                    className="w-full"
+                    disabled={!currentReason}
+                    onClick={() => handleReschedule(rescheduleTarget, currentReason)}
+                  >
+                    Confirm Reschedule
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </>
+        )
+      })()}
 
       {/* ===== Add Schedule Modal ===== */}
       {showAddModal && (

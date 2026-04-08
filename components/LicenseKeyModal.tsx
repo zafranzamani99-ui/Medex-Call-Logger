@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { format } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic } from '@/lib/types'
@@ -12,6 +12,19 @@ interface LicenseKeyModalProps {
   clinic: Clinic
   agentName: string
   onClose: () => void
+}
+
+const ACTION_PRESETS = [
+  'ADD WS', 'ADD SST', 'ADD E-INV', 'NEW WS API + E-INV + SST LIVE',
+  'NEW CLIENT', 'REM MTN', 'REM CHANGE ADDRESS', 'RENEWAL', 'Others',
+]
+
+const MONTHS = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
+  'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER']
+
+function formatSubjectDate(): string {
+  const now = new Date()
+  return `${now.getDate()} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`
 }
 
 function formatDate(dateStr: string | null): string {
@@ -81,6 +94,44 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
   const [emailType, setEmailType] = useState('')
   const [emailAddress, setEmailAddress] = useState('')
   const [emailPassword, setEmailPassword] = useState('')
+
+  // === Subject Line ===
+  const [selectedActions, setSelectedActions] = useState<string[]>([])
+  const [customAction, setCustomAction] = useState('')
+  const [subjectEdited, setSubjectEdited] = useState(false)
+  const [subjectOverride, setSubjectOverride] = useState('')
+  const [subjectCopied, setSubjectCopied] = useState(false)
+
+  const generatedSubject = useMemo(() => {
+    const actions = selectedActions.filter(a => a !== 'Others')
+    if (selectedActions.includes('Others') && customAction.trim()) {
+      actions.push(customAction.trim())
+    }
+    const actionPart = actions.join(' + ')
+    const datePart = formatSubjectDate()
+    const base = `License Key for ${clinic.clinic_name} (${clinic.clinic_code}) by ${agentName.toUpperCase()} on ${datePart}`
+    return actionPart ? `${actionPart} : ${base}` : base
+  }, [selectedActions, customAction, clinic.clinic_name, clinic.clinic_code, agentName])
+
+  const currentSubject = subjectEdited ? subjectOverride : generatedSubject
+
+  const toggleAction = (action: string) => {
+    setSubjectEdited(false)
+    setSelectedActions(prev =>
+      prev.includes(action) ? prev.filter(a => a !== action) : [...prev, action]
+    )
+  }
+
+  const handleSubjectEdit = (val: string) => {
+    setSubjectEdited(true)
+    setSubjectOverride(val)
+  }
+
+  const handleCopySubject = async () => {
+    await navigator.clipboard.writeText(currentSubject)
+    setSubjectCopied(true)
+    setTimeout(() => setSubjectCopied(false), 2000)
+  }
 
   // === Email Header & Footer (both saved to localStorage) ===
   const [emailHeader, setEmailHeader] = useState('Dear [Name],\nKindly create this for the clinic above. Thanks.')
@@ -231,6 +282,7 @@ ${r('28', 'Email Password', emailPassword)}
         clinic_code: clinic.clinic_code,
         clinic_name: clinic.clinic_name,
         created_by: agentName,
+        subject: currentSubject,
       }).then(() => setSaved(true))
     }
   }
@@ -267,6 +319,60 @@ ${r('28', 'Email Password', emailPassword)}
         <div className="flex-1 overflow-y-auto">
           {activeTab === 'form' ? (
             <div className="p-4 space-y-4">
+              {/* Action / Reason + Subject */}
+              <div className="space-y-3 bg-surface-raised border border-border rounded-lg p-3">
+                <div>
+                  <div className={labelClass}>Action / Reason</div>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {ACTION_PRESETS.map(action => (
+                      <button
+                        key={action}
+                        type="button"
+                        onClick={() => toggleAction(action)}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors border ${
+                          selectedActions.includes(action)
+                            ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                            : 'bg-white/[0.03] text-zinc-400 border-border hover:border-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {action}
+                      </button>
+                    ))}
+                  </div>
+                  {selectedActions.includes('Others') && (
+                    <input
+                      value={customAction}
+                      onChange={(e) => { setCustomAction(e.target.value); setSubjectEdited(false) }}
+                      className={inputClass + ' mt-2'}
+                      placeholder="Type custom action..."
+                      autoFocus
+                    />
+                  )}
+                </div>
+                <div>
+                  <div className={labelClass}>Email Subject</div>
+                  <div className="flex gap-1.5 mt-1">
+                    <input
+                      value={currentSubject}
+                      onChange={(e) => handleSubjectEdit(e.target.value)}
+                      className={inputClass + ' flex-1 !text-[11px]'}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCopySubject}
+                      className={`px-3 rounded-md text-xs font-medium transition-colors shrink-0 ${
+                        subjectCopied
+                          ? 'bg-green-600 text-white'
+                          : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-300'
+                      }`}
+                    >
+                      {subjectCopied ? 'Copied!' : 'Copy Subject'}
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-zinc-600 mt-1.5">Step 1: Copy Subject &rarr; Step 2: Copy Body</p>
+                </div>
+              </div>
+
               {/* Email Header */}
               <div>
                 <h4 className={sh}>Email Header</h4>

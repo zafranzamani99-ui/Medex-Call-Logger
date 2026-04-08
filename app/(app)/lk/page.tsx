@@ -16,6 +16,7 @@ interface LKRecord {
   clinic_name: string
   created_by: string
   created_at: string
+  subject?: string
 }
 
 export default function LKPage() {
@@ -167,6 +168,7 @@ export default function LKPage() {
                   <th className="text-left px-3 py-2 font-medium">Date</th>
                   <th className="text-left px-3 py-2 font-medium">Code</th>
                   <th className="text-left px-3 py-2 font-medium">Clinic</th>
+                  <th className="text-left px-3 py-2 font-medium">Subject</th>
                   <th className="text-left px-3 py-2 font-medium">By</th>
                   <th className="w-8"></th>
                 </tr>
@@ -183,6 +185,9 @@ export default function LKPage() {
                     </td>
                     <td className="px-3 py-2 text-text-primary font-mono">{r.clinic_code}</td>
                     <td className="px-3 py-2 text-text-primary">{r.clinic_name}</td>
+                    <td className="px-3 py-2 text-text-secondary max-w-[200px]" title={r.subject || ''}>
+                      <span className="line-clamp-1">{r.subject || '—'}</span>
+                    </td>
                     <td className="px-3 py-2 text-text-secondary">
                       {loadingRow === r.id ? (
                         <span className="text-accent animate-pulse">Loading…</span>
