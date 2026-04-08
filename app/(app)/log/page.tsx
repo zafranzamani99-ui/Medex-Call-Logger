@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic, OpenTicketWarning, IssueType, TicketStatus, Channel, KnowledgeBaseEntry } from '@/lib/types'
-import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor } from '@/lib/constants'
+import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor, ISSUE_TYPES } from '@/lib/constants'
 import ClinicSearch from '@/components/ClinicSearch'
 import OpenTicketBanner from '@/components/OpenTicketBanner'
 import TimelineBuilder from '@/components/TimelineBuilder'
@@ -298,7 +298,9 @@ export default function LogCallPage() {
   const handleKBSelect = (entry: KnowledgeBaseEntry) => {
     setIssue(entry.issue)
     setMyResponse(entry.fix)
-    setIssueType(entry.issue_type)
+    // Validate issue_type against allowed list (DB CHECK constraint)
+    const validType = ISSUE_TYPES.includes(entry.issue_type) ? entry.issue_type : 'Others'
+    setIssueType(validType)
     setShowKB(false)
     setFieldErrors(prev => ({ ...prev, issueType: false, issue: false }))
   }

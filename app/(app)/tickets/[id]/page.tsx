@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import type { Ticket, TimelineEntry, TicketStatus, Channel } from '@/lib/types'
-import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel, ISSUE_CATEGORIES, ISSUE_TYPES, getIssueCategoryColor } from '@/lib/constants'
+import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel, CALL_DURATIONS, ISSUE_CATEGORIES, ISSUE_TYPES, getIssueCategoryColor } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
@@ -56,6 +56,7 @@ export default function TicketDetailPage() {
   const [editInternalTimeline, setEditInternalTimeline] = useState('')
   const [editIssueCategory, setEditIssueCategory] = useState<string | null>(null)
   const [editIssueType, setEditIssueType] = useState('')
+  const [editDuration, setEditDuration] = useState<number | null>(null)
 
   // Timeline entry edit/delete state
   const [editingTimelineId, setEditingTimelineId] = useState<string | null>(null)
@@ -103,6 +104,7 @@ export default function TicketDetailPage() {
       setEditInternalTimeline(t.internal_timeline || '')
       setEditIssueCategory(t.issue_category || null)
       setEditIssueType(t.issue_type || '')
+      setEditDuration(t.call_duration || null)
     }
 
     if (timelineRes.data) setTimeline(timelineRes.data as TimelineEntry[])
@@ -154,6 +156,7 @@ export default function TicketDetailPage() {
     if (editNeedCheck !== ticket.need_team_check) changes.push(editNeedCheck ? 'Flagged for attention' : 'Flag removed')
     if ((editIssueCategory || null) !== (ticket.issue_category || null)) changes.push(`Category: ${ticket.issue_category || 'None'} → ${editIssueCategory || 'None'}`)
     if (editIssueType !== ticket.issue_type) changes.push(`Type: ${ticket.issue_type} → ${editIssueType}`)
+    if ((editDuration || null) !== (ticket.call_duration || null)) changes.push(`Duration: ${getDurationLabel(ticket.call_duration)} → ${getDurationLabel(editDuration)}`)
 
     const { error } = await supabase
       .from('tickets')
@@ -167,7 +170,8 @@ export default function TicketDetailPage() {
         need_team_check: editNeedCheck,
         issue_category: editIssueCategory || null,
         issue_type: editIssueType,
-        jira_link: editStatus === 'Escalated' ? editJiraLink : ticket.jira_link,
+        call_duration: editDuration,
+        jira_link: editJiraLink || null,
         pic: editPic || null,
         caller_tel: editCallerTel || null,
         last_updated_by: userId,
@@ -298,6 +302,8 @@ export default function TicketDetailPage() {
   const handleDelete = async () => {
     if (!ticket) return
     if (!confirm(`Delete ticket ${ticket.ticket_ref}? This cannot be undone.`)) return
+    // Also delete any linked schedule that references this ticket
+    await supabase.from('schedules').delete().eq('source_ticket_id', ticket.id)
     await supabase.from('tickets').delete().eq('id', ticket.id)
     router.push('/tickets')
   }
@@ -479,7 +485,18 @@ export default function TicketDetailPage() {
               </div>
               <div>
                 <span className="text-text-tertiary text-xs">Duration</span>
-                <p className="text-text-primary mt-1">{getDurationLabel(ticket.call_duration)}</p>
+                {editing ? (
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {CALL_DURATIONS.map(d => (
+                      <button key={d.value} type="button" onClick={() => setEditDuration(editDuration === d.value ? null : d.value)}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${editDuration === d.value ? 'bg-violet-500/20 text-violet-300 border-violet-500/50' : 'bg-surface border-border text-text-secondary hover:border-violet-500/30'}`}>
+                        {d.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-text-primary mt-1">{getDurationLabel(ticket.call_duration)}</p>
+                )}
               </div>
               <div className="sm:col-span-2">
                 <span className="text-text-tertiary text-xs">Issue</span>
@@ -535,17 +552,21 @@ export default function TicketDetailPage() {
                   <p className="text-text-primary mt-1">{ticket.internal_timeline || '-'}</p>
                 )}
               </div>
-              {ticket.jira_link && (
-                <div className="sm:col-span-2">
-                  <span className="text-text-tertiary text-xs">Jira Link</span>
+              <div className="sm:col-span-2">
+                <span className="text-text-tertiary text-xs">Jira Link</span>
+                {editing ? (
+                  <Input value={editJiraLink} onChange={(e) => setEditJiraLink(e.target.value)} className="mt-1" placeholder="https://medex.atlassian.net/browse/..." />
+                ) : ticket.jira_link ? (
                   <p className="mt-1">
                     <a href={ticket.jira_link} target="_blank" rel="noopener noreferrer"
                       className="text-accent hover:text-accent-hover text-sm underline break-all">
                       {ticket.jira_link}
                     </a>
                   </p>
-                </div>
-              )}
+                ) : (
+                  <p className="text-text-primary mt-1">-</p>
+                )}
+              </div>
             </div>
 
             {/* Status + flag toggle in edit mode */}
@@ -594,12 +615,8 @@ export default function TicketDetailPage() {
                 </div>
                 <PillSelector label="Status" options={statusOptions} value={editStatus}
                   onChange={(v) => setEditStatus(v as TicketStatus)} />
-                {editStatus === 'Escalated' && (
-                  <div>
-                    <Label>Jira Link</Label>
-                    <Input value={editJiraLink} onChange={(e) => setEditJiraLink(e.target.value)}
-                      placeholder="https://medex.atlassian.net/browse/..." />
-                  </div>
+                {editStatus === 'Escalated' && !editJiraLink.trim() && (
+                  <p className="text-xs text-red-400">Jira link is required when escalating</p>
                 )}
                 <div className="flex items-center gap-3">
                   <button type="button" onClick={() => setEditNeedCheck(!editNeedCheck)}

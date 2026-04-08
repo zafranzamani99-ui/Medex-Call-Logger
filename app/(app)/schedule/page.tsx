@@ -412,13 +412,19 @@ export default function SchedulePage() {
     toast('Marked as no answer')
   }
 
-  // Delete schedule
+  // Delete schedule + linked ticket
   const handleDelete = async (id: string) => {
-    if (!confirm('Delete this schedule entry?')) return
+    if (!confirm('Delete this schedule entry? The linked call log will also be deleted.')) return
+    // Find the schedule to get its source_ticket_id
+    const schedule = schedules.find(s => s.id === id)
     await supabase.from('schedules').delete().eq('id', id)
+    // Also delete the linked ticket if it exists
+    if (schedule?.source_ticket_id) {
+      await supabase.from('tickets').delete().eq('id', schedule.source_ticket_id)
+    }
     fetchSchedules()
     setShowDetailModal(false)
-    toast('Schedule deleted')
+    toast('Schedule and linked call log deleted')
   }
 
   // Start working on a schedule — set in_progress + fetch full clinic details
@@ -599,6 +605,7 @@ export default function SchedulePage() {
       caller_tel: null,
       pic: formPic || null,
       issue_type: 'Schedule',
+      issue_category: 'System Implementation',
       issue: `Schedule ${typeLabel}: ${clinicName} on ${formDate.split('-').reverse().join('-')} at ${formTime}`,
       my_response: `${formMode} ${typeLabel} scheduled. ${duration ? 'Duration: ' + duration + '.' : ''}`,
       status: 'Resolved',

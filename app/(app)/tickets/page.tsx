@@ -107,9 +107,9 @@ export default function HistoryPage() {
 
   // ─── Column resize ───
   const STORAGE_KEY = 'history-col-widths'
-  const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'next', 'staff', 'actions'] as const
+  const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'jira', 'next', 'staff', 'actions'] as const
   const DEFAULT_WIDTHS: Record<string, number> = {
-    ref: 155, phone: 120, clinic: 200, issue: 320, type: 105, status: 150, next: 150, staff: 80, actions: 50,
+    ref: 155, phone: 120, clinic: 200, issue: 320, type: 105, status: 150, jira: 90, next: 150, staff: 80, actions: 50,
   }
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return DEFAULT_WIDTHS
@@ -288,7 +288,7 @@ export default function HistoryPage() {
   const handleExport = () => {
     const headers = [
       'Ref', 'Type', 'Date', 'Duration', 'Clinic Code', 'Clinic Name', 'City', 'State', 'Product',
-      'MTN Expiry', 'Renewal', 'Category', 'Issue Type', 'Issue', 'My Response', 'Next Step',
+      'MTN Expiry', 'Renewal', 'Category', 'Issue Type', 'Issue', 'My Response', 'Jira Link', 'Next Step',
       'Status', 'PIC', 'Caller Tel', 'Logged By', 'Need Team Check'
     ]
     const rows = filtered.map((t) => [
@@ -301,7 +301,7 @@ export default function HistoryPage() {
       t.issue_category || '', t.issue_type,
       `"${(t.issue || '').replace(/"/g, '""')}"`,
       `"${(t.my_response || '').replace(/"/g, '""')}"`,
-      t.next_step || '', t.status, t.pic || '', t.caller_tel || '',
+      t.jira_link || '', t.next_step || '', t.status, t.pic || '', t.caller_tel || '',
       t.created_by_name, t.need_team_check ? 'Yes' : 'No',
     ])
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
@@ -686,6 +686,10 @@ export default function HistoryPage() {
                   <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('status', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
                 </th>
                 <th className="text-left px-4 py-3 font-medium relative">
+                  <span>Jira</span>
+                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('jira', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
+                </th>
+                <th className="text-left px-4 py-3 font-medium relative">
                   <span>Next Step</span>
                   <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('next', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
                 </th>
@@ -706,7 +710,7 @@ export default function HistoryPage() {
                   <Fragment key={ticket.id}>
                     {showDateHeader && (
                       <tr>
-                        <td colSpan={9} className="px-4 py-2 bg-surface-raised/50">
+                        <td colSpan={10} className="px-4 py-2 bg-surface-raised/50">
                           <div className="flex items-center gap-3">
                             <span className="text-xs font-semibold text-text-secondary tracking-wide">{getDateLabel(ticket.created_at)}</span>
                             <div className="flex-1 h-px bg-border" />
@@ -774,6 +778,22 @@ export default function HistoryPage() {
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="px-4 py-3 align-top">
+                        {ticket.jira_link ? (
+                          <a
+                            href={ticket.jira_link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-xs text-accent hover:text-accent-hover underline break-all line-clamp-1"
+                            title={ticket.jira_link}
+                          >
+                            {ticket.jira_link.match(/browse\/([A-Z]+-\d+)/)?.[1] || 'Link'}
+                          </a>
+                        ) : (
+                          <span className="text-xs text-text-muted">-</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 align-top">
                         <span className="text-xs text-violet-400">{ticket.next_step || ''}</span>

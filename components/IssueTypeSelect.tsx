@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { ISSUE_TYPES, getIssueTypeColor } from '@/lib/constants'
 import { getIssueHexColor } from '@/lib/theme'
 
@@ -14,47 +13,15 @@ interface Props {
 export default function IssueTypeSelect({ value, onChange, required }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
-  const [customTypes, setCustomTypes] = useState<string[]>([])
-  const [showSavePrompt, setShowSavePrompt] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const supabase = createClient()
-
-  // Load custom issue types from DB
-  useEffect(() => {
-    async function loadCustomTypes() {
-      const { data } = await supabase
-        .from('custom_issue_types')
-        .select('name')
-        .order('name')
-      if (data) {
-        setCustomTypes(data.map((d: { name: string }) => d.name))
-      }
-    }
-    loadCustomTypes()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // All types = defaults + custom (deduplicated)
-  const allTypes = useMemo(() => {
-    const combined = [...ISSUE_TYPES]
-    for (const ct of customTypes) {
-      if (!combined.includes(ct)) combined.push(ct)
-    }
-    return combined
-  }, [customTypes])
 
   // Filtered by search
   const filtered = useMemo(() => {
-    if (!search.trim()) return allTypes
+    if (!search.trim()) return ISSUE_TYPES
     const q = search.toLowerCase()
-    return allTypes.filter((t) => t.toLowerCase().includes(q))
-  }, [allTypes, search])
-
-  // Is the search term a new type not in the list?
-  const isNewType = search.trim() && !allTypes.some(
-    (t) => t.toLowerCase() === search.trim().toLowerCase()
-  )
+    return ISSUE_TYPES.filter((t) => t.toLowerCase().includes(q))
+  }, [search])
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -71,24 +38,6 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
     onChange(type)
     setSearch('')
     setOpen(false)
-  }
-
-  function handleUseNew() {
-    const newType = search.trim()
-    onChange(newType)
-    setShowSavePrompt(newType)
-    setSearch('')
-    setOpen(false)
-  }
-
-  async function handleSaveCustomType(name: string) {
-    const { error } = await supabase
-      .from('custom_issue_types')
-      .insert({ name })
-    if (!error) {
-      setCustomTypes((prev) => [...prev, name].sort())
-    }
-    setShowSavePrompt(null)
   }
 
   const selectedColor = value ? getIssueTypeColor(value) : null
@@ -116,7 +65,7 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
           value={open ? search : ''}
           onChange={(e) => setSearch(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder={value && !open ? '' : 'Search or type new...'}
+          placeholder={value && !open ? '' : 'Search issue type...'}
           className="bg-transparent outline-none flex-1 min-w-0 placeholder:text-zinc-500"
         />
         <svg className={`w-4 h-4 text-zinc-500 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -143,47 +92,9 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
               </button>
           ))}
 
-          {isNewType && (
-            <button
-              type="button"
-              onClick={handleUseNew}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-800 flex items-center gap-2 border-t border-border text-blue-400"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Use &quot;{search.trim()}&quot;
-            </button>
-          )}
-
-          {filtered.length === 0 && !isNewType && (
+          {filtered.length === 0 && (
             <div className="px-3 py-2 text-sm text-zinc-500">No matches</div>
           )}
-        </div>
-      )}
-
-      {/* Save prompt modal */}
-      {showSavePrompt && (
-        <div className="absolute z-50 mt-1 w-full bg-zinc-900 border border-border rounded-lg shadow-xl p-3">
-          <p className="text-sm text-zinc-300 mb-2">
-            Save &quot;{showSavePrompt}&quot; for everyone to use next time?
-          </p>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => handleSaveCustomType(showSavePrompt)}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg"
-            >
-              Yes, save it
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowSavePrompt(null)}
-              className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs rounded-lg"
-            >
-              Just this once
-            </button>
-          </div>
         </div>
       )}
     </div>
