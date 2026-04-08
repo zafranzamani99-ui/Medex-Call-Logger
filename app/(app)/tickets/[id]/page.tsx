@@ -5,7 +5,7 @@ import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import type { Ticket, TimelineEntry, TicketStatus, Channel } from '@/lib/types'
-import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel } from '@/lib/constants'
+import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel, ISSUE_CATEGORIES, ISSUE_TYPES, getIssueCategoryColor } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
@@ -54,6 +54,8 @@ export default function TicketDetailPage() {
   const [editCallerTel, setEditCallerTel] = useState('')
   const [editTimelineFromCustomer, setEditTimelineFromCustomer] = useState('')
   const [editInternalTimeline, setEditInternalTimeline] = useState('')
+  const [editIssueCategory, setEditIssueCategory] = useState<string | null>(null)
+  const [editIssueType, setEditIssueType] = useState('')
 
   // Timeline entry edit/delete state
   const [editingTimelineId, setEditingTimelineId] = useState<string | null>(null)
@@ -99,6 +101,8 @@ export default function TicketDetailPage() {
       setEditCallerTel(t.caller_tel || '')
       setEditTimelineFromCustomer(t.timeline_from_customer || '')
       setEditInternalTimeline(t.internal_timeline || '')
+      setEditIssueCategory(t.issue_category || null)
+      setEditIssueType(t.issue_type || '')
     }
 
     if (timelineRes.data) setTimeline(timelineRes.data as TimelineEntry[])
@@ -148,6 +152,8 @@ export default function TicketDetailPage() {
     if ((editTimelineFromCustomer || null) !== ticket.timeline_from_customer) changes.push('Timeline updated')
     if ((editInternalTimeline || null) !== ticket.internal_timeline) changes.push('Internal timeline updated')
     if (editNeedCheck !== ticket.need_team_check) changes.push(editNeedCheck ? 'Flagged for attention' : 'Flag removed')
+    if ((editIssueCategory || null) !== (ticket.issue_category || null)) changes.push(`Category: ${ticket.issue_category || 'None'} → ${editIssueCategory || 'None'}`)
+    if (editIssueType !== ticket.issue_type) changes.push(`Type: ${ticket.issue_type} → ${editIssueType}`)
 
     const { error } = await supabase
       .from('tickets')
@@ -159,6 +165,8 @@ export default function TicketDetailPage() {
         internal_timeline: editInternalTimeline || null,
         status: editStatus,
         need_team_check: editNeedCheck,
+        issue_category: editIssueCategory || null,
+        issue_type: editIssueType,
         jira_link: editStatus === 'Escalated' ? editJiraLink : ticket.jira_link,
         pic: editPic || null,
         caller_tel: editCallerTel || null,
@@ -543,6 +551,47 @@ export default function TicketDetailPage() {
             {/* Status + flag toggle in edit mode */}
             {editing && (
               <div className="mt-4 space-y-3 pt-4 border-t border-border">
+                {/* Issue Category */}
+                <div>
+                  <Label>Issue Category</Label>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    <button
+                      onClick={() => setEditIssueCategory(null)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                        !editIssueCategory ? 'bg-zinc-500/30 text-zinc-300 ring-1 ring-zinc-500/50' : 'bg-surface-raised text-text-tertiary hover:text-text-primary'
+                      }`}
+                    >
+                      None
+                    </button>
+                    {ISSUE_CATEGORIES.map(cat => {
+                      const colors = getIssueCategoryColor(cat)
+                      return (
+                        <button
+                          key={cat}
+                          onClick={() => setEditIssueCategory(cat)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                            editIssueCategory === cat ? `${colors.bg} ${colors.text} ring-1 ring-current/30` : 'bg-surface-raised text-text-tertiary hover:text-text-primary'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                {/* Issue Type */}
+                <div>
+                  <Label>Issue Type</Label>
+                  <select
+                    value={editIssueType}
+                    onChange={(e) => setEditIssueType(e.target.value)}
+                    className="mt-1 w-full px-3 py-1.5 bg-surface-inset border border-border rounded-lg text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                  >
+                    {ISSUE_TYPES.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
                 <PillSelector label="Status" options={statusOptions} value={editStatus}
                   onChange={(v) => setEditStatus(v as TicketStatus)} />
                 {editStatus === 'Escalated' && (

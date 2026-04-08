@@ -269,6 +269,7 @@ export default function SchedulePage() {
       clinic_name: s.clinic_name,
       pic: s.pic || null,
       issue_type: 'Schedule',
+      issue_category: 'System Implementation',
       issue: `Schedule ${typeLabel}: ${s.clinic_name} on ${s.schedule_date.split('-').reverse().join('-')} at ${s.schedule_time}`,
       my_response: `${s.mode || 'Remote'} ${typeLabel} scheduled.`,
       status: 'Resolved',
