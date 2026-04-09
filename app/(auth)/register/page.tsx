@@ -11,6 +11,7 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
@@ -20,6 +21,25 @@ export default function RegisterPage() {
     e.preventDefault()
     setError('')
     setLoading(true)
+
+    // Validate invite code server-side before creating account
+    try {
+      const inviteRes = await fetch('/api/validate-invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: inviteCode }),
+      })
+      const inviteData = await inviteRes.json()
+      if (!inviteData.valid) {
+        setError(inviteData.error || 'Invalid invite code')
+        setLoading(false)
+        return
+      }
+    } catch {
+      setError('Could not validate invite code. Try again.')
+      setLoading(false)
+      return
+    }
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
@@ -107,6 +127,24 @@ export default function RegisterPage() {
               />
               <p className="text-[11px] text-text-muted mt-1">
                 This name appears on every ticket you log
+              </p>
+            </div>
+
+            <div>
+              <label htmlFor="inviteCode" className="block text-[12px] font-medium text-text-tertiary mb-1.5">
+                Invite Code
+              </label>
+              <input
+                id="inviteCode"
+                type="text"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value)}
+                required
+                className={inputClasses}
+                placeholder="Enter invite code"
+              />
+              <p className="text-[11px] text-text-muted mt-1">
+                Get this from your admin
               </p>
             </div>
 

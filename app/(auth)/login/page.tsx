@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
 
 // WHY: Login page — spec Section 14. Email + password via Supabase Auth.
 // Redirects to dashboard on success. Shows error on failure.
@@ -121,10 +120,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-[13px] text-text-tertiary mt-5">
-          No account?{' '}
-          <Link href="/register" className="text-indigo-400 hover:text-indigo-300 transition-colors font-medium">
-            Register
-          </Link>
+          Need access? Contact your admin
         </p>
       </div>
     </div>

@@ -1,10 +1,13 @@
 // WHY: Central type definitions mirroring the Supabase database schema.
 // All components import from here — single source of truth prevents mismatches.
 
+export type UserRole = 'admin' | 'support'
+
 export interface Profile {
   id: string
   display_name: string
   email: string
+  role: UserRole
   created_at: string
 }
 
