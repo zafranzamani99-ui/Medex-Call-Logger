@@ -183,6 +183,12 @@ export const CHANNEL_COLORS: Record<Channel, { bg: string; text: string }> = {
   'Internal':  { bg: 'bg-gray-500/20', text: 'text-gray-400' },
 }
 
+// Convert ALL CAPS or mixed-case names to Proper Case (e.g. "ZAFRAN ZAMANI" → "Zafran Zamani")
+// CSS text-transform: capitalize won't work for ALL CAPS — must use JS
+export function toProperCase(name: string): string {
+  return name.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+}
+
 // ---- Job Sheet constants ----
 
 export const JOB_SHEET_SERVICE_TYPES = [

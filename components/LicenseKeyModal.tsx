@@ -288,7 +288,7 @@ ${r('28', 'Email Password', emailPassword)}
   }
 
   const inputClass = 'w-full px-2 py-1.5 bg-background border border-border rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/50'
-  const labelClass = 'text-[11px] text-zinc-500 mb-0.5'
+  const labelClass = 'text-[11px] text-text-tertiary mb-0.5'
   const selectClass = 'w-full px-2 py-1.5 bg-background border border-border rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/50'
   const sh = 'text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2'
 
@@ -298,7 +298,7 @@ ${r('28', 'Email Password', emailPassword)}
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
           <h3 className="font-semibold text-white text-sm">Create License Key Request</h3>
-          <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors p-2 -mr-2" aria-label="Close">
+          <button onClick={onClose} className="text-text-secondary hover:text-text-primary transition-colors p-2 -mr-2" aria-label="Close">
             <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -307,10 +307,10 @@ ${r('28', 'Email Password', emailPassword)}
 
         {/* Tabs */}
         <div className="flex border-b border-border shrink-0">
-          <button onClick={() => setActiveTab('form')} className={`flex-1 py-2 text-xs font-medium transition-colors ${activeTab === 'form' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
+          <button onClick={() => setActiveTab('form')} className={`flex-1 py-2 text-xs font-medium transition-colors ${activeTab === 'form' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-text-tertiary hover:text-text-secondary'}`}>
             Edit Form
           </button>
-          <button onClick={() => setActiveTab('preview')} className={`flex-1 py-2 text-xs font-medium transition-colors ${activeTab === 'preview' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
+          <button onClick={() => setActiveTab('preview')} className={`flex-1 py-2 text-xs font-medium transition-colors ${activeTab === 'preview' ? 'text-blue-400 border-b-2 border-blue-400' : 'text-text-tertiary hover:text-text-secondary'}`}>
             Preview
           </button>
         </div>
@@ -369,7 +369,7 @@ ${r('28', 'Email Password', emailPassword)}
                       {subjectCopied ? 'Copied!' : 'Copy Subject'}
                     </button>
                   </div>
-                  <p className="text-[10px] text-zinc-600 mt-1.5">Step 1: Copy Subject &rarr; Step 2: Copy Body</p>
+                  <p className="text-[10px] text-text-muted mt-1.5">Step 1: Copy Subject &rarr; Step 2: Copy Body</p>
                 </div>
               </div>
 

@@ -106,7 +106,7 @@ ${ticket.my_response || '-'}
           <h3 className="font-semibold text-white">WhatsApp Draft</h3>
           <button
             onClick={onClose}
-            className="text-zinc-500 hover:text-white transition-colors p-2 -mr-2"
+            className="text-text-secondary hover:text-text-primary transition-colors p-2 -mr-2"
             aria-label="Close"
           >
             <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

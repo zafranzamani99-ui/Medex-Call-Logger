@@ -200,14 +200,14 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
           placeholder={loading ? 'Loading clinics...' : 'Search clinic name or code...'}
           disabled={loading}
           className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-white
-                     placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50
+                     placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-blue-500/50
                      focus:border-blue-500/50 font-mono text-sm"
         />
         {selectedClinic && (
           <button
             type="button"
             onClick={handleClear}
-            className="absolute right-1 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white p-2"
+            className="absolute right-1 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary p-2"
             aria-label="Clear clinic selection"
           >
             <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -242,14 +242,14 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
                 <span className="font-mono text-xs text-blue-400">[{clinic.clinic_code}]</span>
                 <span className="text-sm text-white font-medium">{clinic.clinic_name}</span>
                 {(clinic.city || clinic.state) && (
-                  <span className="text-xs text-zinc-500">
+                  <span className="text-xs text-text-tertiary">
                     — {[clinic.city, clinic.state].filter(Boolean).join(', ')}
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-2 mt-1">
                 {clinic.product_type && (
-                  <span className="text-xs text-zinc-500">{clinic.product_type}</span>
+                  <span className="text-xs text-text-tertiary">{clinic.product_type}</span>
                 )}
                 <RenewalBadge status={clinic.renewal_status} />
               </div>
@@ -261,7 +261,7 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
       {/* No results */}
       {showDropdown && query.length >= 2 && results.length === 0 && (
         <div className="absolute z-40 w-full mt-1 bg-surface border border-border rounded-lg p-3">
-          <p className="text-sm text-zinc-500">No clinic found. You can fill details manually.</p>
+          <p className="text-sm text-text-tertiary">No clinic found. You can fill details manually.</p>
         </div>
       )}
     </div>

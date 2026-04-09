@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { format, startOfDay, subDays, startOfWeek, startOfMonth } from 'date-fns'
 import { useRouter } from 'next/navigation'
@@ -31,8 +31,32 @@ export default function MyLogPage() {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [lkRequests, setLkRequests] = useState<LKRequest[]>([])
   const [loading, setLoading] = useState(true)
-  const [dateRange, setDateRange] = useState<DateRange>('today')
+  const [dateRange, setDateRange] = useState<DateRange>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('mylog-date-range')
+      if (saved) { sessionStorage.removeItem('mylog-date-range'); return saved as DateRange }
+    }
+    return 'today'
+  })
   const [search, setSearch] = useState('')
+
+  const navigateToTicket = useCallback((ticketId: string) => {
+    sessionStorage.setItem('mylog-date-range', dateRange)
+    sessionStorage.setItem('mylog-scroll-y', String(window.scrollY))
+    router.push(`/tickets/${ticketId}`)
+  }, [router, dateRange])
+
+  useEffect(() => {
+    if (!loading) {
+      const savedY = sessionStorage.getItem('mylog-scroll-y')
+      if (savedY) {
+        requestAnimationFrame(() => {
+          window.scrollTo(0, parseInt(savedY, 10))
+          sessionStorage.removeItem('mylog-scroll-y')
+        })
+      }
+    }
+  }, [loading])
 
   // Load current user
   useEffect(() => {
@@ -214,7 +238,7 @@ export default function MyLogPage() {
         {/* Stats strip */}
         {!loading && tickets.length > 0 && (
           <div className="mt-4 grid grid-cols-3 gap-3">
-            <div className="rounded-xl p-3 border border-border" style={{ background: 'rgba(255,255,255,0.015)' }}>
+            <div className="rounded-xl p-3 border border-border bg-surface-raised">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Total</p>
               <p className="text-xl font-bold text-text-primary tabular-nums mt-0.5">{tickets.length}</p>
               <p className="text-[11px] text-text-tertiary mt-0.5">
@@ -223,14 +247,14 @@ export default function MyLogPage() {
                 {lkRequests.length > 0 && ` · ${lkRequests.length} LK`}
               </p>
             </div>
-            <div className="rounded-xl p-3 border border-border" style={{ background: 'rgba(255,255,255,0.015)' }}>
+            <div className="rounded-xl p-3 border border-border bg-surface-raised">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Resolved</p>
               <div className="flex items-baseline gap-1.5 mt-0.5">
                 <p className="text-xl font-bold text-emerald-400 tabular-nums">{resolutionPct}%</p>
                 <p className="text-[11px] text-text-tertiary">{resolvedCount}/{tickets.length}</p>
               </div>
               {/* Mini progress bar */}
-              <div className="mt-1.5 h-1 rounded-full bg-white/[0.04] overflow-hidden">
+              <div className="mt-1.5 h-1 rounded-full bg-surface-inset overflow-hidden">
                 <div
                   className="h-full rounded-full transition-all duration-500"
                   style={{ width: `${resolutionPct}%`, background: '#34d399' }}
@@ -238,8 +262,8 @@ export default function MyLogPage() {
               </div>
             </div>
             <div className={`rounded-xl p-3 border ${
-              unresolvedTickets.length > 0 ? 'border-amber-500/25' : 'border-border'
-            }`} style={{ background: unresolvedTickets.length > 0 ? 'rgba(245,158,11,0.04)' : 'rgba(255,255,255,0.015)' }}>
+              unresolvedTickets.length > 0 ? 'border-amber-500/25 bg-amber-500/[0.04]' : 'border-border bg-surface-raised'
+            }`}>
               <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Open</p>
               <p className={`text-xl font-bold tabular-nums mt-0.5 ${
                 unresolvedTickets.length > 0 ? 'text-amber-400' : 'text-emerald-400'
@@ -281,7 +305,7 @@ export default function MyLogPage() {
                 {unresolvedTickets.map((ticket) => (
                   <button
                     key={ticket.id}
-                    onClick={() => router.push(`/tickets/${ticket.id}`)}
+                    onClick={() => navigateToTicket(ticket.id)}
                     className="w-full text-left px-4 py-3 hover:bg-amber-500/[0.04] transition-colors group"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -289,7 +313,7 @@ export default function MyLogPage() {
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-medium text-text-primary">{ticket.clinic_name}</span>
                           <StatusBadge status={ticket.status} />
-                          <span className="text-[11px] text-zinc-500 ml-auto shrink-0">
+                          <span className="text-[11px] text-text-tertiary ml-auto shrink-0">
                             {format(new Date(ticket.created_at), 'HH:mm')}
                           </span>
                         </div>
@@ -319,12 +343,12 @@ export default function MyLogPage() {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search clinic, issue, phone..."
               className="w-full pl-9 pr-3 py-2 text-sm bg-surface-inset border border-border rounded-lg text-white
-                         placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/30"
+                         placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/30"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white p-1"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary p-1"
               >
                 <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -353,7 +377,7 @@ export default function MyLogPage() {
                 return (
                   <div
                     key={ticket.id}
-                    onClick={() => router.push(`/tickets/${ticket.id}`)}
+                    onClick={() => navigateToTicket(ticket.id)}
                     className={`px-4 py-2.5 transition-all cursor-pointer group ${
                       ticket.status === 'Resolved'
                         ? 'hover:bg-white/[0.02] opacity-60 hover:opacity-100'
@@ -423,7 +447,7 @@ export default function MyLogPage() {
             <div>
               <div className="flex items-center gap-3 mb-2">
                 <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">License Key Requests</span>
-                <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.04)' }} />
+                <div className="flex-1 h-px bg-border" />
                 <span className="text-[11px] text-text-muted tabular-nums">{lkRequests.length}</span>
               </div>
               <div className="card overflow-hidden divide-y divide-border">

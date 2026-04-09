@@ -8,7 +8,7 @@ import type { Ticket, DashboardStats, Schedule } from '@/lib/types'
 import { isStale } from '@/lib/staleDetection'
 import dynamic from 'next/dynamic'
 import Button from '@/components/ui/Button'
-import { SCHEDULE_TYPE_COLORS, formatWorkDurationLive } from '@/lib/constants'
+import { SCHEDULE_TYPE_COLORS, formatWorkDurationLive, toProperCase } from '@/lib/constants'
 
 const DashboardCharts = dynamic(() => import('@/components/DashboardCharts'), {
   ssr: false,
@@ -246,7 +246,7 @@ export default function DashboardPage() {
                 .map(([name, count], i) => (
                   <span key={name}>
                     {i > 0 && <span className="text-text-muted">, </span>}
-                    <span>{name}</span> <span className="text-text-primary font-bold tabular-nums">{count}</span>
+                    <span>{toProperCase(name)}</span> <span className="text-text-primary font-bold tabular-nums">{count}</span>
                   </span>
                 ))}
             </>
@@ -256,7 +256,7 @@ export default function DashboardPage() {
 
       {/* ═══ WORKING NOW + NEXT UP — schedule awareness strip ═══ */}
       {(activeWork.length > 0 || upcomingSchedules.length > 0) && (
-        <div className="mb-8 rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.04)' }}>
+        <div className="mb-8 rounded-xl overflow-hidden border border-border">
           {/* Working Now */}
           {activeWork.length > 0 && (
             <div className="px-4 py-3" style={{ background: 'rgba(251, 191, 36, 0.04)' }}>
@@ -284,7 +284,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="text-left">
                         <div className="text-[13px] text-text-primary font-medium group-hover:text-amber-300 transition-colors">
-                          {s.agent_name} <span className="text-text-muted font-normal">·</span> <span className="font-normal text-text-secondary">{s.schedule_type}</span> <span className="text-text-muted font-normal">@</span> <span className="font-normal text-text-secondary truncate">{s.clinic_name}</span>
+                          {toProperCase(s.agent_name)} <span className="text-text-muted font-normal">·</span> <span className="font-normal text-text-secondary">{s.schedule_type}</span> <span className="text-text-muted font-normal">@</span> <span className="font-normal text-text-secondary truncate">{s.clinic_name}</span>
                         </div>
                         <div className="text-[11px] font-semibold text-amber-400 tabular-nums">{formatWorkDurationLive(elapsedSec)}</div>
                       </div>
@@ -296,7 +296,7 @@ export default function DashboardPage() {
           )}
           {/* Next Up */}
           {upcomingSchedules.length > 0 && (
-            <div className="px-4 py-3 flex items-center gap-3 flex-wrap" style={{ background: 'rgba(255,255,255,0.015)', borderTop: activeWork.length > 0 ? '1px solid rgba(255,255,255,0.04)' : undefined }}>
+            <div className={`px-4 py-3 flex items-center gap-3 flex-wrap bg-surface-raised ${activeWork.length > 0 ? 'border-t border-border' : ''}`}>
               <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Next up</span>
               {upcomingSchedules.slice(0, 3).map((s) => {
                 const colors = SCHEDULE_TYPE_COLORS[s.schedule_type] || { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
@@ -350,7 +350,7 @@ export default function DashboardPage() {
                       <div className="flex items-center gap-2 mt-2 text-[11px] text-text-tertiary">
                         <span className="font-mono">{ticket.ticket_ref}</span>
                         <span className="text-text-muted">·</span>
-                        <span>{ticket.created_by_name}</span>
+                        <span>{toProperCase(ticket.created_by_name)}</span>
                         <span className="text-text-muted">·</span>
                         <span className="tabular-nums">{format(new Date(ticket.created_at), 'dd/MM HH:mm')}</span>
                         {ticket.issue_category && (
@@ -424,7 +424,7 @@ export default function DashboardPage() {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] text-text-secondary truncate">
-                        <span className="text-text-primary font-medium">{ticket.created_by_name}</span>
+                        <span className="text-text-primary font-medium">{toProperCase(ticket.created_by_name)}</span>
                         {' '}{ticket.record_type === 'call' ? 'logged a call for' : 'opened a ticket for'}{' '}
                         {ticket.caller_tel && <span className="text-emerald-400 font-medium font-mono">{ticket.caller_tel}</span>}
                         {ticket.caller_tel && ' '}
@@ -489,8 +489,7 @@ export default function DashboardPage() {
                   <div
                     key={ticket.id}
                     onClick={() => router.push(`/tickets/${ticket.id}`)}
-                    className="px-3.5 py-2.5 hover:bg-white/[0.02] transition-colors cursor-pointer"
-                    style={{ borderBottom: i < openTickets.length - 1 ? '1px solid rgba(255,255,255,0.03)' : undefined }}
+                    className={`px-3.5 py-2.5 hover:bg-surface-raised transition-colors cursor-pointer ${i < openTickets.length - 1 ? 'border-b border-border' : ''}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[13px] truncate">
@@ -507,7 +506,7 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-text-muted">
                       <span className="font-mono">{ticket.ticket_ref}</span>
                       <span>·</span>
-                      <span>{ticket.created_by_name}</span>
+                      <span>{toProperCase(ticket.created_by_name)}</span>
                       <span>·</span>
                       <span className="tabular-nums">{format(new Date(ticket.created_at), 'dd/MM')}</span>
                     </div>

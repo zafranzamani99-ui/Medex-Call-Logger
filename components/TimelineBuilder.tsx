@@ -67,7 +67,7 @@ export default function TimelineBuilder({
 
       {/* Date */}
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Date</label>
+        <label className="block text-xs text-text-tertiary mb-1">Date</label>
         <input
           type="date"
           value={entryDate}
@@ -88,21 +88,21 @@ export default function TimelineBuilder({
 
       {/* Notes */}
       <div>
-        <label className="block text-xs text-zinc-500 mb-1">Notes</label>
+        <label className="block text-xs text-text-tertiary mb-1">Notes</label>
         <input
           type="text"
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           placeholder="What happened in this interaction..."
           className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-white text-sm
-                     placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                     placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-blue-500/50"
         />
       </div>
 
       {/* Auto-generated formatted string — editable (spec: "textarea is editable") */}
       {formattedString && (
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">
+          <label className="block text-xs text-text-tertiary mb-1">
             Generated Timeline (editable)
           </label>
           <textarea

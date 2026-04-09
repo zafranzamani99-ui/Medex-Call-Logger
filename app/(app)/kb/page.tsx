@@ -345,7 +345,7 @@ export default function KBPage() {
       {/* Search + filter */}
       <div className="flex gap-2 mb-4">
         <div className="relative flex-1">
-          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <Input
@@ -462,7 +462,7 @@ export default function KBPage() {
                       </div>
                       <button
                         onClick={(e) => handleDelete(entry.id, e)}
-                        className="text-zinc-500 hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                        className="text-text-tertiary hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
                         title="Delete"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -472,7 +472,7 @@ export default function KBPage() {
                     </div>
                     <p className="text-sm text-zinc-400 mt-2 line-clamp-2">{extractFix(entry.fix)}</p>
                     {entry.added_by && (
-                      <p className="text-xs text-zinc-500 mt-2">Added by: {entry.added_by}</p>
+                      <p className="text-xs text-text-tertiary mt-2">Added by: {entry.added_by}</p>
                     )}
                   </>
                 )}
@@ -508,7 +508,7 @@ export default function KBPage() {
               </div>
 
               {selectedEntry.added_by && (
-                <p className="text-xs text-zinc-500">Added by: {selectedEntry.added_by}</p>
+                <p className="text-xs text-text-tertiary">Added by: {selectedEntry.added_by}</p>
               )}
 
               <div className="flex gap-2 pt-2 border-t border-border">

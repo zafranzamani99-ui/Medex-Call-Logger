@@ -125,7 +125,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
         className={`relative flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] transition-all duration-150 ${
           active
             ? 'bg-indigo-500/10 text-indigo-400 font-medium'
-            : 'text-text-tertiary hover:text-text-secondary hover:bg-white/[0.03]'
+            : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-raised'
         } ${isCollapsed ? 'justify-center px-0' : ''}`}
       >
         {active && !isCollapsed && (
@@ -141,7 +141,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
           <>
             <span className="flex-1">{item.label}{item.label === 'Job Sheets' && <span className="ml-1.5 text-[9px] font-semibold uppercase tracking-wider text-amber-400/80 bg-amber-400/10 px-1.5 py-0.5 rounded">beta</span>}</span>
             {dotCount > 0 && (
-              <span className="text-[10px] tabular-nums font-medium text-text-muted bg-white/[0.06] px-1.5 py-0.5 rounded-md">
+              <span className="text-[10px] tabular-nums font-medium text-text-muted bg-surface-inset px-1.5 py-0.5 rounded-md">
                 {dotCount}
               </span>
             )}
@@ -395,7 +395,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl text-sm transition-colors ${
                   isActive(item.href)
                     ? 'bg-indigo-500/10 text-indigo-400 font-medium'
-                    : 'text-text-tertiary hover:text-text-primary hover:bg-white/[0.03]'
+                    : 'text-text-tertiary hover:text-text-primary hover:bg-surface-raised'
                 }`}
               >
                 {item.icon}

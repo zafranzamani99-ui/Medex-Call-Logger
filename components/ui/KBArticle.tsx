@@ -35,7 +35,7 @@ function renderFixText(text: string) {
       const indent = line.search(/\S/) >= 4
       elements.push(
         <div key={key++} className={`flex gap-2 ${indent ? 'ml-9' : 'ml-6'} mt-1`}>
-          <span className="text-zinc-500 flex-shrink-0 mt-1.5">
+          <span className="text-text-tertiary flex-shrink-0 mt-1.5">
             <svg className="size-1.5 fill-current" viewBox="0 0 6 6"><circle cx="3" cy="3" r="3" /></svg>
           </span>
           <span className="text-sm text-zinc-300 leading-relaxed">{formatInline(bulletMatch[1])}</span>

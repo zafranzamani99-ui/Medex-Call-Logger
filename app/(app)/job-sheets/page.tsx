@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { JobSheet, Clinic } from '@/lib/types'
-import { JOB_SHEET_STATUS_COLORS, JOB_SHEET_CHECKLIST_LABELS, JOB_SHEET_ISSUE_CATEGORIES, DEFAULT_IMPORTANT_DETAILS } from '@/lib/constants'
+import { JOB_SHEET_STATUS_COLORS, JOB_SHEET_CHECKLIST_LABELS, JOB_SHEET_ISSUE_CATEGORIES, DEFAULT_IMPORTANT_DETAILS, toProperCase } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 import { Input, Label, Select } from '@/components/ui/Input'
 import Badge from '@/components/ui/Badge'
@@ -382,7 +382,7 @@ export default function JobSheetsPage() {
                         {new Date(js.service_date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </td>
                       <td className="px-4 py-3 text-text-primary font-medium">{js.clinic_name}</td>
-                      <td className="px-4 py-3 text-text-secondary">{js.service_by}</td>
+                      <td className="px-4 py-3 text-text-secondary">{toProperCase(js.service_by)}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
                           {(js.service_types || []).map(t => (
@@ -417,8 +417,8 @@ export default function JobSheetsPage() {
                   <p className="text-sm text-text-primary font-medium">{js.clinic_name}</p>
                   <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary">
                     <span>{new Date(js.service_date).toLocaleDateString('en-GB')}</span>
-                    <span className="text-zinc-600">·</span>
-                    <span>{js.service_by}</span>
+                    <span className="text-text-muted">·</span>
+                    <span>{toProperCase(js.service_by)}</span>
                   </div>
                   {(js.service_types || []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">

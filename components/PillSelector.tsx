@@ -34,7 +34,7 @@ export default function PillSelector({
   return (
     <div>
       {label && (
-        <label className="block text-sm text-zinc-400 mb-2">
+        <label className="block text-sm text-text-secondary mb-2">
           {label}
           {required && <span className="text-red-400 ml-1">*</span>}
         </label>

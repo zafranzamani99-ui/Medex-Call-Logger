@@ -6,7 +6,7 @@ import Badge from '@/components/ui/Badge'
 // Color is reserved for Status and Issue Type badges.
 export default function RecordTypeBadge({ recordType }: { recordType: RecordType }) {
   return (
-    <Badge bg="bg-zinc-500/10" text="text-zinc-500">
+    <Badge bg="bg-zinc-500/10" text="text-text-tertiary">
       {RECORD_TYPE_LABELS[recordType]}
     </Badge>
   )

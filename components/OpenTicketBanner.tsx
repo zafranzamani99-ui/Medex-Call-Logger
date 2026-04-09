@@ -2,6 +2,7 @@
 
 import { format } from 'date-fns'
 import type { OpenTicketWarning } from '@/lib/types'
+import { toProperCase } from '@/lib/constants'
 import { IssueTypeBadge } from './FlagBadge'
 import StatusBadge from './StatusBadge'
 
@@ -86,7 +87,7 @@ export default function OpenTicketBanner(props: OpenTicketBannerProps) {
                 <div className="flex items-center gap-2 mb-1">
                   <IssueTypeBadge issueType={t.issue_type} />
                   <StatusBadge status={t.status} />
-                  <span className="text-[11px] text-zinc-500 ml-auto shrink-0">
+                  <span className="text-[11px] text-text-tertiary ml-auto shrink-0">
                     {format(new Date(t.created_at), 'dd/MM HH:mm')}
                   </span>
                 </div>
@@ -95,14 +96,14 @@ export default function OpenTicketBanner(props: OpenTicketBannerProps) {
                   {t.issue}
                 </p>
                 {/* Row 3: Agent */}
-                <p className="text-[11px] text-zinc-500 mt-1">
-                  by {t.created_by_name}
+                <p className="text-[11px] text-text-tertiary mt-1">
+                  by {toProperCase(t.created_by_name)}
                 </p>
               </div>
               {/* Action arrow */}
               <div className={`shrink-0 mt-1 flex items-center gap-1 text-[11px] font-medium transition-colors ${
                 t.status === 'Resolved'
-                  ? 'text-zinc-500 group-hover:text-zinc-300'
+                  ? 'text-text-tertiary group-hover:text-text-secondary'
                   : 'text-blue-400 group-hover:text-blue-300'
               }`}>
                 <span className="hidden sm:inline">

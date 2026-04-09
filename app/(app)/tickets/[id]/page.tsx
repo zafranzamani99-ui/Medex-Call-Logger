@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import type { Ticket, TimelineEntry, TicketStatus, Channel } from '@/lib/types'
-import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel, CALL_DURATIONS, ISSUE_CATEGORIES, ISSUE_TYPES, getIssueCategoryColor } from '@/lib/constants'
+import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel, formatWorkDuration, CALL_DURATIONS, ISSUE_CATEGORIES, ISSUE_TYPES, getIssueCategoryColor, toProperCase } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
@@ -34,6 +34,7 @@ export default function TicketDetailPage() {
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
+  const [linkedSchedule, setLinkedSchedule] = useState<{ actual_duration_minutes: number | null; duration_estimate: string | null } | null>(null)
 
   // UI state
   const { toast } = useToast()
@@ -61,6 +62,13 @@ export default function TicketDetailPage() {
   // Timeline entry edit/delete state
   const [editingTimelineId, setEditingTimelineId] = useState<string | null>(null)
   const [editTimelineNotes, setEditTimelineNotes] = useState('')
+
+  // Follow-up image attachments
+  const MAX_UPDATE_ATTACHMENTS = 5
+  const [updateAttachments, setUpdateAttachments] = useState<string[]>([])
+  const [updateUploading, setUpdateUploading] = useState(false)
+  const updateFileInputRef = useRef<HTMLInputElement>(null)
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
 
   useEffect(() => {
     async function getUser() {
@@ -109,11 +117,21 @@ export default function TicketDetailPage() {
 
     if (timelineRes.data) setTimeline(timelineRes.data as TimelineEntry[])
     if (auditRes.data) setAuditEntries(auditRes.data)
+
+    // Fetch linked schedule (if this ticket was created from a schedule)
+    const { data: schedData } = await supabase
+      .from('schedules')
+      .select('actual_duration_minutes, duration_estimate')
+      .eq('source_ticket_id', ticketId)
+      .limit(1)
+      .maybeSingle()
+    setLinkedSchedule(schedData)
+
     setLoading(false)
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { fetchTicket() }, [ticketId])
+  useEffect(() => { window.scrollTo(0, 0); fetchTicket() }, [ticketId])
 
   // KB generation via AI
   const triggerKBGeneration = async (t: Ticket) => {
@@ -237,6 +255,7 @@ export default function TicketDetailPage() {
       notes: data.formattedString || data.notes,
       added_by: userId,
       added_by_name: userName,
+      attachment_urls: updateAttachments.length > 0 ? updateAttachments : [],
     })
     // Build ticket update — always update activity + audit
     const ticketUpdate: Record<string, unknown> = {
@@ -265,12 +284,18 @@ export default function TicketDetailPage() {
     if (followUpInternal.trim()) {
       ticketUpdate.internal_timeline = followUpInternal.trim()
     }
+    // Append follow-up images to ticket's attachment_urls
+    if (updateAttachments.length > 0) {
+      const existing = ticket.attachment_urls || []
+      ticketUpdate.attachment_urls = [...existing, ...updateAttachments]
+    }
     await supabase.from('tickets').update(ticketUpdate).eq('id', ticket.id)
     setShowAddUpdate(false)
     setFollowUpStatus(null)
     setFollowUpResponse('')
     setFollowUpTimeline('')
     setFollowUpInternal('')
+    setUpdateAttachments([])
     fetchTicket()
     setSaving(false)
     toast('Follow-up added')
@@ -298,6 +323,63 @@ export default function TicketDetailPage() {
       toast('Timeline entry updated')
     }
   }
+
+  // ─── Follow-up image upload ───
+  const uploadUpdateFile = useCallback(async (file: File) => {
+    if (updateAttachments.length >= MAX_UPDATE_ATTACHMENTS) {
+      toast(`Maximum ${MAX_UPDATE_ATTACHMENTS} images allowed`, 'error')
+      return
+    }
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg']
+    if (!allowedTypes.includes(file.type)) {
+      toast('Only PNG and JPG images are allowed', 'error')
+      return
+    }
+    setUpdateUploading(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch('/api/upload', { method: 'POST', body: form })
+      const data = await res.json()
+      if (!res.ok) { toast(data.error || 'Upload failed', 'error'); return }
+      setUpdateAttachments(prev => [...prev, data.url])
+      toast('Image attached', 'success')
+    } catch {
+      toast('Upload failed', 'error')
+    } finally {
+      setUpdateUploading(false)
+    }
+  }, [updateAttachments.length, toast])
+
+  const handleUpdateFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) uploadUpdateFile(file)
+    if (updateFileInputRef.current) updateFileInputRef.current.value = ''
+  }
+
+  const removeUpdateAttachment = (idx: number) => {
+    setUpdateAttachments(prev => prev.filter((_, i) => i !== idx))
+  }
+
+  // Paste handler — only active when Add Update form is open
+  useEffect(() => {
+    if (!showAddUpdate) return
+    const handlePaste = (e: ClipboardEvent) => {
+      if (lightboxUrl) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          e.preventDefault()
+          const file = items[i].getAsFile()
+          if (file) uploadUpdateFile(file)
+          return
+        }
+      }
+    }
+    document.addEventListener('paste', handlePaste)
+    return () => document.removeEventListener('paste', handlePaste)
+  }, [showAddUpdate, lightboxUrl, uploadUpdateFile])
 
   const handleDelete = async () => {
     if (!ticket) return
@@ -350,7 +432,7 @@ export default function TicketDetailPage() {
       case 'In Progress':
         return { background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(99, 102, 241, 0.02) 100%)', border: '1px solid rgba(99, 102, 241, 0.08)' }
       default:
-        return { background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }
+        return { background: 'var(--surface-raised)', border: '1px solid var(--border)' }
     }
   })()
 
@@ -494,6 +576,13 @@ export default function TicketDetailPage() {
                       </button>
                     ))}
                   </div>
+                ) : linkedSchedule?.actual_duration_minutes ? (
+                  <div className="mt-1">
+                    <p className="text-text-primary">{formatWorkDuration(linkedSchedule.actual_duration_minutes)}</p>
+                    {linkedSchedule.duration_estimate && (
+                      <p className="text-xs text-text-muted">Est: {linkedSchedule.duration_estimate}</p>
+                    )}
+                  </div>
                 ) : (
                   <p className="text-text-primary mt-1">{getDurationLabel(ticket.call_duration)}</p>
                 )}
@@ -508,10 +597,8 @@ export default function TicketDetailPage() {
                 {!editing && ticket.attachment_urls?.length > 0 && (
                   <div className="flex gap-2 mt-2">
                     {ticket.attachment_urls.map((url, idx) => (
-                      <a key={idx} href={url} target="_blank" rel="noopener noreferrer">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={url} alt={`Attachment ${idx + 1}`} className="size-20 object-cover rounded-lg border border-border hover:border-accent transition-colors" />
-                      </a>
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img key={idx} src={url} alt={`Attachment ${idx + 1}`} className="size-20 object-cover rounded-lg border border-border hover:border-accent transition-colors cursor-pointer" onClick={() => setLightboxUrl(url)} />
                     ))}
                   </div>
                 )}
@@ -534,7 +621,7 @@ export default function TicketDetailPage() {
               </div>
               <div>
                 <span className="text-text-tertiary text-xs">Logged By</span>
-                <p className="text-text-primary mt-1">{ticket.created_by_name}</p>
+                <p className="text-text-primary mt-1">{toProperCase(ticket.created_by_name)}</p>
               </div>
               <div>
                 <span className="text-text-tertiary text-xs">Timeline from Customer</span>
@@ -685,8 +772,39 @@ export default function TicketDetailPage() {
                     onChange={(e) => setFollowUpResponse(e.target.value)}
                     placeholder="Additional response or notes to append..."
                     rows={2}
-                    className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none"
+                    className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none"
                   />
+                </div>
+                {/* Image attachments */}
+                <div className="mt-3">
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => updateFileInputRef.current?.click()}
+                      disabled={updateAttachments.length >= MAX_UPDATE_ATTACHMENTS || updateUploading}
+                      className="text-xs text-text-secondary hover:text-text-primary flex items-center gap-1 disabled:opacity-40 transition-colors"
+                    >
+                      <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                      Attach Image
+                    </button>
+                    <span className="text-xs text-text-muted">or Ctrl+V to paste</span>
+                    {updateAttachments.length > 0 && (
+                      <span className="text-xs text-text-tertiary">{updateAttachments.length}/{MAX_UPDATE_ATTACHMENTS}</span>
+                    )}
+                    <input ref={updateFileInputRef} type="file" accept="image/*" hidden onChange={handleUpdateFileUpload} />
+                  </div>
+                  {(updateAttachments.length > 0 || updateUploading) && (
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {updateAttachments.map((url, i) => (
+                        <div key={i} className="relative group">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={url} alt={`Attachment ${i + 1}`} className="w-16 h-16 rounded-lg object-cover cursor-pointer border border-border hover:border-accent transition-colors" onClick={() => setLightboxUrl(url)} />
+                          <button onClick={() => removeUpdateAttachment(i)} className="absolute -top-1.5 -right-1.5 size-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                      {updateUploading && <div className="w-16 h-16 rounded-lg skeleton" />}
+                    </div>
+                  )}
                 </div>
                 {/* Optional: Timeline fields */}
                 <div className="mt-3 grid grid-cols-2 gap-3">
@@ -696,7 +814,7 @@ export default function TicketDetailPage() {
                       value={followUpTimeline}
                       onChange={(e) => setFollowUpTimeline(e.target.value)}
                       placeholder="Timeline stated by customer"
-                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
                     />
                   </div>
                   <div>
@@ -705,7 +823,7 @@ export default function TicketDetailPage() {
                       value={followUpInternal}
                       onChange={(e) => setFollowUpInternal(e.target.value)}
                       placeholder='e.g. "By Hazleen: 06/04/2026"'
-                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
                     />
                   </div>
                 </div>
@@ -771,14 +889,13 @@ export default function TicketDetailPage() {
                       )}
 
                       {/* Entry — card with channel-colored left border */}
-                      <div className={`group rounded-lg border-l-[3px] ${borderColor} transition-colors`}
-                        style={{ background: 'rgba(255,255,255,0.015)' }}>
+                      <div className={`group rounded-lg border-l-[3px] ${borderColor} transition-colors bg-surface-raised`}>
                         <div className="px-4 py-3">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className={`text-xs px-2 py-0.5 rounded-full ${channelColor.bg} ${channelColor.text} font-medium`}>
                               {entry.channel}
                             </span>
-                            <span className="text-xs text-text-muted">{entry.added_by_name}</span>
+                            <span className="text-xs text-text-muted">{toProperCase(entry.added_by_name)}</span>
                             <span className="text-xs text-text-muted tabular-nums ml-auto">
                               {format(new Date(entry.created_at), 'HH:mm')}
                             </span>
@@ -786,7 +903,7 @@ export default function TicketDetailPage() {
                             <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                               <button
                                 onClick={() => { setEditingTimelineId(entry.id); setEditTimelineNotes(entry.notes) }}
-                                className="p-1 text-text-muted hover:text-text-primary rounded hover:bg-white/[0.06] transition-colors"
+                                className="p-1 text-text-muted hover:text-text-primary rounded hover:bg-surface-inset transition-colors"
                                 title="Edit"
                               >
                                 <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -821,6 +938,14 @@ export default function TicketDetailPage() {
                             </div>
                           ) : (
                             <p className="text-sm text-text-primary mt-1.5 whitespace-pre-wrap leading-relaxed">{entry.notes}</p>
+                          )}
+                          {entry.attachment_urls && entry.attachment_urls.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2">
+                              {entry.attachment_urls.map((url, imgIdx) => (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img key={imgIdx} src={url} alt={`Attachment ${imgIdx + 1}`} className="w-12 h-12 rounded object-cover cursor-pointer border border-border hover:border-accent transition-colors" onClick={() => setLightboxUrl(url)} />
+                              ))}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -942,7 +1067,7 @@ export default function TicketDetailPage() {
                     <div key={i} className="flex items-start gap-2">
                       <div className={`size-1.5 rounded-full flex-shrink-0 mt-1 ${isInsert ? 'bg-green-400/60' : isDelete ? 'bg-red-400/60' : 'bg-blue-400/60'}`} />
                       <div>
-                        <span>{format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{entry.changed_by}</span></span>
+                        <span>{format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{toProperCase(entry.changed_by)}</span></span>
                         <p className="text-text-muted mt-0.5">{summary}</p>
                       </div>
                     </div>
@@ -952,13 +1077,13 @@ export default function TicketDetailPage() {
                 <>
                   <div className="flex items-center gap-2">
                     <div className="size-1.5 rounded-full bg-green-400/60 flex-shrink-0" />
-                    <span>Created {format(new Date(ticket.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{ticket.created_by_name}</span></span>
+                    <span>Created {format(new Date(ticket.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{toProperCase(ticket.created_by_name)}</span></span>
                   </div>
                   {ticket.last_updated_by_name && (
                     <div className="flex items-start gap-2">
                       <div className="size-1.5 rounded-full bg-blue-400/60 flex-shrink-0 mt-1" />
                       <div>
-                        <span>Updated {format(new Date(ticket.updated_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{ticket.last_updated_by_name}</span></span>
+                        <span>Updated {format(new Date(ticket.updated_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{toProperCase(ticket.last_updated_by_name!)}</span></span>
                         {ticket.last_change_note && (
                           <p className="text-text-muted mt-0.5">{ticket.last_change_note}</p>
                         )}
@@ -1034,6 +1159,15 @@ export default function TicketDetailPage() {
           agentName={userName}
           onClose={() => setShowWADraft(false)}
         />
+      )}
+
+      {/* Image lightbox overlay */}
+      {lightboxUrl && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4" onClick={() => setLightboxUrl(null)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={lightboxUrl} alt="Attachment preview" className="max-w-full max-h-[90vh] object-contain rounded-lg" onClick={(e) => e.stopPropagation()} />
+          <button onClick={() => setLightboxUrl(null)} className="absolute top-4 right-4 text-white/80 hover:text-white text-2xl">&times;</button>
+        </div>
       )}
     </div>
   )

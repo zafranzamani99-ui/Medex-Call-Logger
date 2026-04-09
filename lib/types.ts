@@ -117,6 +117,7 @@ export interface TimelineEntry {
   notes: string
   added_by: string
   added_by_name: string
+  attachment_urls?: string[]
   created_at: string
 }
 

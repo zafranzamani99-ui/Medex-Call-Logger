@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import { useRouter } from 'next/navigation'
 import EmptyState, { EmptyIcons } from '@/components/ui/EmptyState'
+import { toProperCase } from '@/lib/constants'
 
 // WHY: Activity Log page — shows every data change across the system.
 // Reads from audit_log table which is auto-populated by DB triggers.
@@ -280,7 +281,7 @@ export default function ActivityPage() {
               {/* Row 2: Agent + Timestamp */}
               <div className="flex items-center gap-3 mt-1.5 text-xs">
                 <span className="bg-accent-muted text-accent font-medium px-1.5 py-0.5 rounded">
-                  {entry.changed_by}
+                  {toProperCase(entry.changed_by)}
                 </span>
                 <span className="text-text-tertiary tabular-nums">
                   {format(new Date(entry.created_at), 'dd/MM/yyyy HH:mm:ss')}

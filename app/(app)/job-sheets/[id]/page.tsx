@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { JobSheet, JobSheetChecklistItem, JobSheetIssueCategory, JobSheetImportantDetails, BackupStatus, JobOutcome, PaymentMethod } from '@/lib/types'
-import { JOB_SHEET_CHECKLIST_LABELS, JOB_SHEET_ISSUE_CATEGORIES, JOB_SHEET_STATUS_COLORS, DEFAULT_IMPORTANT_DETAILS } from '@/lib/constants'
+import { JOB_SHEET_CHECKLIST_LABELS, JOB_SHEET_ISSUE_CATEGORIES, JOB_SHEET_STATUS_COLORS, DEFAULT_IMPORTANT_DETAILS, toProperCase } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 import { Input, Label, Textarea, Select } from '@/components/ui/Input'
 import Badge from '@/components/ui/Badge'
@@ -113,7 +113,7 @@ export default function JobSheetDetailPage() {
     setServiceDate(js.service_date)
     setTimeStart(js.time_start || '')
     setTimeEnd(js.time_end || '')
-    setServiceBy(js.service_by)
+    setServiceBy(toProperCase(js.service_by))
     setClinicCode(js.clinic_code)
     setClinicName(js.clinic_name)
     setContactPerson(js.contact_person || '')

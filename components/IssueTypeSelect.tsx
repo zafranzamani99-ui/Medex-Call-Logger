@@ -44,7 +44,7 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
 
   return (
     <div ref={containerRef} className="relative">
-      <label className="block text-sm text-zinc-400 mb-1">
+      <label className="block text-sm text-text-secondary mb-1">
         Issue Type {required && <span className="text-red-400">*</span>}
       </label>
 
@@ -66,9 +66,9 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
           onChange={(e) => setSearch(e.target.value)}
           onFocus={() => setOpen(true)}
           placeholder={value && !open ? '' : 'Search issue type...'}
-          className="bg-transparent outline-none flex-1 min-w-0 placeholder:text-zinc-500"
+          className="bg-transparent outline-none flex-1 min-w-0 placeholder:text-text-tertiary"
         />
-        <svg className={`w-4 h-4 text-zinc-500 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg className={`w-4 h-4 text-text-tertiary transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </div>
@@ -93,7 +93,7 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
           ))}
 
           {filtered.length === 0 && (
-            <div className="px-3 py-2 text-sm text-zinc-500">No matches</div>
+            <div className="px-3 py-2 text-sm text-text-tertiary">No matches</div>
           )}
         </div>
       )}

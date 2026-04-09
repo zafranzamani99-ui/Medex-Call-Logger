@@ -9,7 +9,7 @@ import {
   isSameMonth, isToday,
 } from 'date-fns'
 import type { Schedule } from '@/lib/types'
-import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, formatWorkDuration } from '@/lib/constants'
+import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, formatWorkDuration, toProperCase } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 import { Input, Label, Textarea } from '@/components/ui/Input'
 import ClinicSearch from '@/components/ClinicSearch'
@@ -61,7 +61,7 @@ export default function SchedulePage() {
 
   // Resolve agent_id → current display_name (avoids stale casing like "AMALI" vs "Amali")
   const agentDisplayName = (s: { agent_id?: string; agent_name: string }) =>
-    agents.find(a => a.id === s.agent_id)?.name || s.agent_name
+    toProperCase(agents.find(a => a.id === s.agent_id)?.name || s.agent_name)
 
   // Modal state
   const [showAddModal, setShowAddModal] = useState(false)
@@ -159,7 +159,7 @@ export default function SchedulePage() {
       .order('schedule_time')
 
     if (filterPic !== 'all') {
-      query = query.eq('pic_support', filterPic)
+      query = query.ilike('pic_support', filterPic)
     }
 
     const { data } = await query
@@ -755,9 +755,10 @@ export default function SchedulePage() {
                         title={isRescheduled && s.reschedule_reason ? `Rescheduled: ${s.reschedule_reason}` : undefined}
                         className={`w-full text-left px-1.5 py-0.5 rounded text-[10px] sm:text-xs ${
                           isInProgress ? 'bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40'
+                            : isNoAnswer ? 'bg-orange-500/20 text-orange-400'
                             : isRescheduled ? 'bg-red-500/20 text-red-400'
                             : `${colors.bg} ${colors.text}`
-                        } ${isStruck ? 'line-through' : ''} ${isCancelled ? 'opacity-50' : ''} ${isRescheduled ? 'opacity-60' : ''} ${isCompleted ? 'opacity-70' : ''}`}
+                        } ${isStruck ? 'line-through' : ''} ${isCancelled ? 'opacity-50' : ''} ${isRescheduled ? 'opacity-60' : ''} ${isCompleted ? 'opacity-70' : ''} ${isNoAnswer ? 'opacity-70' : ''}`}
                       >
                         {isInProgress && <span className="inline-block size-1.5 rounded-full bg-amber-400 animate-pulse mr-0.5 align-middle" />}
                         {isPastTime && <span className="text-amber-400 mr-0.5">!</span>}
@@ -797,7 +798,7 @@ export default function SchedulePage() {
             </span>
           )
         })()}
-        <span>{schedules.filter(s => s.status === 'no_answer').length} no answer</span>
+        <span className="text-orange-400">{schedules.filter(s => s.status === 'no_answer').length} no answer</span>
         <span>{schedules.filter(s => s.status === 'rescheduled').length} rescheduled</span>
         <span>{schedules.filter(s => s.status === 'cancelled').length} cancelled</span>
         <span className="ml-auto">{schedules.length} total this month</span>
@@ -846,7 +847,7 @@ export default function SchedulePage() {
                         onClick={() => handleChipClick(s)}
                         className={`w-full text-left px-5 py-3 hover:bg-surface-raised/60 transition-colors ${
                           isCancelled ? 'opacity-40' : ''
-                        } ${isCompleted ? 'opacity-60' : ''} ${isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${isRescheduled ? 'bg-red-500/5 border-l-2 border-l-red-400' : ''}`}
+                        } ${isCompleted ? 'opacity-60' : ''} ${isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${isNoAnswer ? 'bg-orange-500/5 border-l-2 border-l-orange-400' : ''} ${isRescheduled ? 'bg-red-500/5 border-l-2 border-l-red-400' : ''}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">
@@ -879,6 +880,11 @@ export default function SchedulePage() {
                             {isRescheduled && s.reschedule_reason && (
                               <div className="text-xs text-red-400 mt-0.5 ml-[4.5rem]">Rescheduled: {s.reschedule_reason}</div>
                             )}
+                            {/* No answer note */}
+                            {isNoAnswer && s.notes && (() => {
+                              const lastNoAnswer = s.notes.split('\n').filter(l => l.startsWith('No answer at')).pop()
+                              return lastNoAnswer ? <div className="text-xs text-orange-400 mt-0.5 ml-[4.5rem]">{lastNoAnswer}</div> : null
+                            })()}
                             {/* Mode + Duration */}
                             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                               <span className={`text-xs ${isRemote ? 'text-purple-400' : 'text-emerald-400'}`}>
@@ -886,13 +892,13 @@ export default function SchedulePage() {
                               </span>
                               {s.duration_estimate && (
                                 <>
-                                  <span className="text-zinc-600">·</span>
+                                  <span className="text-text-muted">·</span>
                                   <span className="text-xs text-text-tertiary">{s.duration_estimate}</span>
                                 </>
                               )}
                               {s.actual_duration_minutes && (
                                 <>
-                                  <span className="text-zinc-600">·</span>
+                                  <span className="text-text-muted">·</span>
                                   <span className="text-xs text-green-400 font-medium">{formatWorkDuration(s.actual_duration_minutes)}</span>
                                 </>
                               )}

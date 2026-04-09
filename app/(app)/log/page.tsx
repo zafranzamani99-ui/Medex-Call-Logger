@@ -4,13 +4,13 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic, OpenTicketWarning, IssueType, TicketStatus, Channel, KnowledgeBaseEntry } from '@/lib/types'
-import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor, ISSUE_TYPES } from '@/lib/constants'
+import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor, ISSUE_TYPES, toProperCase } from '@/lib/constants'
 import ClinicSearch from '@/components/ClinicSearch'
 import OpenTicketBanner from '@/components/OpenTicketBanner'
 import TimelineBuilder from '@/components/TimelineBuilder'
 import PillSelector from '@/components/PillSelector'
 import IssueTypeSelect from '@/components/IssueTypeSelect'
-import WADraftModal from '@/components/WADraftModal'
+
 import LicenseKeyModal from '@/components/LicenseKeyModal'
 import Button from '@/components/ui/Button'
 import { Input, Textarea, Label } from '@/components/ui/Input'
@@ -102,12 +102,15 @@ export default function LogCallPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({})
-  const [showWADraft, setShowWADraft] = useState(false)
+
   const [showLicenseKeyModal, setShowLicenseKeyModal] = useState(false)
   const responseRef = useRef<HTMLTextAreaElement>(null)
   const clinicRef = useRef<HTMLDivElement>(null)
+  const issueCategoryRef = useRef<HTMLDivElement>(null)
   const issueTypeRef = useRef<HTMLDivElement>(null)
   const issueRef = useRef<HTMLDivElement>(null)
+  const myResponseRef = useRef<HTMLDivElement>(null)
+  const durationRef = useRef<HTMLDivElement>(null)
   const statusRef = useRef<HTMLDivElement>(null)
   const jiraLinkRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
@@ -350,7 +353,7 @@ export default function LogCallPage() {
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
-      if (lightboxUrl || showWADraft || showLicenseKeyModal || showKB) return
+      if (lightboxUrl || showLicenseKeyModal || showKB) return
       const items = e.clipboardData?.items
       if (!items) return
       for (let i = 0; i < items.length; i++) {
@@ -364,15 +367,18 @@ export default function LogCallPage() {
     }
     document.addEventListener('paste', handlePaste)
     return () => document.removeEventListener('paste', handlePaste)
-  }, [lightboxUrl, showWADraft, showLicenseKeyModal, showKB, uploadFile])
+  }, [lightboxUrl, showLicenseKeyModal, showKB, uploadFile])
 
   const handleSave = useCallback(async () => {
     setError('')
     const errors: Record<string, boolean> = {}
 
     if (!selectedClinic && !pic) errors.clinic = true
+    if (!issueCategory) errors.issueCategory = true
     if (!issueType) errors.issueType = true
     if (!issue.trim()) errors.issue = true
+    if (!myResponse.trim()) errors.myResponse = true
+    if (!callDuration) errors.duration = true
     if (!status) errors.status = true
     if (status === 'Escalated' && !jiraLink.trim()) errors.jiraLink = true
 
@@ -380,8 +386,11 @@ export default function LogCallPage() {
       setFieldErrors(errors)
       const missing: string[] = []
       if (errors.clinic) missing.push('clinic or clinic PIC')
+      if (errors.issueCategory) missing.push('category')
       if (errors.issueType) missing.push('issue type')
       if (errors.issue) missing.push('issue description')
+      if (errors.myResponse) missing.push('my response')
+      if (errors.duration) missing.push('duration')
       if (errors.status) missing.push('status')
       if (errors.jiraLink) missing.push('Jira link')
       setError(`Required: ${missing.join(', ')}`)
@@ -389,8 +398,11 @@ export default function LogCallPage() {
       // Scroll to first errored field
       const fieldOrder: { key: string; ref: React.RefObject<HTMLDivElement | null> }[] = [
         { key: 'clinic', ref: clinicRef },
+        { key: 'issueCategory', ref: issueCategoryRef },
         { key: 'issueType', ref: issueTypeRef },
         { key: 'issue', ref: issueRef },
+        { key: 'myResponse', ref: myResponseRef },
+        { key: 'duration', ref: durationRef },
         { key: 'status', ref: statusRef },
         { key: 'jiraLink', ref: jiraLinkRef },
       ]
@@ -730,10 +742,10 @@ export default function LogCallPage() {
       <div className="lg:grid lg:grid-cols-5 lg:gap-6">
 
         {/* ═══════ LEFT: Form Column ═══════ */}
-        <div className="lg:col-span-3 space-y-0">
+        <div className="lg:col-span-3">
 
           {/* ─── ZONE 1: Caller Details (inset bg) ─── */}
-          <div className="rounded-xl p-4 space-y-4 mb-4" style={{ background: 'rgba(255,255,255,0.015)', border: '1px solid rgba(255,255,255,0.04)' }}>
+          <div className="rounded-xl p-4 space-y-4 mb-4 bg-surface-raised border border-border">
             <div className="flex items-center justify-between">
               <h2 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Caller Details</h2>
               <span className="text-[10px] text-text-muted">Search or enter manually</span>
@@ -759,7 +771,7 @@ export default function LogCallPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedClinic(null)}
-                  className="absolute -top-2.5 -right-2.5 p-1 text-zinc-400 hover:text-white bg-zinc-800 border border-zinc-600 rounded-full hover:bg-zinc-700 transition-colors"
+                  className="absolute -top-2.5 -right-2.5 p-1 text-text-secondary hover:text-text-primary bg-zinc-800 border border-zinc-600 rounded-full hover:bg-zinc-700 transition-colors"
                   title="Clear clinic"
                 >
                   <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -830,17 +842,33 @@ export default function LogCallPage() {
             {/* Clinic WhatsApp */}
             <div>
               <Label>Clinic WhatsApp</Label>
-              <Input
-                type="tel"
-                value={clinicWa}
-                onChange={(e) => setClinicWa(e.target.value)}
-                placeholder="Clinic WhatsApp number"
-              />
+              <div className="flex gap-2">
+                <Input
+                  type="tel"
+                  value={clinicWa}
+                  onChange={(e) => setClinicWa(e.target.value)}
+                  placeholder="Clinic WhatsApp number"
+                  className="flex-1"
+                />
+                {clinicWa.trim() && (
+                  <a
+                    href={`https://wa.me/${clinicWa.trim().replace(/\D/g, '').replace(/^0/, '60')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center px-3 rounded-lg bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 transition-colors shrink-0"
+                    title="Chat on WhatsApp"
+                  >
+                    <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                    </svg>
+                  </a>
+                )}
+              </div>
             </div>
           </div>
 
           {/* ─── ZONE 2: Issue Details (main surface) ─── */}
-          <div className="rounded-xl p-4 space-y-4 mb-4 card">
+          <div className="rounded-xl p-4 space-y-4 mb-6 card">
             <div className="flex items-center justify-between">
               <h2 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Issue Details</h2>
               <button
@@ -856,12 +884,18 @@ export default function LogCallPage() {
             </div>
 
             {/* Issue Category */}
-            <PillSelector
-              label="Category"
-              options={ISSUE_CATEGORIES.map(c => ({ value: c, label: c, colors: getIssueCategoryColor(c) }))}
-              value={issueCategory}
-              onChange={setIssueCategory}
-            />
+            <div ref={issueCategoryRef} className={fieldErrors.issueCategory ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
+              <PillSelector
+                label="Category"
+                required
+                options={ISSUE_CATEGORIES.map(c => ({ value: c, label: c, colors: getIssueCategoryColor(c) }))}
+                value={issueCategory}
+                onChange={(v) => {
+                  setIssueCategory(v)
+                  setFieldErrors(prev => ({ ...prev, issueCategory: false }))
+                }}
+              />
+            </div>
 
             {/* Issue Type */}
             <div ref={issueTypeRef} className={fieldErrors.issueType ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
@@ -1023,13 +1057,14 @@ export default function LogCallPage() {
             </div>
 
             {/* My Response */}
-            <div>
-              <Label>My Response</Label>
+            <div ref={myResponseRef} className={fieldErrors.myResponse ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
+              <Label required>My Response</Label>
               <Textarea
                 ref={responseRef}
                 value={myResponse}
                 onChange={(e) => {
                   setMyResponse(e.target.value)
+                  setFieldErrors(prev => ({ ...prev, myResponse: false }))
                   const el = e.target
                   requestAnimationFrame(() => {
                     el.style.height = 'auto'
@@ -1039,23 +1074,27 @@ export default function LogCallPage() {
                 rows={3}
                 style={{ minHeight: '4.5rem', maxHeight: '20rem', overflow: 'auto' }}
                 placeholder="What support did or told the clinic..."
+                error={fieldErrors.myResponse}
               />
             </div>
           </div>
 
           {/* ─── ZONE 3: Logistics + Resolution (elevated) ─── */}
-          <div className="rounded-xl p-4 space-y-4 mb-4" style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.05)' }}>
+          <div className="rounded-xl p-4 space-y-5 mb-4 bg-surface-raised border border-border">
             <h2 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Logistics & Resolution</h2>
 
             {/* Call Duration */}
-            <div>
-              <Label>Duration</Label>
+            <div ref={durationRef} className={fieldErrors.duration ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
+              <Label required>Duration</Label>
               <div className="flex flex-wrap gap-1.5">
                 {CALL_DURATIONS.map((d) => (
                   <button
                     key={d.value}
                     type="button"
-                    onClick={() => setCallDuration(callDuration === d.value ? null : d.value)}
+                    onClick={() => {
+                      setCallDuration(callDuration === d.value ? null : d.value)
+                      if (callDuration !== d.value) setFieldErrors(prev => ({ ...prev, duration: false }))
+                    }}
                     className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
                       callDuration === d.value
                         ? 'bg-accent-muted border-accent/50 text-accent'
@@ -1105,7 +1144,7 @@ export default function LogCallPage() {
             </div>
 
             {/* Divider before Resolution */}
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.04)' }} className="pt-4">
+            <div className="pt-4 border-t border-border">
               <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3">Resolution</h3>
             </div>
 
@@ -1156,9 +1195,6 @@ export default function LogCallPage() {
             <Button variant="ghost" size="lg" onClick={handleSaveDraft} className="border border-border">
               Draft
             </Button>
-            <Button variant="success" size="lg" onClick={() => setShowWADraft(true)}>
-              WA
-            </Button>
             <Button variant="secondary" size="lg" onClick={handleClear}>
               Clear
             </Button>
@@ -1171,7 +1207,7 @@ export default function LogCallPage() {
 
             {/* Clinic Context Card */}
             {selectedClinic ? (
-              <div className={`rounded-xl border border-border border-l-4 ${clinicBorderColor} p-4 space-y-3`} style={{ background: 'rgba(255,255,255,0.02)' }}>
+              <div className={`rounded-xl border border-border border-l-4 ${clinicBorderColor} p-4 space-y-3 bg-surface-raised`}>
                 <div className="flex items-center justify-between">
                   <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Clinic Info</h3>
                   <button
@@ -1245,7 +1281,7 @@ export default function LogCallPage() {
                 </Button>
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-border p-6 text-center" style={{ background: 'rgba(255,255,255,0.01)' }}>
+              <div className="rounded-xl border border-dashed border-border p-6 text-center bg-surface-raised">
                 <svg className="size-8 mx-auto text-text-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
                 </svg>
@@ -1280,7 +1316,7 @@ export default function LogCallPage() {
                     >
                       <p className="text-xs font-medium text-text-primary truncate">{t.issue}</p>
                       <p className="text-[10px] text-text-muted mt-0.5">
-                        {t.ticket_ref} · {t.status} · {t.created_by_name}
+                        {t.ticket_ref} · {t.status} · {toProperCase(t.created_by_name)}
                       </p>
                     </button>
                   ))}
@@ -1289,7 +1325,7 @@ export default function LogCallPage() {
             })()}
 
             {/* Quick actions */}
-            <div className="rounded-xl border border-border p-3 space-y-1.5" style={{ background: 'rgba(255,255,255,0.015)' }}>
+            <div className="rounded-xl border border-border p-3 space-y-1.5 bg-surface-raised">
               <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">Quick Actions</h3>
               <button
                 type="button"
@@ -1300,16 +1336,6 @@ export default function LogCallPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                 </svg>
                 Load from Knowledge Base
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowWADraft(true)}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-xs text-text-secondary hover:text-text-primary hover:bg-white/[0.03] transition-colors"
-              >
-                <svg className="size-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
-                </svg>
-                Generate WA Draft
               </button>
               <button
                 type="button"
@@ -1324,7 +1350,7 @@ export default function LogCallPage() {
             </div>
 
             {/* Form progress */}
-            <div className="rounded-xl border border-border p-3" style={{ background: 'rgba(255,255,255,0.01)' }}>
+            <div className="rounded-xl border border-border p-3 bg-surface-raised">
               <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">Progress</h3>
               <div className="space-y-1.5">
                 {[
@@ -1353,9 +1379,6 @@ export default function LogCallPage() {
           </Button>
           <Button variant="ghost" size="lg" onClick={handleSaveDraft} className="border border-border px-3">
             Draft
-          </Button>
-          <Button variant="success" size="lg" onClick={() => setShowWADraft(true)} className="px-4">
-            WA
           </Button>
           <Button variant="secondary" size="lg" onClick={handleClear} className="px-3">
             Clear
@@ -1405,30 +1428,6 @@ export default function LogCallPage() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* WA Draft Modal */}
-      {showWADraft && (
-        <WADraftModal
-          ticket={{
-            clinic_name: selectedClinic?.clinic_name || 'N/A',
-            clinic_code: selectedClinic?.clinic_code || 'N/A',
-            clinic_phone: selectedClinic?.clinic_phone,
-            pic,
-            issue_type: issueType || 'Others',
-            issue: issue || 'N/A',
-            my_response: myResponse,
-            next_step: nextStep,
-            status: status || 'In Progress',
-          }}
-          agentName={userName}
-          onClose={() => setShowWADraft(false)}
-          scheduleData={issueType === 'Schedule' && scheduleDate && scheduleTime ? {
-            schedule_date: scheduleDate,
-            schedule_time: scheduleTime,
-            duration_estimate: SCHEDULE_TYPES.find(t => t.value === scheduleType)?.duration || 'TBD',
-          } : undefined}
-        />
       )}
 
       {/* License Key Request Modal */}

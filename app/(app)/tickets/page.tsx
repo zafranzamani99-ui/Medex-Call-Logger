@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format, isToday, isYesterday } from 'date-fns'
 import type { Ticket, TicketStatus, RecordType } from '@/lib/types'
-import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor } from '@/lib/constants'
+import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor, toProperCase } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
@@ -104,6 +104,24 @@ export default function HistoryPage() {
 
   // Save filters whenever they change
   useEffect(() => { saveFilters() }, [saveFilters])
+
+  // ─── Scroll position restore (save before leaving, restore on back) ───
+  const navigateToTicket = useCallback((ticketId: string) => {
+    sessionStorage.setItem('tickets-scroll-y', String(window.scrollY))
+    router.push(`/tickets/${ticketId}`)
+  }, [router])
+
+  useEffect(() => {
+    if (!loading) {
+      const savedY = sessionStorage.getItem('tickets-scroll-y')
+      if (savedY) {
+        requestAnimationFrame(() => {
+          window.scrollTo(0, parseInt(savedY, 10))
+          sessionStorage.removeItem('tickets-scroll-y')
+        })
+      }
+    }
+  }, [loading])
 
   // ─── Column resize ───
   const STORAGE_KEY = 'history-col-widths'
@@ -409,7 +427,7 @@ export default function HistoryPage() {
       </div>
 
       {/* Command-palette style search */}
-      <div className="mb-4 rounded-xl p-1" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+      <div className="mb-4 rounded-xl p-1 bg-surface-raised border border-border">
         <div className="flex gap-2 items-center">
           <div className="relative flex-1">
             <svg className="absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -424,7 +442,7 @@ export default function HistoryPage() {
               className="pl-10 !bg-transparent !border-0 !shadow-none !ring-0 text-sm"
             />
           </div>
-          <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-text-muted bg-white/[0.04] border border-border rounded">/</kbd>
+          <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-text-muted bg-surface-inset border border-border rounded">/</kbd>
           <Button
             variant={activeFilterCount > 0 ? 'primary' : 'ghost'}
             size="sm"
@@ -720,7 +738,7 @@ export default function HistoryPage() {
                       </tr>
                     )}
                     <tr
-                      onClick={() => router.push(`/tickets/${ticket.id}`)}
+                      onClick={() => navigateToTicket(ticket.id)}
                       className={getRowClasses(ticket)}
                     >
                       <td className="px-4 py-3 align-top">
@@ -755,7 +773,7 @@ export default function HistoryPage() {
                           </div>
                         )}
                         {sortKey === 'updated_at' && ticket.last_change_note && (
-                          <p className="text-xs text-purple-400 mt-0.5 truncate">{ticket.last_change_note}{ticket.last_updated_by_name ? ` — ${ticket.last_updated_by_name}` : ''}</p>
+                          <p className="text-xs text-purple-400 mt-0.5 truncate">{ticket.last_change_note}{ticket.last_updated_by_name ? ` — ${toProperCase(ticket.last_updated_by_name)}` : ''}</p>
                         )}
                       </td>
                       <td className="px-4 py-3 align-top">
@@ -799,7 +817,7 @@ export default function HistoryPage() {
                         <span className="text-xs text-violet-400">{ticket.next_step || ''}</span>
                       </td>
                       <td className="px-4 py-3 align-top">
-                        <span className="text-xs text-accent font-medium">{ticket.created_by_name}</span>
+                        <span className="text-xs text-accent font-medium">{toProperCase(ticket.created_by_name)}</span>
                       </td>
                       <td className="px-4 py-3 text-right align-top">
                         <button
@@ -844,7 +862,7 @@ export default function HistoryPage() {
                 </div>
               )}
               <div
-                onClick={() => router.push(`/tickets/${ticket.id}`)}
+                onClick={() => navigateToTicket(ticket.id)}
                 className={`px-4 py-3 ${getRowClasses(ticket)}`}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -886,7 +904,7 @@ export default function HistoryPage() {
                   <p className="truncate"><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline || ''}</span></p>
                 </div>
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
-                  <span className="bg-accent-muted text-accent font-medium text-xs px-1.5 py-0.5 rounded">{ticket.created_by_name}</span>
+                  <span className="bg-accent-muted text-accent font-medium text-xs px-1.5 py-0.5 rounded">{toProperCase(ticket.created_by_name)}</span>
                   <span className="text-xs text-text-tertiary tabular-nums">{format(new Date(ticket.created_at), 'dd/MM/yyyy HH:mm')}</span>
                   {ticket.call_duration && <span className="text-xs text-text-tertiary">{getDurationLabel(ticket.call_duration)}</span>}
                   <RecordTypeBadge recordType={ticket.record_type} />
@@ -898,7 +916,7 @@ export default function HistoryPage() {
                   <div className="flex items-center gap-1.5 mt-1.5 text-xs text-purple-400">
                     <span className="text-purple-400/60">Last update:</span>
                     <span className="truncate">{ticket.last_change_note}</span>
-                    {ticket.last_updated_by_name && <span className="text-text-tertiary">by {ticket.last_updated_by_name}</span>}
+                    {ticket.last_updated_by_name && <span className="text-text-tertiary">by {toProperCase(ticket.last_updated_by_name)}</span>}
                   </div>
                 )}
               </div>

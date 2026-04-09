@@ -47,7 +47,7 @@ export function SlidePanel({ open, onClose, title, children }: BaseProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
           {title && <h3 className="font-semibold text-white">{title}</h3>}
-          <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors p-1 -mr-1 ml-auto" aria-label="Close">
+          <button onClick={onClose} className="text-text-secondary hover:text-text-primary transition-colors p-1 -mr-1 ml-auto" aria-label="Close">
             <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -77,7 +77,7 @@ export function ModalDialog({ open, onClose, title, children, size = 'md' }: Bas
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
             {title && <h3 className="font-semibold text-white">{title}</h3>}
-            <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors p-1 -mr-1 ml-auto" aria-label="Close">
+            <button onClick={onClose} className="text-text-secondary hover:text-text-primary transition-colors p-1 -mr-1 ml-auto" aria-label="Close">
               <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
