@@ -12,7 +12,7 @@ import RecordTypeBadge from '@/components/RecordTypeBadge'
 import { NeedsAttentionBadge, StaleBadge, IssueTypeBadge, IssueCategoryBadge } from '@/components/FlagBadge'
 import PillSelector from '@/components/PillSelector'
 import TimelineBuilder from '@/components/TimelineBuilder'
-import WADraftModal from '@/components/WADraftModal'
+
 import { DetailSkeleton } from '@/components/Skeleton'
 import Button from '@/components/ui/Button'
 import { Input, Textarea, Label } from '@/components/ui/Input'
@@ -41,7 +41,7 @@ export default function TicketDetailPage() {
   const [editing, setEditing] = useState(false)
   const [showAddUpdate, setShowAddUpdate] = useState(false)
   const timelineDataRef = useRef<{ entryDate: string; channel: Channel; notes: string; formattedString: string } | null>(null)
-  const [showWADraft, setShowWADraft] = useState(false)
+
   const [saving, setSaving] = useState(false)
 
   // Edit fields
@@ -465,7 +465,7 @@ export default function TicketDetailPage() {
               <select
                 value={ticket.status}
                 onChange={(e) => handleStatusChange(e.target.value)}
-                className="text-sm font-medium rounded-lg px-3 py-1.5 bg-white/[0.05] border border-white/[0.08] text-text-primary cursor-pointer"
+                className="text-sm font-medium rounded-lg px-3 py-1.5 bg-surface-inset border border-border text-text-primary cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
               >
                 {STATUSES.map((s) => (
                   <option key={s} value={s}>{s}</option>
@@ -996,12 +996,25 @@ export default function TicketDetailPage() {
                 Escalate to Ticket
               </Button>
             )}
-            <Button variant="success" size="sm" onClick={() => setShowWADraft(true)} className="w-full justify-start">
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            <a
+              href={ticket.caller_tel?.trim()
+                ? `https://wa.me/${ticket.caller_tel.trim().replace(/\D/g, '').replace(/^0/, '60')}`
+                : undefined}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`w-full justify-start inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+                ticket.caller_tel?.trim()
+                  ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer'
+                  : 'bg-surface-inset text-text-muted cursor-not-allowed opacity-50'
+              }`}
+              onClick={(e) => { if (!ticket.caller_tel?.trim()) e.preventDefault() }}
+            >
+              <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                <path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.29-1.243l-.307-.184-2.87.853.853-2.87-.184-.307A8 8 0 1112 20z"/>
               </svg>
-              WA Draft
-            </Button>
+              WhatsApp
+            </a>
             {ticket.issue && (
               <Button variant="secondary" size="sm" onClick={() => triggerKBGeneration(ticket)} className="w-full justify-start">
                 <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1113,12 +1126,28 @@ export default function TicketDetailPage() {
             </svg>
             <span className="text-[10px] font-medium">Update</span>
           </button>
-          <button onClick={() => setShowWADraft(true)} className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-green-400 hover:text-green-300 transition-colors">
-            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            <span className="text-[10px]">WA Draft</span>
-          </button>
+          {ticket.caller_tel?.trim() ? (
+            <a
+              href={`https://wa.me/${ticket.caller_tel.trim().replace(/\D/g, '').replace(/^0/, '60')}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-emerald-400 hover:text-emerald-300 transition-colors"
+            >
+              <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                <path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.29-1.243l-.307-.184-2.87.853.853-2.87-.184-.307A8 8 0 1112 20z"/>
+              </svg>
+              <span className="text-[10px]">WhatsApp</span>
+            </a>
+          ) : (
+            <button disabled className="flex flex-col items-center gap-0.5 px-3 py-1.5 text-text-muted opacity-50 cursor-not-allowed">
+              <svg className="size-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                <path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.29-1.243l-.307-.184-2.87.853.853-2.87-.184-.307A8 8 0 1112 20z"/>
+              </svg>
+              <span className="text-[10px]">WhatsApp</span>
+            </button>
+          )}
           <button onClick={() => {
             sessionStorage.setItem('clinic_prefill', JSON.stringify({
               clinic_code: ticket.clinic_code,
@@ -1141,25 +1170,6 @@ export default function TicketDetailPage() {
         </div>
       </div>
 
-      {/* WA Draft Modal */}
-      {showWADraft && (
-        <WADraftModal
-          ticket={{
-            clinic_name: ticket.clinic_name,
-            clinic_code: ticket.clinic_code,
-            clinic_phone: ticket.clinic_phone,
-            pic: ticket.pic,
-            ticket_ref: ticket.ticket_ref,
-            issue_type: ticket.issue_type,
-            issue: ticket.issue,
-            my_response: ticket.my_response,
-            next_step: ticket.next_step,
-            status: ticket.status,
-          }}
-          agentName={userName}
-          onClose={() => setShowWADraft(false)}
-        />
-      )}
 
       {/* Image lightbox overlay */}
       {lightboxUrl && (

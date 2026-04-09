@@ -85,7 +85,7 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
   // WHY: useMemo prevents Fuse from rebuilding its inverted index on every render.
   // With 3,800+ clinics, this was a CRITICAL performance bug — O(n) index build per keystroke.
   const fuse = useMemo(() => new Fuse(clinics, {
-    keys: ['clinic_name', 'clinic_code'],
+    keys: ['clinic_name', 'clinic_code', 'lkey_line1', 'lkey_line2', 'lkey_line3', 'lkey_line4'],
     // WHY: 0.3 was too strict — multi-word searches like "an nur putrajaya"
     // scored 0.45+ and got filtered out. 0.5 allows fuzzy multi-word matching
     // while still keeping results relevant.
@@ -222,7 +222,7 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
         <div
           ref={dropdownRef}
           className="absolute z-40 w-full mt-1 bg-surface border border-border rounded-lg
-                     shadow-xl max-h-48 sm:max-h-60 overflow-y-auto"
+                     shadow-xl max-h-60 sm:max-h-72 overflow-y-auto"
         >
           {results.map((clinic) => (
             <button
@@ -241,9 +241,13 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-xs text-blue-400">[{clinic.clinic_code}]</span>
                 <span className="text-sm text-white font-medium">{clinic.clinic_name}</span>
-                {(clinic.city || clinic.state) && (
-                  <span className="text-xs text-text-tertiary">
-                    — {[clinic.city, clinic.state].filter(Boolean).join(', ')}
+                {(clinic.lkey_line2 || clinic.lkey_line3 || clinic.lkey_line4) && (
+                  <span className="text-xs text-text-secondary">
+                    — {[clinic.lkey_line2, clinic.lkey_line3, clinic.lkey_line4]
+                      .filter(Boolean)
+                      .map(s => s!.replace(/,+/g, ',').replace(/(^,\s*|,\s*$)/g, '').trim())
+                      .filter(s => s.length > 0)
+                      .join(', ')}
                   </span>
                 )}
               </div>
