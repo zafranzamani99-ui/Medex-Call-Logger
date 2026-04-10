@@ -13,7 +13,7 @@ const variantClasses: Record<string, string> = {
   primary:   'bg-indigo-500 hover:bg-indigo-600 text-white shadow-theme-sm active:translate-y-px active:shadow-none',
   secondary: 'bg-surface border border-border text-text-secondary hover:text-text-primary hover:bg-surface-raised shadow-theme-sm active:translate-y-px',
   success:   'bg-emerald-600 hover:bg-emerald-700 text-white shadow-theme-sm active:translate-y-px active:shadow-none',
-  danger:    'bg-red-500/10 text-red-400 hover:bg-red-500/20 active:translate-y-px',
+  danger:    'bg-surface border border-border text-red-400 hover:bg-red-500/10 shadow-theme-sm active:translate-y-px',
   ghost:     'text-text-tertiary hover:text-text-primary hover:bg-surface-raised active:translate-y-px',
 }
 

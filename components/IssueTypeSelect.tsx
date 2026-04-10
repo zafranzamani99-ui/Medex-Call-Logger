@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { createClient } from '@/lib/supabase/client'
 import { ISSUE_TYPES, getIssueTypeColor } from '@/lib/constants'
 import { getIssueHexColor } from '@/lib/theme'
 
@@ -13,15 +14,40 @@ interface Props {
 export default function IssueTypeSelect({ value, onChange, required }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [customTypes, setCustomTypes] = useState<string[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Load custom issue types from existing tickets (ones not in the default list)
+  useEffect(() => {
+    async function loadCustomTypes() {
+      const supabase = createClient()
+      const { data } = await supabase
+        .from('tickets')
+        .select('issue_type')
+      if (data) {
+        const defaultSet = new Set(ISSUE_TYPES)
+        const custom = Array.from(new Set(
+          data.map((t: { issue_type: string }) => t.issue_type).filter((t: string) => !defaultSet.has(t))
+        )).sort() as string[]
+        setCustomTypes(custom)
+      }
+    }
+    loadCustomTypes()
+  }, [])
+
+  // All available types = defaults + custom from DB
+  const allTypes = useMemo(() => [...ISSUE_TYPES, ...customTypes], [customTypes])
+
   // Filtered by search
   const filtered = useMemo(() => {
-    if (!search.trim()) return ISSUE_TYPES
+    if (!search.trim()) return allTypes
     const q = search.toLowerCase()
-    return ISSUE_TYPES.filter((t) => t.toLowerCase().includes(q))
-  }, [search])
+    return allTypes.filter((t) => t.toLowerCase().includes(q))
+  }, [search, allTypes])
+
+  // Check if search text is a new custom type (not in any list)
+  const isNewCustom = search.trim() && !allTypes.some(t => t.toLowerCase() === search.trim().toLowerCase())
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -65,7 +91,13 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
           value={open ? search : ''}
           onChange={(e) => setSearch(e.target.value)}
           onFocus={() => setOpen(true)}
-          placeholder={value && !open ? '' : 'Search issue type...'}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && isNewCustom) {
+              e.preventDefault()
+              handleSelect(search.trim())
+            }
+          }}
+          placeholder={value && !open ? '' : 'Search or type custom...'}
           className="bg-transparent outline-none flex-1 min-w-0 placeholder:text-text-tertiary"
         />
         <svg className={`w-4 h-4 text-text-tertiary transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -76,7 +108,9 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
       {/* Dropdown */}
       {open && (
         <div className="absolute z-50 mt-1 w-full max-h-60 overflow-y-auto bg-zinc-900 border border-border rounded-lg shadow-xl">
-          {filtered.map((type) => (
+          {filtered.map((type) => {
+            const isCustom = !ISSUE_TYPES.includes(type)
+            return (
               <button
                 key={type}
                 type="button"
@@ -89,10 +123,25 @@ export default function IssueTypeSelect({ value, onChange, required }: Props) {
                   style={{ backgroundColor: getIssueHexColor(type) }}
                 />
                 <span className="text-white">{type}</span>
+                {isCustom && <span className="text-[10px] text-text-muted ml-auto">custom</span>}
               </button>
-          ))}
+            )
+          })}
 
-          {filtered.length === 0 && (
+          {/* Option to use typed text as new custom type */}
+          {isNewCustom && (
+            <button
+              type="button"
+              onClick={() => handleSelect(search.trim())}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-zinc-800 flex items-center gap-2 transition-colors border-t border-border"
+            >
+              <span className="inline-block w-2.5 h-2.5 rounded-full flex-shrink-0 bg-zinc-500" />
+              <span className="text-white">Use &quot;{search.trim()}&quot;</span>
+              <span className="text-[10px] text-text-muted ml-auto">new</span>
+            </button>
+          )}
+
+          {filtered.length === 0 && !isNewCustom && (
             <div className="px-3 py-2 text-sm text-text-tertiary">No matches</div>
           )}
         </div>

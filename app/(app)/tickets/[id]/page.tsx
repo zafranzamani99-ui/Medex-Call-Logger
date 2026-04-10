@@ -1002,10 +1002,10 @@ export default function TicketDetailPage() {
                 : undefined}
               target="_blank"
               rel="noopener noreferrer"
-              className={`w-full justify-start inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg transition-colors ${
+              className={`w-full justify-center inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 border ${
                 ticket.caller_tel?.trim()
-                  ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 cursor-pointer'
-                  : 'bg-surface-inset text-text-muted cursor-not-allowed opacity-50'
+                  ? 'bg-surface border-border text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 shadow-theme-sm active:translate-y-px cursor-pointer'
+                  : 'bg-surface border-border text-text-muted cursor-not-allowed opacity-50'
               }`}
               onClick={(e) => { if (!ticket.caller_tel?.trim()) e.preventDefault() }}
             >
