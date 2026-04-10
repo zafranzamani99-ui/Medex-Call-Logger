@@ -129,10 +129,11 @@ export default function SchedulePage() {
         if (profile) setUserName(profile.display_name)
       }
       setFilterReady(true)
-      // Load all agents for filter
+      // Load support agents for filter (exclude admins)
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, display_name')
+        .eq('role', 'support')
         .order('display_name')
       if (profiles) setAgents(profiles.map((p: { id: string; display_name: string }) => ({ id: p.id, name: p.display_name })))
     }
