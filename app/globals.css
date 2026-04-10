@@ -349,19 +349,57 @@ input[type="date"]:hover, input[type="date"]:focus, input[type="date"]:active {
 .safe-top { padding-top: env(safe-area-inset-top); }
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
 
-/* ---- Job Sheet Print Styles ---- */
+/* ---- Print Styles ---- */
 @media print {
-  @page {
-    size: A4;
-    margin: 12mm;
+  /* Force light color-scheme — dark canvas is the root cause of black backgrounds in PDF.
+     color-scheme: dark tells the browser to paint a dark canvas BELOW all CSS.
+     Making backgrounds transparent just reveals that dark canvas. */
+  :root, [data-theme="dark"] {
+    color-scheme: light !important;
+    --background: #ffffff;
+    --foreground: #18181b;
+    --surface: #ffffff;
+    --border: #e2e5f0;
+    --surface-raised: #f0f1f7;
+    --surface-overlay: #ffffff;
+    --surface-inset: #eef0f7;
+    --text-primary: #0f1020;
+    --text-secondary: #4b4f6b;
+    --text-tertiary: #6e7290;
+    --text-muted: #a0a4be;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-muted: rgba(79, 70, 229, 0.08);
+    --ring: rgba(79, 70, 229, 0.4);
+    --glow-sm: none;
+    --glow-md: none;
+    --shadow-sm: none;
+    --shadow-md: none;
+    --shadow-lg: none;
   }
 
-  /* Hide navigation, sidebar, bottom bar, interactive form */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  html, body {
+    background: #fff !important;
+    color: #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide navigation, sidebar, bottom bar, theme toggle */
   [data-print-hide],
   nav,
   aside,
-  .safe-bottom {
+  .safe-bottom,
+  button[aria-label="Toggle theme"] {
     display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
   }
 
   /* Show print-only elements */
@@ -369,25 +407,22 @@ input[type="date"]:hover, input[type="date"]:focus, input[type="date"]:active {
     display: block !important;
   }
 
-  /* Override dark theme to white */
-  body,
-  html {
-    background: #fff !important;
-    color: #000 !important;
-    -webkit-print-color-adjust: exact;
-    print-color-adjust: exact;
-  }
-
-  /* Remove sidebar margin on main */
-  main,
-  [data-main-content] {
+  /* Remove sidebar padding/margin on main + wrappers */
+  main {
+    padding-left: 0 !important;
     margin-left: 0 !important;
     padding: 0 !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+  main > div {
+    padding: 0 !important;
+    margin: 0 !important;
     max-width: 100% !important;
   }
 
   /* Compact spacing */
-  .pb-20 {
+  .pb-20, .pb-24 {
     padding-bottom: 0 !important;
   }
 }

@@ -39,6 +39,7 @@ export const ISSUE_CATEGORIES: string[] = [
   'Data Issue',
   'System Issue',
   'Change Request',
+  'Hardware',
 ]
 
 export const ISSUE_CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
@@ -47,6 +48,7 @@ export const ISSUE_CATEGORY_COLORS: Record<string, { bg: string; text: string }>
   'Data Issue':            { bg: 'bg-amber-500/20', text: 'text-amber-400' },
   'System Issue':          { bg: 'bg-red-500/20', text: 'text-red-400' },
   'Change Request':        { bg: 'bg-violet-500/20', text: 'text-violet-400' },
+  'Hardware':              { bg: 'bg-zinc-600/20', text: 'text-zinc-300' },
 }
 
 export const DEFAULT_CATEGORY_COLOR = { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
@@ -137,6 +139,24 @@ export function getDurationLabel(minutes: number | null): string {
   return found ? found.label : `${minutes} min`
 }
 
+// Format time for display — handles both "HH:MM" (from time picker) and legacy "10AM"/"2:30PM"
+export function formatTimeDisplay(time: string): string {
+  if (!time) return '-'
+  // Already in 12h format (e.g. "10AM", "2:30PM", "10:00 AM")
+  if (/[APap][Mm]/.test(time)) return time
+  // 24h "HH:MM" from <input type="time">
+  const match = time.match(/^(\d{1,2}):(\d{2})$/)
+  if (match) {
+    let h = parseInt(match[1])
+    const m = match[2]
+    const period = h >= 12 ? 'PM' : 'AM'
+    if (h === 0) h = 12
+    else if (h > 12) h -= 12
+    return m === '00' ? `${h}${period}` : `${h}:${m}${period}`
+  }
+  return time
+}
+
 // Format actual work duration (minutes → "45m", "1h 30m", "2h")
 export function formatWorkDuration(minutes: number | null): string {
   if (!minutes) return '-'
@@ -192,7 +212,7 @@ export function toProperCase(name: string): string {
 // ---- Job Sheet constants ----
 
 export const JOB_SHEET_SERVICE_TYPES = [
-  'ISP1', 'ISP2', 'ISP3', 'MTN', 'AD-HOC/KIOSK',
+  'ISP1', 'ISP2', 'ISP3', 'MTN', 'AD-HOC', 'KIOSK',
   'Hardware', 'Label', 'Others',
 ]
 
@@ -224,6 +244,29 @@ export const JOB_SHEET_CHECKLIST_LABELS = [
 export const JOB_SHEET_STATUS_COLORS: Record<string, { bg: string; text: string }> = {
   draft:     { bg: 'bg-amber-500/20', text: 'text-amber-400' },
   completed: { bg: 'bg-green-500/20', text: 'text-green-400' },
+}
+
+// Resource Hub
+export const RESOURCE_CATEGORIES = [
+  'System Versions',
+  'Database Files',
+  'Templates',
+  'SOPs & Guides',
+  'Training',
+  'Tools & Utilities',
+] as const
+
+export const RESOURCE_CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
+  'System Versions':    { bg: 'bg-blue-500/10',    text: 'text-blue-400' },
+  'Database Files':     { bg: 'bg-emerald-500/10',  text: 'text-emerald-400' },
+  'Templates':          { bg: 'bg-purple-500/10',   text: 'text-purple-400' },
+  'SOPs & Guides':      { bg: 'bg-amber-500/10',    text: 'text-amber-400' },
+  'Training':           { bg: 'bg-cyan-500/10',     text: 'text-cyan-400' },
+  'Tools & Utilities':  { bg: 'bg-rose-500/10',     text: 'text-rose-400' },
+}
+
+export function getResourceCategoryColor(category: string) {
+  return RESOURCE_CATEGORY_COLORS[category] || { bg: 'bg-zinc-500/10', text: 'text-zinc-400' }
 }
 
 export const DEFAULT_IMPORTANT_DETAILS = {

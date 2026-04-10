@@ -17,6 +17,7 @@ import { DetailSkeleton } from '@/components/Skeleton'
 import Button from '@/components/ui/Button'
 import { Input, Textarea, Label } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/Toast'
+import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 
 // WHY: Ticket Detail — spec Section 9.
 // UPGRADE: Breadcrumb nav, two-column layout on lg, redesigned vertical timeline.
@@ -43,6 +44,7 @@ export default function TicketDetailPage() {
   const timelineDataRef = useRef<{ entryDate: string; channel: Channel; notes: string; formattedString: string } | null>(null)
 
   const [saving, setSaving] = useState(false)
+  const [showCrmPanel, setShowCrmPanel] = useState(false)
 
   // Edit fields
   const [editIssue, setEditIssue] = useState('')
@@ -505,6 +507,15 @@ export default function TicketDetailPage() {
           {isStale(ticket) && <StaleBadge />}
         </div>
         <div className="flex items-center gap-3 mt-2 text-sm text-text-secondary flex-wrap">
+          <button
+            onClick={() => setShowCrmPanel(true)}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors"
+          >
+            <svg className="size-3" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" />
+            </svg>
+            CRM
+          </button>
           {(ticket.city || ticket.state) && (
             <span className="text-text-tertiary">{[ticket.city, ticket.state].filter(Boolean).join(', ')}</span>
           )}
@@ -1170,6 +1181,14 @@ export default function TicketDetailPage() {
         </div>
       </div>
 
+
+      {/* CRM Profile Panel */}
+      {showCrmPanel && ticket && (
+        <ClinicProfilePanel
+          clinicCode={ticket.clinic_code}
+          onClose={() => setShowCrmPanel(false)}
+        />
+      )}
 
       {/* Image lightbox overlay */}
       {lightboxUrl && (

@@ -106,6 +106,32 @@ export function ActivitySkeleton() {
   )
 }
 
+export function ResourcesSkeleton() {
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <SkeletonLine className="w-32 h-6 mb-1" />
+          <SkeletonLine className="w-56" />
+        </div>
+        <SkeletonCard className="w-28 h-9" />
+      </div>
+      <SkeletonCard className="h-10 mb-3" />
+      <div className="flex gap-2 mb-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <SkeletonCard key={i} className="w-24 h-8" />
+        ))}
+      </div>
+      <SkeletonLine className="w-28 mb-3" />
+      <div className="space-y-2">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <SkeletonCard key={i} className="h-20" />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function MyLogSkeleton() {
   return (
     <div className="max-w-4xl mx-auto">

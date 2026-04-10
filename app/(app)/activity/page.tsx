@@ -121,6 +121,38 @@ function describeChange(entry: AuditEntry): string {
     return `Schedule updated: ${clinic}`
   }
 
+  if (action === 'UPDATE' && table_name === 'clinics' && old_data && new_data) {
+    const code = (new_data.clinic_code || old_data.clinic_code) as string
+    const name = (new_data.clinic_name || old_data.clinic_name) as string
+    const changes: string[] = []
+    // Check text fields for differences
+    const fields = ['clinic_name', 'clinic_phone', 'workstation_count', 'main_pc_name',
+      'ultraviewer_id', 'anydesk_id', 'ram', 'processor', 'current_program_version',
+      'current_db_version', 'db_size', 'email_main', 'registered_contact']
+    for (const f of fields) {
+      if (old_data[f] !== new_data[f]) {
+        const label = f.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+        // Mask passwords in activity display
+        if (f.includes('_pw')) {
+          changes.push(`${label}: updated`)
+        } else {
+          changes.push(`${label}: ${old_data[f] || '(empty)'} → ${new_data[f] || '(empty)'}`)
+        }
+      }
+    }
+    // Boolean flags
+    for (const f of ['has_e_invoice', 'has_sst', 'has_whatsapp', 'has_backup', 'has_ext_hdd']) {
+      if (old_data[f] !== new_data[f]) {
+        const label = f.replace('has_', '').replace(/_/g, ' ')
+        changes.push(`${label}: ${new_data[f] ? 'enabled' : 'disabled'}`)
+      }
+    }
+    if (old_data.clinic_notes !== new_data.clinic_notes) changes.push('Notes updated')
+    return changes.length > 0
+      ? `[${code}] ${name} — ${changes.slice(0, 3).join(', ')}${changes.length > 3 ? ` +${changes.length - 3} more` : ''}`
+      : `[${code}] ${name} — updated`
+  }
+
   if (action === 'UPDATE' && table_name === 'timeline_entries') {
     return `Timeline entry modified`
   }

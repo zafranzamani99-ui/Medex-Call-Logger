@@ -38,6 +38,33 @@ const COLUMN_MAP: Record<string, string> = {
   'LKEY Line 3': 'lkey_line3',
   'LKEY Line 4': 'lkey_line4',
   'LKEY Line 5': 'lkey_line5',
+  // Extended CRM columns (26 — full Excel file)
+  'CLOUD START DATE': 'cloud_start',
+  'CLOUD END DATE': 'cloud_end',
+  'M1G/ DEALER CASE': 'm1g_dealer_case',
+  'PASS TO DEALER/M1G': 'pass_to_dealer',
+  'PRODUCT': 'product',
+  'Signed-up': 'signed_up',
+  'CMS RUNNING NO. QUOTATION/PO': 'cms_running_no',
+  'GROUP': 'clinic_group',
+  'COMPANY NAME': 'company_name',
+  'CO. REG & BRN': 'company_reg',
+  'Remark (rate for additional pc)': 'remark_additional_pc',
+  'Customer ID- Certificate No.': 'customer_cert_no',
+  'CMS INSTALL DATE/LIVE DATE': 'cms_install_date',
+  'Address1': 'address1',
+  'Address3': 'address3',
+  'Address4': 'address4',
+  'Contact Tel1': 'contact_tel',
+  'RACE': 'race',
+  'InvoiceNo-CMS/MTN/CLD (key in by Celine)': 'invoice_no',
+  'Billing Address / AAMS ACC NO': 'billing_address',
+  'Account Manager': 'account_manager',
+  'Info': 'info',
+  'Type': 'clinic_type',
+  'Reason not using E-INV': 'einv_no_reason',
+  'STATUS RENEWAL': 'status_renewal',
+  'REMARKS - FOLLOW UP': 'remarks_followup',
 }
 
 // WHY: Excel dates can be DD/MM/YYYY, serial numbers, or JS Date objects.
@@ -81,14 +108,30 @@ function toStr(val: unknown): string | null {
   return String(val).trim() || null
 }
 
+// WHY: Excel headers can contain line breaks (e.g. "CMS   RUNNING NO.\nQUOTATION/PO").
+// Normalize to single-line, single-space for reliable COLUMN_MAP matching.
+function normalizeHeaders(rows: Record<string, unknown>[]): Record<string, unknown>[] {
+  return rows.map(row => {
+    const out: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(row)) {
+      const norm = key.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+      out[norm] = value
+    }
+    return out
+  })
+}
+
+const DATE_COLUMNS = new Set(['mtn_expiry', 'mtn_start', 'cloud_start', 'cloud_end', 'cms_install_date'])
+
 function parseRows(rows: Record<string, unknown>[]): Record<string, string | null>[] {
-  return rows
+  const normalized = normalizeHeaders(rows)
+  return normalized
     .filter((row) => toStr(row['ACCT NO']))
     .map((row) => {
       const clinic: Record<string, string | null> = {}
       for (const [csvCol, dbCol] of Object.entries(COLUMN_MAP)) {
         // Date columns need raw value (could be Excel serial number)
-        if (dbCol === 'mtn_expiry' || dbCol === 'mtn_start') {
+        if (DATE_COLUMNS.has(dbCol)) {
           clinic[dbCol] = fixDate(row[csvCol])
         } else {
           clinic[dbCol] = toStr(row[csvCol])
@@ -185,6 +228,11 @@ export async function POST(request: NextRequest) {
     // WHY: Upsert instead of delete+insert. The old approach (delete all → insert)
     // was risky: if insert failed mid-batch, the clinics table was left empty/partial.
     // Upsert: existing clinic_code → update, new clinic_code → insert. Safe on failure.
+    //
+    // IMPORTANT: Operational fields (workstation_count, ultraviewer_id, ram, etc.)
+    // are NOT included in the upsert payload — they only contain CRM-imported columns.
+    // Supabase upsert only touches specified columns, so agent-managed operational data
+    // is preserved across uploads. See sql/041_clinic_operational_fields.sql.
     const uploadStart = new Date().toISOString()
     const BATCH_SIZE = 500
     let upsertedCount = 0
@@ -209,6 +257,10 @@ export async function POST(request: NextRequest) {
 
     // Remove clinics not touched by this upload (no longer in CRM)
     // WHY: Upserted rows have updated_at >= uploadStart. Stale rows are older.
+    // NOTE: This deletes clinics removed from the external CRM, including their
+    // operational data (UV/AD IDs, workstation count, etc.). This is by design —
+    // if a clinic is no longer a customer, remove it. The audit_log preserves
+    // the last known state for recovery if needed.
     await supabase.from('clinics').delete().lt('updated_at', uploadStart)
 
     const insertedCount = upsertedCount

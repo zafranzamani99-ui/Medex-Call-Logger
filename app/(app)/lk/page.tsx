@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { Clinic } from '@/lib/types'
 import ClinicSearch from '@/components/ClinicSearch'
 import LicenseKeyModal from '@/components/LicenseKeyModal'
+import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import Button from '@/components/ui/Button'
 import { Label } from '@/components/ui/Input'
 
@@ -26,6 +27,7 @@ export default function LKPage() {
   const [showModal, setShowModal] = useState(false)
   const [history, setHistory] = useState<LKRecord[]>([])
   const [loadingRow, setLoadingRow] = useState<string | null>(null)
+  const [showCrmPanel, setShowCrmPanel] = useState(false)
 
   useEffect(() => {
     async function init() {
@@ -148,12 +150,25 @@ export default function LKPage() {
             </div>
           </div>
 
-          <Button onClick={() => setShowModal(true)} size="lg" className="w-full">
-            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
-            </svg>
-            Create License Key Request
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="secondary"
+              size="lg"
+              onClick={() => setShowCrmPanel(true)}
+              className="border border-indigo-500/30 text-indigo-400 hover:bg-indigo-600/10"
+            >
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" />
+              </svg>
+              CRM
+            </Button>
+            <Button onClick={() => setShowModal(true)} size="lg" className="flex-1">
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+              </svg>
+              Create License Key Request
+            </Button>
+          </div>
         </div>
       )}
 
@@ -221,6 +236,22 @@ export default function LKPage() {
           clinic={selectedClinic}
           agentName={userName}
           onClose={() => { setShowModal(false); refreshHistory() }}
+        />
+      )}
+
+      {/* CRM Profile Panel */}
+      {showCrmPanel && selectedClinic && (
+        <ClinicProfilePanel
+          clinicCode={selectedClinic.clinic_code}
+          onClose={() => setShowCrmPanel(false)}
+          onClinicUpdated={() => {
+            // Re-fetch clinic to pick up CRM changes (e.g. LKEY address)
+            const refetch = async () => {
+              const { data } = await supabase.from('clinics').select('*').eq('clinic_code', selectedClinic.clinic_code).single()
+              if (data) setSelectedClinic(data as Clinic)
+            }
+            refetch()
+          }}
         />
       )}
     </div>

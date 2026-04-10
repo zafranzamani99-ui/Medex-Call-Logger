@@ -81,7 +81,7 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
   // === System Environment ===
   const [environment, setEnvironment] = useState('LIVE')
   const [internalUse, setInternalUse] = useState('No')
-  const [serverName, setServerName] = useState('SERVER')
+  const [serverName, setServerName] = useState(clinic.main_pc_name || 'SERVER')
   const [deviceId, setDeviceId] = useState('')
 
   // === Activations ===

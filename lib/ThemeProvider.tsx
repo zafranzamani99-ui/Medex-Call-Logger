@@ -27,9 +27,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>('dark')
   const [mounted, setMounted] = useState(false)
 
-  // Load saved preference on mount
+  // Load saved preference on mount (migrate old key if needed)
   useEffect(() => {
-    const saved = localStorage.getItem('medex-theme') as Theme | null
+    let saved = localStorage.getItem('medex-ws-theme') as Theme | null
+    if (!saved) {
+      const old = localStorage.getItem('medex-theme') as Theme | null
+      if (old) { saved = old; localStorage.setItem('medex-ws-theme', old); localStorage.removeItem('medex-theme') }
+    }
     if (saved === 'light' || saved === 'dark') {
       setTheme(saved)
       document.documentElement.setAttribute('data-theme', saved)
@@ -39,7 +43,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   const applyTheme = (next: Theme) => {
     setTheme(next)
-    localStorage.setItem('medex-theme', next)
+    localStorage.setItem('medex-ws-theme', next)
     document.documentElement.setAttribute('data-theme', next)
   }
 

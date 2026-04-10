@@ -33,6 +33,58 @@ export interface Clinic {
   lkey_line4: string | null
   lkey_line5: string | null
   updated_at: string
+
+  // Extended CRM columns (full Excel file)
+  cloud_start: string | null
+  cloud_end: string | null
+  m1g_dealer_case: string | null
+  pass_to_dealer: string | null
+  product: string | null
+  signed_up: string | null
+  cms_running_no: string | null
+  clinic_group: string | null
+  company_name: string | null
+  company_reg: string | null
+  remark_additional_pc: string | null
+  customer_cert_no: string | null
+  cms_install_date: string | null
+  address1: string | null
+  address3: string | null
+  address4: string | null
+  contact_tel: string | null
+  race: string | null
+  invoice_no: string | null
+  billing_address: string | null
+  account_manager: string | null
+  info: string | null
+  clinic_type: string | null
+  einv_no_reason: string | null
+  status_renewal: string | null
+  remarks_followup: string | null
+
+  // Custom columns (JSONB — user-defined fields)
+  custom_data: Record<string, string | boolean | null> | null
+
+  // Operational fields (agent-managed, never overwritten by CRM upload)
+  workstation_count: string | null
+  main_pc_name: string | null
+  current_program_version: string | null
+  current_db_version: string | null
+  db_size: string | null
+  ultraviewer_id: string | null
+  ultraviewer_pw: string | null
+  anydesk_id: string | null
+  anydesk_pw: string | null
+  ram: string | null
+  processor: string | null
+  has_e_invoice: boolean
+  has_sst: boolean
+  has_whatsapp: boolean
+  has_backup: boolean
+  has_ext_hdd: boolean
+  clinic_notes: string | null
+  last_updated_by: string | null
+  last_updated_by_name: string | null
 }
 
 // Status values — spec Section 4.3
@@ -333,6 +385,43 @@ export interface JobSheet {
   schedule_id: string | null
   created_by: string | null
   created_by_name: string
+  created_at: string
+  updated_at: string
+}
+
+// CRM custom column definitions (team-shared)
+export interface CustomColumn {
+  id: string
+  column_key: string
+  column_name: string
+  column_type: 'text' | 'toggle' | 'date'
+  display_order: number
+  created_by: string | null
+  created_by_name: string | null
+  created_at: string
+}
+
+// Resource Hub
+export type ResourceCategory =
+  | 'System Versions'
+  | 'Database Files'
+  | 'Templates'
+  | 'SOPs & Guides'
+  | 'Training'
+  | 'Tools & Utilities'
+
+export interface Resource {
+  id: string
+  title: string
+  url: string
+  description: string | null
+  category: ResourceCategory
+  tags: string[]
+  version: string | null
+  is_pinned: boolean
+  created_by: string | null
+  created_by_name: string
+  updated_by_name: string | null
   created_at: string
   updated_at: string
 }

@@ -1,4 +1,4 @@
-# Medex Call Logger — Deployment Guide
+# Medex Workspace — Deployment Guide
 
 ## Target
 - **Domain**: support.medex1cloud.com
@@ -21,8 +21,8 @@ Go to **Supabase Dashboard > SQL Editor** and run these in order:
 ### 2. Commit & Push to GitHub
 ```bash
 git add .
-git commit -m "Medex Call Logger — ready for deployment"
-git remote add origin https://github.com/YOUR_USERNAME/medex-call-logger.git
+git commit -m "Medex Workspace — ready for deployment"
+git remote add origin https://github.com/YOUR_USERNAME/medex-workspace.git
 git branch -M main
 git push -u origin main
 ```

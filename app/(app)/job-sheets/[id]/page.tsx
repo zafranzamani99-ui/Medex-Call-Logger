@@ -9,6 +9,7 @@ import Button from '@/components/ui/Button'
 import { Input, Label, Textarea, Select } from '@/components/ui/Input'
 import Badge from '@/components/ui/Badge'
 import { useToast } from '@/components/ui/Toast'
+import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 
 // Section wrapper
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -45,6 +46,8 @@ export default function JobSheetDetailPage() {
   const { toast } = useToast()
 
   const [loading, setLoading] = useState(true)
+  const [showCrmPanel, setShowCrmPanel] = useState(false)
+  const [savingToCrm, setSavingToCrm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [autoSaved, setAutoSaved] = useState(false)
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -242,6 +245,49 @@ export default function JobSheetDetailPage() {
     scheduleAutoSave()
   }
 
+  // Save operational data back to CRM
+  const saveToCrm = async () => {
+    if (!clinicCode) return
+    setSavingToCrm(true)
+    const { data: { session } } = await supabase.auth.getSession()
+    const uid = session?.user?.id || null
+    const { data: profile } = uid ? await supabase.from('profiles').select('display_name').eq('id', uid).single() : { data: null }
+
+    // Only sync non-empty fields — don't overwrite CRM with blanks
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updates: Record<string, any> = {
+      last_updated_by: uid,
+      last_updated_by_name: profile?.display_name || serviceBy,
+      updated_at: new Date().toISOString(),
+    }
+    if (importantDetails.main_pc_name) updates.main_pc_name = importantDetails.main_pc_name
+    if (importantDetails.ultraviewer_id) updates.ultraviewer_id = importantDetails.ultraviewer_id
+    if (importantDetails.ultraviewer_pw) updates.ultraviewer_pw = importantDetails.ultraviewer_pw
+    if (importantDetails.anydesk_id) updates.anydesk_id = importantDetails.anydesk_id
+    if (importantDetails.anydesk_pw) updates.anydesk_pw = importantDetails.anydesk_pw
+    if (importantDetails.ram) updates.ram = importantDetails.ram
+    if (importantDetails.processor) updates.processor = importantDetails.processor
+    if (importantDetails.service_db_size_after) updates.db_size = importantDetails.service_db_size_after
+    updates.has_backup = importantDetails.auto_backup_30days
+    updates.has_ext_hdd = importantDetails.ext_hdd_backup
+
+    // Extract from checklist notes
+    const wsNote = checklist.find(c => c.label === 'Total Workstation')?.notes
+    if (wsNote) updates.workstation_count = wsNote
+    const progNote = checklist.find(c => c.label === 'Install/Update Program Version No')?.notes
+    if (progNote) updates.current_program_version = progNote
+    const dbNote = checklist.find(c => c.label === 'Database Version (after update)')?.notes
+    if (dbNote) updates.current_db_version = dbNote
+
+    const { error } = await supabase.from('clinics').update(updates).eq('clinic_code', clinicCode)
+    setSavingToCrm(false)
+    if (error) {
+      toast('Failed to save to CRM: ' + error.message, 'error')
+    } else {
+      toast('System info saved to CRM')
+    }
+  }
+
   // Toggle issue category
   const toggleIssueCategory = (idx: number) => {
     setIssueCategories(prev => {
@@ -250,6 +296,20 @@ export default function JobSheetDetailPage() {
       return next
     })
     scheduleAutoSave()
+  }
+
+  const [deleting, setDeleting] = useState(false)
+  const handleDelete = async () => {
+    if (!confirm('Delete this job sheet? This cannot be undone.')) return
+    setDeleting(true)
+    const { error } = await supabase.from('job_sheets').delete().eq('id', id)
+    setDeleting(false)
+    if (error) {
+      toast('Failed to delete: ' + error.message, 'error')
+    } else {
+      toast('Job sheet deleted')
+      router.push('/job-sheets')
+    }
   }
 
   if (loading) {
@@ -290,6 +350,12 @@ export default function JobSheetDetailPage() {
             </svg>
             PDF
           </Button>
+          <Button variant="danger" size="sm" loading={deleting} onClick={handleDelete}>
+            <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+            Delete
+          </Button>
         </div>
       </div>
 
@@ -297,7 +363,7 @@ export default function JobSheetDetailPage() {
       <div className="hidden print:block" data-print-only id="js-print">
         <style dangerouslySetInnerHTML={{ __html: `
           @media print {
-            @page { size: A4 portrait; margin: 10mm 12mm 8mm 12mm; }
+            @page { size: A4 portrait; margin: 0; }
             * { box-sizing: border-box; }
             #js-print {
               font-family: Arial, Helvetica, sans-serif;
@@ -305,11 +371,12 @@ export default function JobSheetDetailPage() {
               color: #000 !important;
               line-height: 1.25;
               width: 100%;
+              padding: 10mm 12mm 8mm 12mm;
               -webkit-print-color-adjust: exact;
               print-color-adjust: exact;
             }
             #js-print table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-            #js-print td { border: 0.7px solid #333; padding: 3px 5px; vertical-align: top; color: #000 !important; overflow: hidden; word-wrap: break-word; }
+            #js-print td { border: 0.7px solid #333; padding: 3px 5px; vertical-align: top; color: #000 !important; background: #fff !important; overflow: hidden; word-wrap: break-word; }
             #js-print .nb { border: none !important; }
             #js-print .bt0 { border-top: none !important; }
             #js-print .bb0 { border-bottom: none !important; }
@@ -323,9 +390,6 @@ export default function JobSheetDetailPage() {
             #js-print .ck-on { background: #1a1a1a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             #js-print .c { text-align: center; }
             #js-print .vm { vertical-align: middle; }
-            /* Hide sidebar/nav in print & reset layout */
-            [data-print-hide], nav, aside, header, [role="complementary"] { display: none !important; }
-            body, body > *, main, main > *, main > * > *, [data-main-content] { margin: 0 !important; padding: 0 !important; max-width: 100% !important; width: 100% !important; }
             #js-print img { max-width: 100%; height: auto; }
           }
         `}} />
@@ -429,13 +493,13 @@ export default function JobSheetDetailPage() {
             </tr>
             <tr>
               <td className="nb" colSpan={2}></td>
-              <td className="vm"><span className={serviceTypes.includes('AD-HOC/KIOSK') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('AD-HOC/KIOSK') ? '\u2713' : ''}</span> AD-HOC</td>
+              <td className="vm"><span className={serviceTypes.includes('AD-HOC') || serviceTypes.includes('AD-HOC/KIOSK') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('AD-HOC') || serviceTypes.includes('AD-HOC/KIOSK') ? '\u2713' : ''}</span> AD-HOC</td>
               <td className="vm"></td>
               <td className="vm"></td>
             </tr>
             <tr>
               <td className="nb" colSpan={2}></td>
-              <td className="vm"><span className={serviceTypes.includes('AD-HOC/KIOSK') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('AD-HOC/KIOSK') ? '\u2713' : ''}</span> KIOSK</td>
+              <td className="vm"><span className={serviceTypes.includes('KIOSK') || serviceTypes.includes('AD-HOC/KIOSK') ? 'ck ck-on' : 'ck'}>{serviceTypes.includes('KIOSK') || serviceTypes.includes('AD-HOC/KIOSK') ? '\u2713' : ''}</span> KIOSK</td>
               <td className="vm"></td>
               <td className="vm"></td>
             </tr>
@@ -693,8 +757,8 @@ export default function JobSheetDetailPage() {
 
         {/* 4. Type of Service */}
         <Section title="Type of Service">
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-            {['ISP1', 'ISP2', 'ISP3', 'MTN', 'AD-HOC/KIOSK'].map(type => (
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            {['ISP1', 'ISP2', 'ISP3', 'MTN', 'AD-HOC', 'KIOSK'].map(type => (
               <label key={type} className="flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
@@ -900,6 +964,35 @@ export default function JobSheetDetailPage() {
               </div>
             </div>
           </div>
+
+          {/* Save to CRM + View CRM */}
+          <div className="mt-4 pt-4 border-t border-border flex gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowCrmPanel(true)}
+              disabled={!clinicCode}
+              className="border border-indigo-500/30 text-indigo-400 hover:bg-indigo-600/10"
+            >
+              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" />
+              </svg>
+              View CRM
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={saveToCrm}
+              loading={savingToCrm}
+              disabled={!clinicCode || savingToCrm}
+              className="border border-green-500/30 text-green-400 hover:bg-green-600/10"
+            >
+              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+              Save to CRM
+            </Button>
+          </div>
         </Section>
 
         {/* 10. Charges */}
@@ -955,6 +1048,14 @@ export default function JobSheetDetailPage() {
           </div>
         </Section>
       </div>
+
+      {/* CRM Profile Panel */}
+      {showCrmPanel && clinicCode && (
+        <ClinicProfilePanel
+          clinicCode={clinicCode}
+          onClose={() => setShowCrmPanel(false)}
+        />
+      )}
     </div>
   )
 }

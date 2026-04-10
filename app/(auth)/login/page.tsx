@@ -59,7 +59,7 @@ export default function LoginPage() {
             </svg>
           </div>
           <h1 className="text-xl font-bold text-text-primary">Sign in to Medex</h1>
-          <p className="text-text-tertiary text-[13px] mt-1.5">Call Logger · Support Team</p>
+          <p className="text-text-tertiary text-[13px] mt-1.5">Workspace</p>
         </div>
 
         {/* Login Form */}

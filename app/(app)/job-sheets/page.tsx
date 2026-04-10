@@ -118,10 +118,11 @@ export default function JobSheetsPage() {
       parsed = parseData.parsed || {}
     } catch { /* continue without parsed data */ }
 
-    // Fetch clinic details for extra fields
-    let clinicData: { clinic_phone?: string; email_main?: string; registered_contact?: string; product_type?: string } | null = null
+    // Fetch clinic details (including CRM operational data for auto-fill)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let clinicData: any = null
     if (data.clinic_code) {
-      const { data: clinic } = await supabase.from('clinics').select('clinic_phone, email_main, registered_contact, product_type').eq('clinic_code', data.clinic_code).single()
+      const { data: clinic } = await supabase.from('clinics').select('*').eq('clinic_code', data.clinic_code).single()
       clinicData = clinic
     }
 
@@ -136,6 +137,17 @@ export default function JobSheetsPage() {
     const issueCategories = JOB_SHEET_ISSUE_CATEGORIES.map(label => ({ label, checked: false }))
 
     const importantDetails = { ...DEFAULT_IMPORTANT_DETAILS }
+    // Pre-fill from CRM operational data (previous visits)
+    if (clinicData?.main_pc_name) importantDetails.main_pc_name = clinicData.main_pc_name
+    if (clinicData?.ultraviewer_id) importantDetails.ultraviewer_id = clinicData.ultraviewer_id
+    if (clinicData?.ultraviewer_pw) importantDetails.ultraviewer_pw = clinicData.ultraviewer_pw
+    if (clinicData?.anydesk_id) importantDetails.anydesk_id = clinicData.anydesk_id
+    if (clinicData?.anydesk_pw) importantDetails.anydesk_pw = clinicData.anydesk_pw
+    if (clinicData?.ram) importantDetails.ram = clinicData.ram
+    if (clinicData?.processor) importantDetails.processor = clinicData.processor
+    if (clinicData?.has_backup) importantDetails.auto_backup_30days = true
+    if (clinicData?.has_ext_hdd) importantDetails.ext_hdd_backup = true
+    // AI-parsed values override CRM defaults (agent notes are more current)
     if (parsed.main_pc_name) importantDetails.main_pc_name = parsed.main_pc_name
     if (parsed.space_c) importantDetails.space_c = parsed.space_c
     if (parsed.space_d) importantDetails.space_d = parsed.space_d

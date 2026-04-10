@@ -24,8 +24,8 @@ const jetbrainsMono = JetBrains_Mono({
 // WHY: Root layout wraps the entire app. Metadata sets the page title
 // shown in browser tab. No nav bar here — that goes in the (app) protected layout.
 export const metadata: Metadata = {
-  title: "Medex Call Logger",
-  description: "Medex Support Team — Call & WhatsApp Logging System",
+  title: "Medex Workspace",
+  description: "Medex Workspace — Internal operations platform",
 }
 
 export default function RootLayout({
@@ -38,7 +38,8 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: `
           try {
-            const t = localStorage.getItem('medex-theme');
+            let t = localStorage.getItem('medex-ws-theme');
+            if (!t) { t = localStorage.getItem('medex-theme'); if (t) { localStorage.setItem('medex-ws-theme', t); localStorage.removeItem('medex-theme'); } }
             if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
           } catch {}
         `}} />

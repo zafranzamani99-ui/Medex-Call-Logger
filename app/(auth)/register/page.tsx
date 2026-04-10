@@ -100,7 +100,7 @@ export default function RegisterPage() {
             </svg>
           </div>
           <h1 className="text-xl font-bold text-text-primary">Create your account</h1>
-          <p className="text-[13px] text-text-tertiary mt-1.5">Join the Medex support team</p>
+          <p className="text-[13px] text-text-tertiary mt-1.5">Join Medex Workspace</p>
         </div>
 
         {/* Form */}

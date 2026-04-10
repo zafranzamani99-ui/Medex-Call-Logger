@@ -26,7 +26,7 @@ export default function ThemeToggle() {
     <button
       ref={btnRef}
       onClick={handleClick}
-      className="fixed top-4 right-4 z-30 hidden md:flex items-center justify-center size-8 rounded-full bg-surface-raised border border-border text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
+      className="fixed top-4 right-4 z-30 hidden md:flex print:!hidden items-center justify-center size-8 rounded-full bg-surface-raised border border-border text-text-secondary hover:text-text-primary hover:border-text-muted transition-colors"
       aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
       title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
     >

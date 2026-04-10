@@ -19,7 +19,7 @@ import RecordTypeBadge from '@/components/RecordTypeBadge'
 import { NeedsAttentionBadge, StaleBadge } from '@/components/FlagBadge'
 import { DashboardSkeleton } from '@/components/Skeleton'
 
-// WHY: Dashboard — spec Section 7. Command center for support team.
+// WHY: Dashboard — spec Section 7. Command center for team.
 // Spatial design: Hero urgency zone → triage panel → activity timeline → charts
 
 export default function DashboardPage() {

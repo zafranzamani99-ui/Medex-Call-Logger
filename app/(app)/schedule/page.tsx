@@ -9,10 +9,11 @@ import {
   isSameMonth, isToday,
 } from 'date-fns'
 import type { Schedule } from '@/lib/types'
-import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, formatWorkDuration, toProperCase } from '@/lib/constants'
+import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, formatWorkDuration, formatTimeDisplay, toProperCase } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 import { Input, Label, Textarea } from '@/components/ui/Input'
 import ClinicSearch from '@/components/ClinicSearch'
+import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import type { Clinic } from '@/lib/types'
 import { useToast } from '@/components/ui/Toast'
 
@@ -20,8 +21,12 @@ import { useToast } from '@/components/ui/Toast'
 // Replaces the team's Excel-based schedule tracker.
 // Features: month navigation, colored chips by schedule_type, add/edit/complete schedules.
 
-// Parse time strings like "8:00AM", "1:00PM", "2:30PM" into minutes for sorting
+// Parse time strings into minutes for sorting — handles both "8:00AM" (legacy) and "14:30" (time picker)
 function parseTimeToMinutes(t: string): number {
+  // 24h "HH:MM" from <input type="time">
+  const h24 = t.match(/^(\d{1,2}):(\d{2})$/)
+  if (h24) return parseInt(h24[1]) * 60 + parseInt(h24[2])
+  // 12h "8:00AM", "2:30PM"
   const match = t.match(/^(\d{1,2})[:.]?(\d{2})?\s*(AM|PM)$/i)
   if (!match) return 0
   let hours = parseInt(match[1])
@@ -88,6 +93,7 @@ export default function SchedulePage() {
 
   // Work Panel state — full clinic details when in_progress
   const [workClinic, setWorkClinic] = useState<Clinic | null>(null)
+  const [showCrmPanel, setShowCrmPanel] = useState(false)
   const [workNotes, setWorkNotes] = useState('')
   const workNotesRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [elapsedMinutes, setElapsedMinutes] = useState(0)
@@ -271,7 +277,7 @@ export default function SchedulePage() {
       pic: s.pic || null,
       issue_type: 'Schedule',
       issue_category: 'System Implementation',
-      issue: `Schedule ${typeLabel}: ${s.clinic_name} on ${s.schedule_date.split('-').reverse().join('-')} at ${s.schedule_time}`,
+      issue: `Schedule ${typeLabel}: ${s.clinic_name} on ${s.schedule_date.split('-').reverse().join('-')} at ${formatTimeDisplay(s.schedule_time)}`,
       my_response: `${s.mode || 'Remote'} ${typeLabel} scheduled.`,
       status: 'Resolved',
       created_by: userId,
@@ -356,7 +362,7 @@ export default function SchedulePage() {
     // Log timeline entry
     const ticketId = await ensureTicket(s)
     if (ticketId) {
-      await addTimelineEntry(ticketId, `Rescheduled: ${s.clinic_name} — was ${s.schedule_date.split('-').reverse().join('-')} at ${s.schedule_time}. Reason: ${reason}`)
+      await addTimelineEntry(ticketId, `Rescheduled: ${s.clinic_name} — was ${s.schedule_date.split('-').reverse().join('-')} at ${formatTimeDisplay(s.schedule_time)}. Reason: ${reason}`)
     }
     // Pre-fill add form with all details from old schedule
     if (s.clinic_code && s.clinic_code !== 'MANUAL') {
@@ -607,7 +613,7 @@ export default function SchedulePage() {
       pic: formPic || null,
       issue_type: 'Schedule',
       issue_category: 'System Implementation',
-      issue: `Schedule ${typeLabel}: ${clinicName} on ${formDate.split('-').reverse().join('-')} at ${formTime}`,
+      issue: `Schedule ${typeLabel}: ${clinicName} on ${formDate.split('-').reverse().join('-')} at ${formatTimeDisplay(formTime)}`,
       my_response: `${formMode} ${typeLabel} scheduled. ${duration ? 'Duration: ' + duration + '.' : ''}`,
       status: 'Resolved',
       created_by: userId,
@@ -765,7 +771,7 @@ export default function SchedulePage() {
                         {isPastTime && <span className="text-amber-400 mr-0.5">!</span>}
                         {isNoAnswer && <span className="text-orange-400 mr-0.5">!</span>}
                         {isRescheduled && <span className="text-red-400 mr-0.5 no-underline" style={{ textDecoration: 'none' }}>↻</span>}
-                        <span className="hidden sm:inline">{s.schedule_time} </span>
+                        <span className="font-bold uppercase">{formatTimeDisplay(s.schedule_time)}</span>{' '}
                         {s.clinic_name}
                       </div>
                     )
@@ -867,7 +873,7 @@ export default function SchedulePage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072M12 18.364a7 7 0 010-12.728M8.464 15.536a5 5 0 010-7.072M3 12a9 9 0 0118 0M12 12h.01" />
                                 </svg>
                               )}
-                              <span className="font-mono text-xs flex-shrink-0 text-accent">{s.schedule_time}</span>
+                              <span className="font-mono text-xs flex-shrink-0 text-accent">{formatTimeDisplay(s.schedule_time)}</span>
                               <span className={`text-sm text-text-primary font-medium ${isStruck ? 'line-through' : ''}`}>{s.clinic_name}</span>
                               {s.pic_support && <span className="text-xs text-blue-400">· {s.pic_support}</span>}
                             </div>
@@ -1036,10 +1042,9 @@ export default function SchedulePage() {
                       <div>
                         <Label required>Time</Label>
                         <Input
-                          type="text"
+                          type="time"
                           value={editTime}
                           onChange={(e) => setEditTime(e.target.value)}
-                          placeholder="e.g. 10AM, 2:30PM"
                         />
                       </div>
                     </div>
@@ -1135,7 +1140,7 @@ export default function SchedulePage() {
 
                     {/* Schedule summary + live timer */}
                     <div className="flex items-center gap-3 text-sm text-text-secondary">
-                      <span className="font-mono text-accent">{selectedSchedule.schedule_time}</span>
+                      <span className="font-mono text-accent">{formatTimeDisplay(selectedSchedule.schedule_time)}</span>
                       <span>{selectedSchedule.schedule_date.split('-').reverse().join('/')}</span>
                       <span>{agentDisplayName(selectedSchedule)}</span>
                       {selectedSchedule.started_at && (
@@ -1224,8 +1229,70 @@ export default function SchedulePage() {
                       </div>
                     </div>
 
+                    {/* System Info (CRM operational data) */}
+                    {selectedSchedule.clinic_code !== 'MANUAL' && workClinic && (
+                      <div className="border border-indigo-500/20 bg-indigo-500/5 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">System Info</h4>
+                          <button
+                            onClick={() => setShowCrmPanel(true)}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            Edit Full CRM →
+                          </button>
+                        </div>
+                        {(workClinic.workstation_count || workClinic.main_pc_name || workClinic.ultraviewer_id || workClinic.anydesk_id || workClinic.current_program_version || workClinic.ram) ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {workClinic.workstation_count && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.workstation_count}</span>
+                            )}
+                            {workClinic.main_pc_name && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.main_pc_name}</span>
+                            )}
+                            {workClinic.ram && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.ram} RAM</span>
+                            )}
+                            {workClinic.ultraviewer_id && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">UV: {workClinic.ultraviewer_id}</span>
+                            )}
+                            {workClinic.anydesk_id && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">AD: {workClinic.anydesk_id}</span>
+                            )}
+                            {workClinic.current_program_version && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">v{workClinic.current_program_version}</span>
+                            )}
+                            {workClinic.current_db_version && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">DB {workClinic.current_db_version}</span>
+                            )}
+                            {workClinic.db_size && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.db_size}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setShowCrmPanel(true)}
+                            className="w-full py-2 text-xs text-text-muted hover:text-indigo-400 border border-dashed border-border rounded-lg transition-colors"
+                          >
+                            + Add system info (workstations, UV/AD, versions)
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {/* Quick Action Buttons */}
                     <div className="flex flex-wrap gap-2">
+                      {/* CRM */}
+                      {selectedSchedule.clinic_code !== 'MANUAL' && (
+                        <button
+                          onClick={() => setShowCrmPanel(true)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors bg-indigo-500/10 text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20"
+                        >
+                          <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" />
+                          </svg>
+                          CRM
+                        </button>
+                      )}
                       {/* Call */}
                       {(() => {
                         const phone = workClinic?.clinic_phone || clinicPhones[selectedSchedule.clinic_code]
@@ -1391,7 +1458,7 @@ export default function SchedulePage() {
                       </div>
                       <div>
                         <span className="text-text-tertiary text-xs">Time</span>
-                        <p className="text-text-primary">{selectedSchedule.schedule_time}</p>
+                        <p className="text-text-primary">{formatTimeDisplay(selectedSchedule.schedule_time)}</p>
                       </div>
                       <div>
                         <span className="text-text-tertiary text-xs">Duration</span>
@@ -1451,7 +1518,7 @@ export default function SchedulePage() {
 
               {/* Audit line */}
               <div className="px-4 py-1.5 text-[11px] text-text-muted">
-                Logged by {agentDisplayName(selectedSchedule)} · {new Date(selectedSchedule.created_at).toLocaleDateString('en-GB')}
+                Logged by {agentDisplayName(selectedSchedule)} · {new Date(selectedSchedule.created_at).toLocaleDateString('en-GB')} at {new Date(selectedSchedule.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
               </div>
 
               {/* Actions */}
@@ -1692,10 +1759,9 @@ export default function SchedulePage() {
                   <div>
                     <Label required>Time</Label>
                     <Input
-                      type="text"
+                      type="time"
                       value={formTime}
                       onChange={(e) => setFormTime(e.target.value)}
-                      placeholder="e.g. 10AM, 2:30PM"
                     />
                   </div>
                 </div>
@@ -1782,6 +1848,22 @@ export default function SchedulePage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* CRM Profile Panel */}
+      {showCrmPanel && selectedSchedule && selectedSchedule.clinic_code !== 'MANUAL' && (
+        <ClinicProfilePanel
+          clinicCode={selectedSchedule.clinic_code}
+          onClose={() => setShowCrmPanel(false)}
+          onClinicUpdated={() => {
+            // Re-fetch clinic to update Work Panel display
+            const refetch = async () => {
+              const { data } = await supabase.from('clinics').select('*').eq('clinic_code', selectedSchedule.clinic_code).single()
+              if (data) setWorkClinic(data as Clinic)
+            }
+            refetch()
+          }}
+        />
       )}
     </div>
   )

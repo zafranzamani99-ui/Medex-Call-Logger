@@ -12,6 +12,7 @@ import PillSelector from '@/components/PillSelector'
 import IssueTypeSelect from '@/components/IssueTypeSelect'
 
 import LicenseKeyModal from '@/components/LicenseKeyModal'
+import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import Button from '@/components/ui/Button'
 import { Input, Textarea, Label } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/Toast'
@@ -42,8 +43,8 @@ interface CallLogDraft {
   jiraLink: string
 }
 
-const DRAFTS_KEY = 'medex-call-drafts'
-const AUTOSAVE_KEY = 'medex-call-autosave'
+const DRAFTS_KEY = 'medex-ws-drafts'
+const AUTOSAVE_KEY = 'medex-ws-autosave'
 const MAX_ATTACHMENTS = 5
 function loadDrafts(): CallLogDraft[] {
   try { return JSON.parse(localStorage.getItem(DRAFTS_KEY) || '[]') }
@@ -104,6 +105,7 @@ export default function LogCallPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, boolean>>({})
 
   const [showLicenseKeyModal, setShowLicenseKeyModal] = useState(false)
+  const [showCrmPanel, setShowCrmPanel] = useState(false)
   const responseRef = useRef<HTMLTextAreaElement>(null)
   const clinicRef = useRef<HTMLDivElement>(null)
   const issueCategoryRef = useRef<HTMLDivElement>(null)
@@ -420,6 +422,11 @@ export default function LogCallPage() {
     setFieldErrors({})
     setSaving(true)
 
+    // Support backdating — use the timeline entry date for created_at
+    const entryDate = timelineData?.entryDate || format(new Date(), 'yyyy-MM-dd')
+    const now = new Date()
+    const createdAt = new Date(`${entryDate}T${format(now, 'HH:mm:ss')}`).toISOString()
+
     const ticketData = {
       record_type: 'call',
       clinic_code: selectedClinic?.clinic_code || 'MANUAL',
@@ -445,6 +452,7 @@ export default function LogCallPage() {
       need_team_check: needTeamCheck,
       jira_link: status === 'Escalated' ? jiraLink.trim() : null,
       attachment_urls: attachments.length > 0 ? attachments : [],
+      created_at: createdAt,
       created_by: userId,
       created_by_name: userName,
       last_updated_by: userId,
@@ -1267,18 +1275,31 @@ export default function LogCallPage() {
                   )}
                 </div>
 
-                {/* License Key button */}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowLicenseKeyModal(true)}
-                  className="w-full border border-blue-500/30 text-blue-400 hover:bg-blue-600/10 hover:text-blue-300 text-xs"
-                >
-                  <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
-                  </svg>
-                  License Key Request
-                </Button>
+                {/* Action buttons */}
+                <div className="flex gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowCrmPanel(true)}
+                    className="flex-1 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-600/10 hover:text-indigo-300 text-xs"
+                  >
+                    <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" />
+                    </svg>
+                    CRM
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowLicenseKeyModal(true)}
+                    className="flex-1 border border-blue-500/30 text-blue-400 hover:bg-blue-600/10 hover:text-blue-300 text-xs"
+                  >
+                    <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                    </svg>
+                    LK
+                  </Button>
+                </div>
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-border p-6 text-center bg-surface-raised">
@@ -1436,6 +1457,23 @@ export default function LogCallPage() {
           clinic={selectedClinic}
           agentName={userName}
           onClose={() => setShowLicenseKeyModal(false)}
+        />
+      )}
+
+      {/* CRM Profile Panel */}
+      {showCrmPanel && selectedClinic && (
+        <ClinicProfilePanel
+          clinicCode={selectedClinic.clinic_code}
+          onClose={() => setShowCrmPanel(false)}
+          onClinicUpdated={() => {
+            // Re-fetch clinic to update local state with CRM changes
+            const refetch = async () => {
+              const supabase = createClient()
+              const { data } = await supabase.from('clinics').select('*').eq('clinic_code', selectedClinic.clinic_code).single()
+              if (data) setSelectedClinic(data as Clinic)
+            }
+            refetch()
+          }}
         />
       )}
 
