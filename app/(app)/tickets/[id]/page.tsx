@@ -1101,7 +1101,12 @@ export default function TicketDetailPage() {
                 <>
                   <div className="flex items-center gap-2">
                     <div className="size-1.5 rounded-full bg-green-400/60 flex-shrink-0" />
-                    <span>Created {format(new Date(ticket.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{toProperCase(ticket.created_by_name)}</span></span>
+                    <span>
+                      Created {format(new Date(ticket.created_at), 'dd/MM/yyyy HH:mm')} by <span className="text-text-secondary">{toProperCase(ticket.created_by_name)}</span>
+                      {ticket.submitted_at && new Date(ticket.created_at).toDateString() !== new Date(ticket.submitted_at).toDateString() && (
+                        <span className="text-text-muted text-xs ml-1">(backdated, submitted {format(new Date(ticket.submitted_at), 'dd MMM')})</span>
+                      )}
+                    </span>
                   </div>
                   {ticket.last_updated_by_name && (
                     <div className="flex items-start gap-2">

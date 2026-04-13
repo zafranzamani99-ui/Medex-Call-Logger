@@ -61,7 +61,7 @@ export default async function AppLayout({
       supabase
         .from('tickets')
         .select('id', { count: 'exact', head: true })
-        .in('status', ['open', 'in_progress']),
+        .neq('status', 'Resolved'),
       2000
     ),
     withTimeout(

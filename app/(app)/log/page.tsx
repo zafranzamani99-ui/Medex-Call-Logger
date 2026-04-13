@@ -41,6 +41,7 @@ interface CallLogDraft {
   needTeamCheck: boolean
   status: TicketStatus | null
   jiraLink: string
+  callDate?: string
 }
 
 const DRAFTS_KEY = 'medex-ws-drafts'
@@ -86,6 +87,10 @@ export default function LogCallPage() {
   const [uploading, setUploading] = useState(false)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Call date — defaults to today, can be changed to backdate
+  const [callDate, setCallDate] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [editingCallDate, setEditingCallDate] = useState(false)
 
   // Schedule fields — shown when issueType === 'Schedule'
   const [scheduleDate, setScheduleDate] = useState('')
@@ -212,6 +217,7 @@ export default function LogCallPage() {
       setNeedTeamCheck(draft.needTeamCheck)
       setStatus(draft.status)
       setJiraLink(draft.jiraLink)
+      if (draft.callDate) setCallDate(draft.callDate)
       toast('Form restored')
     }
     pendingRestoreRef.current = null
@@ -234,10 +240,10 @@ export default function LogCallPage() {
       selectedClinic, callerTel, pic, clinicWa,
       callDuration, issueCategory, issueType, issue, myResponse,
       nextStep, timelineFromCustomer, internalTimeline,
-      needTeamCheck, status, jiraLink,
+      needTeamCheck, status, jiraLink, callDate,
     }
   }, [selectedClinic, callerTel, pic, clinicWa, callDuration, issueCategory, issueType, issue,
-      myResponse, nextStep, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink])
+      myResponse, nextStep, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink, callDate])
 
   useEffect(() => {
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current)
@@ -422,10 +428,9 @@ export default function LogCallPage() {
     setFieldErrors({})
     setSaving(true)
 
-    // Support backdating — use the timeline entry date for created_at
-    const entryDate = timelineData?.entryDate || format(new Date(), 'yyyy-MM-dd')
+    // Backdate support — callDate defaults to today, can be set to past dates
     const now = new Date()
-    const createdAt = new Date(`${entryDate}T${format(now, 'HH:mm:ss')}`).toISOString()
+    const createdAt = new Date(`${callDate}T${format(now, 'HH:mm:ss')}`).toISOString()
 
     const ticketData = {
       record_type: 'call',
@@ -515,7 +520,7 @@ export default function LogCallPage() {
   }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, callerTel, callDuration,
       myResponse, nextStep, timelineFromCustomer, internalTimeline, needTeamCheck,
       timelineData, userId, userName, router, supabase, activeDraftId, drafts,
-      scheduleDate, scheduleTime, scheduleType, customScheduleType, attachments])
+      scheduleDate, scheduleTime, scheduleType, customScheduleType, attachments, callDate])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -554,6 +559,8 @@ export default function LogCallPage() {
     setScheduleType(null)
     setCustomScheduleType('')
     setScheduleMode('Remote')
+    setCallDate(format(new Date(), 'yyyy-MM-dd'))
+    setEditingCallDate(false)
     setTimelineData(null)
     setError('')
     setFieldErrors({})
@@ -584,6 +591,8 @@ export default function LogCallPage() {
     setScheduleType(null)
     setCustomScheduleType('')
     setScheduleMode('Remote')
+    setCallDate(format(new Date(), 'yyyy-MM-dd'))
+    setEditingCallDate(false)
     setTimelineData(null)
     setError('')
     setFieldErrors({})
@@ -615,6 +624,7 @@ export default function LogCallPage() {
       needTeamCheck,
       status,
       jiraLink,
+      callDate,
     }
     const updated = [draft, ...drafts].slice(0, 10)
     persistDrafts(updated)
@@ -644,6 +654,7 @@ export default function LogCallPage() {
     setNeedTeamCheck(draft.needTeamCheck)
     setStatus(draft.status)
     setJiraLink(draft.jiraLink)
+    if (draft.callDate) setCallDate(draft.callDate)
     setActiveDraftId(draftId)
     setError('')
     setFieldErrors({})
@@ -681,7 +692,38 @@ export default function LogCallPage() {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Log Call</h1>
-          <p className="text-[13px] text-text-tertiary mt-0.5">Record a new call or ticket</p>
+          <p className="text-[13px] text-text-tertiary mt-0.5">
+            Record a new call or ticket{' · '}
+            {editingCallDate ? (
+              <input
+                type="date"
+                value={callDate}
+                max={format(new Date(), 'yyyy-MM-dd')}
+                onChange={(e) => {
+                  setCallDate(e.target.value)
+                  setEditingCallDate(false)
+                }}
+                onBlur={() => setEditingCallDate(false)}
+                autoFocus
+                className="inline-block px-1.5 py-0.5 bg-surface border border-border rounded text-xs text-text-primary
+                           focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditingCallDate(true)}
+                className={`inline-block hover:underline ${
+                  callDate !== format(new Date(), 'yyyy-MM-dd')
+                    ? 'text-amber-400 font-medium'
+                    : 'text-text-tertiary'
+                }`}
+              >
+                {callDate === format(new Date(), 'yyyy-MM-dd')
+                  ? format(new Date(), 'dd MMM yyyy')
+                  : format(new Date(callDate + 'T00:00:00'), 'dd MMM yyyy')}
+              </button>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           {drafts.length > 0 && (
@@ -1191,6 +1233,7 @@ export default function LogCallPage() {
             <TimelineBuilder
               agentName={userName}
               onChange={(data) => setTimelineData(data)}
+              initialDate={callDate}
             />
           </div>
 

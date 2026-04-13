@@ -33,6 +33,11 @@ export default function TimelineBuilder({
   const [notes, setNotes] = useState(initialNotes)
   const [formattedString, setFormattedString] = useState('')
 
+  // Sync entryDate when parent changes call date (backdate support)
+  useEffect(() => {
+    if (initialDate) setEntryDate(initialDate)
+  }, [initialDate])
+
   // Auto-generate the formatted timeline string
   useEffect(() => {
     if (entryDate && channel && notes) {

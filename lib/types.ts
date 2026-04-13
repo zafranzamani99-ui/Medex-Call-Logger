@@ -149,6 +149,7 @@ export interface Ticket {
   created_by: string
   created_by_name: string
   created_at: string
+  submitted_at?: string
   updated_at: string
   last_updated_by: string | null
   last_updated_by_name: string | null
