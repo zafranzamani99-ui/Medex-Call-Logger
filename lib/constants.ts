@@ -219,7 +219,7 @@ export const JOB_SHEET_SERVICE_TYPES = [
 export const JOB_SHEET_ISSUE_CATEGORIES = [
   'Mdx1 Pro/Database/Gprinter/Mycard',
   'Migrate server',
-  'Network/Internet',
+  'Windows/Network',
   'Other chargeable',
 ]
 

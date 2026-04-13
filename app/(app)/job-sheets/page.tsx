@@ -330,7 +330,7 @@ export default function JobSheetsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Job Sheets <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-400/80 bg-amber-400/10 px-2 py-1 rounded align-middle">beta</span></h1>
+          <h1 className="text-2xl font-bold text-text-primary">Job Sheets</h1>
           <p className="text-[13px] text-text-tertiary mt-0.5">Service job sheets for clinic visits</p>
         </div>
         <Button variant="primary" size="sm" onClick={() => setShowCreate(true)}>

@@ -62,6 +62,7 @@ export default function JobSheetDetailPage() {
 
   const [clinicCode, setClinicCode] = useState('')
   const [clinicName, setClinicName] = useState('')
+  const [lkeyLines, setLkeyLines] = useState<string[]>([])
   const [contactPerson, setContactPerson] = useState('')
   const [contactTel, setContactTel] = useState('')
   const [doctorName, setDoctorName] = useState('')
@@ -158,6 +159,18 @@ export default function JobSheetDetailPage() {
     setImportantDetails(js.important_details && typeof js.important_details === 'object' && 'main_pc_name' in js.important_details
       ? js.important_details
       : DEFAULT_IMPORTANT_DETAILS)
+
+    // Fetch LKEY lines for clinic stamp
+    if (js.clinic_code) {
+      const { data: clinic } = await supabase
+        .from('clinics')
+        .select('lkey_line1, lkey_line2, lkey_line3, lkey_line4')
+        .eq('clinic_code', js.clinic_code)
+        .single()
+      if (clinic) {
+        setLkeyLines([clinic.lkey_line1, clinic.lkey_line2, clinic.lkey_line3, clinic.lkey_line4].filter(Boolean) as string[])
+      }
+    }
 
     setLoading(false)
   }
@@ -367,26 +380,26 @@ export default function JobSheetDetailPage() {
             * { box-sizing: border-box; }
             #js-print {
               font-family: Arial, Helvetica, sans-serif;
-              font-size: 9.5px;
+              font-size: 10.5px;
               color: #000 !important;
-              line-height: 1.25;
+              line-height: 1.28;
               width: 100%;
-              padding: 10mm 12mm 8mm 12mm;
+              padding: 8mm 12mm 6mm 12mm;
               -webkit-print-color-adjust: exact;
               print-color-adjust: exact;
             }
             #js-print table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-            #js-print td { border: 0.7px solid #333; padding: 3px 5px; vertical-align: top; color: #000 !important; background: #fff !important; overflow: hidden; word-wrap: break-word; }
+            #js-print td { border: 0.7px solid #333; padding: 3.5px 5px; vertical-align: top; color: #000 !important; background: #fff !important; overflow: hidden; word-wrap: break-word; }
             #js-print .nb { border: none !important; }
             #js-print .bt0 { border-top: none !important; }
             #js-print .bb0 { border-bottom: none !important; }
             #js-print .bl0 { border-left: none !important; }
             #js-print .br0 { border-right: none !important; }
-            #js-print .lbl { font-size: 9px; color: #000; white-space: nowrap; }
-            #js-print .v { font-weight: bold; font-size: 9.5px; color: #1a3a8a !important; }
+            #js-print .lbl { font-size: 10px; color: #000; white-space: nowrap; }
+            #js-print .v { font-weight: bold; font-size: 10.5px; color: #1a3a8a !important; }
             #js-print .shd { background: #e0e3eb !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-            #js-print .shtl { font-weight: bold; font-size: 8.5px; text-transform: uppercase; letter-spacing: 0.3px; padding: 3px 5px; }
-            #js-print .ck { width: 11px; height: 11px; border: 0.8px solid #000; display: inline-block; vertical-align: middle; margin-right: 3px; text-align: center; font-size: 9px; line-height: 11px; font-weight: bold; }
+            #js-print .shtl { font-weight: bold; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.3px; padding: 3.5px 5px; }
+            #js-print .ck { width: 12px; height: 12px; border: 0.8px solid #000; display: inline-block; vertical-align: middle; margin-right: 3px; text-align: center; font-size: 10px; line-height: 12px; font-weight: bold; }
             #js-print .ck-on { background: #1a1a1a !important; color: #fff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             #js-print .c { text-align: center; }
             #js-print .vm { vertical-align: middle; }
@@ -394,14 +407,19 @@ export default function JobSheetDetailPage() {
           }
         `}} />
 
-        {/* ── Logo — top right ── */}
-        <div style={{ textAlign: 'right', marginBottom: 2 }}>
+        {/* ── Logo + Address ── */}
+        <div style={{ textAlign: 'center', marginBottom: 2 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/medexone-logo.png" alt="MedexOne Global" style={{ height: 40, display: 'inline-block' }} />
+          <img src="/medexone-logo.png" alt="MedexOne Global" style={{ height: 48, display: 'inline-block' }} />
+          <div style={{ fontSize: '8px', color: '#444', lineHeight: 1.4, marginTop: 2 }}>
+            <strong>MEDEXONE GLOBAL SDN. BHD.</strong> (564400-X)<br/>
+            Unit 603, Block G, Level 6, Pusat Dagangan Phileo Damansara 1, No. 9, Jalan 16/11, 46350 Petaling Jaya, Selangor.<br/>
+            Tel: 03-5888 7767 &nbsp; Fax: 03-7954 0240 &nbsp; Email: allsupport@medexoneglobal.com
+          </div>
         </div>
         {/* ── Title — centered ── */}
-        <div style={{ textAlign: 'center', marginBottom: 8 }}>
-          <div style={{ fontSize: '16px', fontWeight: 'bold', letterSpacing: '2px' }}>SERVICE JOB SHEET</div>
+        <div style={{ textAlign: 'center', marginTop: 16, marginBottom: 8 }}>
+          <div style={{ fontSize: '17px', fontWeight: 'bold', letterSpacing: '2px' }}>SERVICE JOB SHEET</div>
         </div>
 
         {/* ── ROW 1: Clinic Stamp + Date/Time/Service/Program ── */}
@@ -417,9 +435,15 @@ export default function JobSheetDetailPage() {
             <tr>
               <td rowSpan={5} style={{ verticalAlign: 'top' }}>
                 <span className="lbl">Clinic Stamp</span>
-                <div style={{ minHeight: 45, paddingTop: 2 }}>
-                  <span className="v" style={{ fontSize: '10px' }}>{clinicName}</span><br/>
-                  <span style={{ fontSize: '8px', color: '#1a3a8a' }}>{clinicCode}</span>
+                <div style={{ minHeight: 50, paddingTop: 2 }}>
+                  {lkeyLines.length > 0 ? lkeyLines.map((line, i) => (
+                    <div key={i} style={{ fontSize: i === 0 ? '11px' : '9px', fontWeight: i === 0 ? 'bold' : 'normal', color: '#1a3a8a', lineHeight: 1.4 }}>{line}</div>
+                  )) : (
+                    <>
+                      <span className="v" style={{ fontSize: '11px' }}>{clinicName}</span><br/>
+                      <span style={{ fontSize: '9px', color: '#1a3a8a' }}>{clinicCode}</span>
+                    </>
+                  )}
                 </div>
               </td>
               <td className="lbl vm">Date</td>
@@ -518,8 +542,8 @@ export default function JobSheetDetailPage() {
           <tbody>
             <tr><td colSpan={5} className="shd shtl">Issue</td></tr>
             <tr>
-              <td className="lbl">Issue Detail</td>
-              <td className="v" style={{ whiteSpace: 'pre-wrap' }}>{issueDetail}</td>
+              <td className="lbl" style={{ verticalAlign: 'top' }}>Issue Detail</td>
+              <td className="v" style={{ whiteSpace: 'pre-wrap', minHeight: 55 }}>{issueDetail}</td>
               <td className="c shtl">Issue</td>
               <td colSpan={2} className="c shtl">Other Issues (chargeable)</td>
             </tr>
@@ -531,12 +555,12 @@ export default function JobSheetDetailPage() {
             </tr>
             <tr>
               <td className="vm"><span className="ck"></span> Database</td>
-              <td className="vm"><span className={issueCategories.find(c => c.label.includes('Network'))?.checked ? 'ck ck-on' : 'ck'}>{issueCategories.find(c => c.label.includes('Network'))?.checked ? '\u2713' : ''}</span> Network</td>
+              <td className="vm"><span className={issueCategories.find(c => c.label.includes('Windows') || c.label.includes('Network'))?.checked ? 'ck ck-on' : 'ck'}>{issueCategories.find(c => c.label.includes('Windows') || c.label.includes('Network'))?.checked ? '\u2713' : ''}</span> Windows</td>
               <td className="nb"></td>
             </tr>
             <tr>
               <td className="vm"><span className="ck"></span> Gprinter / Mycard</td>
-              <td className="vm"><span className="ck"></span> Internet</td>
+              <td className="vm"><span className="ck"></span> Network</td>
               <td className="nb"></td>
             </tr>
           </tbody>
@@ -548,7 +572,7 @@ export default function JobSheetDetailPage() {
           <tbody>
             <tr>
               <td className="lbl" style={{ verticalAlign: 'top' }}>Service Detail</td>
-              <td className="v" style={{ whiteSpace: 'pre-wrap', height: 40 }}>
+              <td className="v" style={{ whiteSpace: 'pre-wrap', minHeight: 60 }}>
                 {backupStatus && <>- BACKUP STATUS ({backupStatus.toUpperCase()}) : OK{'\n'}</>}
                 {serviceDone}
               </td>
@@ -562,9 +586,9 @@ export default function JobSheetDetailPage() {
           <tbody>
             <tr>
               <td className="lbl" style={{ verticalAlign: 'top' }}>Suggestion</td>
-              <td className="v" style={{ whiteSpace: 'pre-wrap', height: 30 }}>{suggestion}</td>
+              <td className="v" style={{ whiteSpace: 'pre-wrap', height: 32 }}>{suggestion}</td>
               <td className="lbl" style={{ verticalAlign: 'top' }}>Remark</td>
-              <td className="v" style={{ whiteSpace: 'pre-wrap', height: 30 }}>{remark}</td>
+              <td className="v" style={{ whiteSpace: 'pre-wrap', height: 32 }}>{remark}</td>
             </tr>
           </tbody>
         </table>
@@ -582,11 +606,11 @@ export default function JobSheetDetailPage() {
                     <tr><td colSpan={3} className="shd shtl">CHECKLIST</td></tr>
                     {checklist.map((item, idx) => (
                       <tr key={idx}>
-                        <td style={{ fontSize: '8px', padding: '1.5px 4px' }}>{item.label} =</td>
-                        <td className="c vm" style={{ padding: '1.5px 2px' }}>
+                        <td style={{ fontSize: '9px', padding: '2px 4px' }}>{item.label} =</td>
+                        <td className="c vm" style={{ padding: '2px 3px' }}>
                           <span className={item.checked ? 'ck ck-on' : 'ck'}>{item.checked ? '\u2713' : ''}</span>
                         </td>
-                        <td className="v" style={{ fontSize: '8px', padding: '1.5px 4px' }}>{item.notes}</td>
+                        <td className="v" style={{ fontSize: '9px', padding: '2px 4px' }}>{item.notes}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -597,33 +621,33 @@ export default function JobSheetDetailPage() {
                 <table style={{ marginBottom: 0 }}>
                   <colgroup><col style={{ width: '55%' }} /><col style={{ width: '45%' }} /></colgroup>
                   <tbody>
-                    <tr><td colSpan={2} className="shd shtl" style={{ fontSize: '7.5px' }}>IMPORTANT DETAILS: (MUST FILL IN WHEN ISP/MTN VISIT)</td></tr>
-                    <tr><td style={{ fontSize: '8px' }}>Main PC =</td><td className="v" style={{ fontSize: '8px' }}>{importantDetails.main_pc_name}</td></tr>
+                    <tr><td colSpan={2} className="shd shtl" style={{ fontSize: '9px' }}>IMPORTANT DETAILS: (MUST FILL IN WHEN ISP/MTN VISIT)</td></tr>
+                    <tr><td style={{ fontSize: '9px' }}>Main PC =</td><td className="v" style={{ fontSize: '9px' }}>{importantDetails.main_pc_name}</td></tr>
                     <tr>
-                      <td style={{ fontSize: '8px' }}>SPACE AVAILABLE</td>
-                      <td style={{ fontSize: '8px' }}><strong>C (SSD/HDD):</strong> <span style={{ color: '#1a3a8a' }}>{importantDetails.space_c}</span></td>
+                      <td style={{ fontSize: '9px' }}>SPACE AVAILABLE</td>
+                      <td style={{ fontSize: '9px' }}><strong>C (SSD/HDD):</strong> <span style={{ color: '#1a3a8a' }}>{importantDetails.space_c}</span></td>
                     </tr>
-                    <tr><td className="nb"></td><td style={{ fontSize: '8px' }}><strong>D:</strong> <span style={{ color: '#1a3a8a' }}>{importantDetails.space_d}</span></td></tr>
+                    <tr><td className="nb"></td><td style={{ fontSize: '9px' }}><strong>D:</strong> <span style={{ color: '#1a3a8a' }}>{importantDetails.space_d}</span></td></tr>
                     <tr>
-                      <td colSpan={2} style={{ fontSize: '8px' }}>
+                      <td colSpan={2} style={{ fontSize: '9px' }}>
                         <span className={importantDetails.auto_backup_30days ? 'ck ck-on' : 'ck'}>{importantDetails.auto_backup_30days ? '\u2713' : ''}</span> Auto-Backup &ndash; 30days. Image?
                       </td>
                     </tr>
-                    <tr><td style={{ fontSize: '8px' }}>Ext. HDD Backup: Y/N</td><td className="v" style={{ fontSize: '8px' }}>{importantDetails.ext_hdd_backup ? 'Y' : 'N'}</td></tr>
-                    <tr><td colSpan={2} style={{ fontSize: '8px' }}>Service DB &ndash; backup &amp; restore. Size</td></tr>
+                    <tr><td style={{ fontSize: '9px' }}>Ext. HDD Backup: Y/N</td><td className="v" style={{ fontSize: '9px' }}>{importantDetails.ext_hdd_backup ? 'Y' : 'N'}</td></tr>
+                    <tr><td colSpan={2} style={{ fontSize: '9px' }}>Service DB &ndash; backup &amp; restore. Size</td></tr>
                     <tr>
-                      <td style={{ fontSize: '8px' }}>Before: <span className="v" style={{ fontSize: '8px' }}>{importantDetails.service_db_size_before}</span></td>
-                      <td style={{ fontSize: '8px' }}>After: <span className="v" style={{ fontSize: '8px' }}>{importantDetails.service_db_size_after}</span></td>
+                      <td style={{ fontSize: '9px' }}>Before: <span className="v" style={{ fontSize: '9px' }}>{importantDetails.service_db_size_before}</span></td>
+                      <td style={{ fontSize: '9px' }}>After: <span className="v" style={{ fontSize: '9px' }}>{importantDetails.service_db_size_after}</span></td>
                     </tr>
                     <tr>
-                      <td style={{ fontSize: '8px' }}>Ultraviewer/Anydesk :</td>
-                      <td style={{ fontSize: '8px' }}>PW- <span className="v" style={{ fontSize: '8px' }}>{importantDetails.ultraviewer_pw || importantDetails.anydesk_pw}</span></td>
+                      <td style={{ fontSize: '9px' }}>Ultraviewer/Anydesk :</td>
+                      <td style={{ fontSize: '9px' }}>PW- <span className="v" style={{ fontSize: '9px' }}>{importantDetails.ultraviewer_pw || importantDetails.anydesk_pw}</span></td>
                     </tr>
-                    <tr><td colSpan={2} style={{ fontSize: '8px' }}><span className="ck"></span> RAM: <span className="v" style={{ fontSize: '8px' }}>{importantDetails.ram}</span></td></tr>
-                    <tr><td colSpan={2} style={{ fontSize: '8px' }}><span className="ck"></span> PROCESSOR : <span className="v" style={{ fontSize: '8px' }}>{importantDetails.processor}</span></td></tr>
+                    <tr><td colSpan={2} style={{ fontSize: '9px' }}><span className="ck"></span> RAM: <span className="v" style={{ fontSize: '9px' }}>{importantDetails.ram}</span></td></tr>
+                    <tr><td colSpan={2} style={{ fontSize: '9px' }}><span className="ck"></span> PROCESSOR : <span className="v" style={{ fontSize: '9px' }}>{importantDetails.processor}</span></td></tr>
                     <tr>
-                      <td style={{ fontSize: '8px' }}><span className={importantDetails.need_server ? 'ck ck-on' : 'ck'}>{importantDetails.need_server ? '\u2713' : ''}</span> Need SERVER?</td>
-                      <td style={{ fontSize: '8px' }}><span className={importantDetails.brief_doctor ? 'ck ck-on' : 'ck'}>{importantDetails.brief_doctor ? '\u2713' : ''}</span> Brief Doctor?</td>
+                      <td style={{ fontSize: '9px' }}><span className={importantDetails.need_server ? 'ck ck-on' : 'ck'}>{importantDetails.need_server ? '\u2713' : ''}</span> Need SERVER?</td>
+                      <td style={{ fontSize: '9px' }}><span className={importantDetails.brief_doctor ? 'ck ck-on' : 'ck'}>{importantDetails.brief_doctor ? '\u2713' : ''}</span> Brief Doctor?</td>
                     </tr>
                     {/* CHARGES — inside right column */}
                     <tr>
@@ -631,7 +655,7 @@ export default function JobSheetDetailPage() {
                       <td className="v vm">{chargeAmount ? `RM ${chargeAmount}` : 'RM'}</td>
                     </tr>
                     <tr>
-                      <td colSpan={2} style={{ fontSize: '8px', lineHeight: 1.5 }}>
+                      <td colSpan={2} style={{ fontSize: '9px', lineHeight: 1.5 }}>
                         <span className={paymentMethod === 'COD' || paymentMethod === 'Cheque' || paymentMethod === 'Online Transfer' ? 'ck ck-on' : 'ck'}>{paymentMethod === 'COD' || paymentMethod === 'Cheque' || paymentMethod === 'Online Transfer' ? '\u2713' : ''}</span> COD, collect CHEQUE / ONLINE TRANSFER<br/>
                         <span className={paymentMethod === 'Credit Card' ? 'ck ck-on' : 'ck'}>{paymentMethod === 'Credit Card' ? '\u2713' : ''}</span> Credit Card Machine Payment<br/>
                         <span className={needReceipt ? 'ck ck-on' : 'ck'}>{needReceipt ? '\u2713' : ''}</span> Need Official Receipt (By accounts)<br/>
@@ -655,28 +679,24 @@ export default function JobSheetDetailPage() {
                 &nbsp;&nbsp;&nbsp;
                 <span className={jobOutcome === 'to_be_continued' ? 'ck ck-on' : 'ck'}>{jobOutcome === 'to_be_continued' ? '\u2713' : ''}</span> TO BE CONTINUED
               </td>
-              <td className="vm" style={{ fontSize: '8.5px', padding: '6px 8px' }}>
+              <td className="vm" style={{ fontSize: '9.5px', padding: '6px 8px' }}>
                 <span className={jobOutcome === 'completed' ? 'ck ck-on' : 'ck'}>{jobOutcome === 'completed' ? '\u2713' : ''}</span> THE WORK DETAILED ABOVE HAD BEEN CARRIED OUT TO MY SATISFACTION
               </td>
             </tr>
             <tr>
-              <td style={{ height: 100, verticalAlign: 'bottom', textAlign: 'center', padding: '6px 8px 8px' }}>
-                <div style={{ fontStyle: 'italic', fontWeight: 'bold', fontSize: '13px', color: '#1a3a8a', marginBottom: 5 }}>{serviceBy}</div>
-                <div style={{ borderTop: '1.5px solid #000', display: 'inline-block', minWidth: 180, paddingTop: 3, fontSize: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>SERVICE PERFORMED BY</div>
+              <td style={{ height: 90, verticalAlign: 'bottom', textAlign: 'center', padding: '6px 8px 8px' }}>
+                <div style={{ fontStyle: 'italic', fontWeight: 'bold', fontSize: '14px', color: '#1a3a8a', marginBottom: 5 }}>{serviceBy}</div>
+                <div style={{ borderTop: '1.5px solid #000', display: 'inline-block', minWidth: 190, paddingTop: 3, fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>SERVICE PERFORMED BY</div>
               </td>
-              <td style={{ height: 100, verticalAlign: 'bottom', textAlign: 'center', padding: '6px 8px 8px' }}>
-                <div style={{ fontWeight: 'bold', fontSize: '13px', color: '#1a3a8a', marginBottom: 5 }}>{customerRepName}</div>
-                <div style={{ borderTop: '1.5px solid #000', display: 'inline-block', minWidth: 180, paddingTop: 3, fontSize: '8px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>CUSTOMER&apos;S REPRESENTATIVE</div>
+              <td style={{ height: 90, verticalAlign: 'bottom', textAlign: 'center', padding: '6px 8px 8px' }}>
+                <div style={{ fontWeight: 'bold', fontSize: '14px', color: '#1a3a8a', marginBottom: 5 }}>{customerRepName}</div>
+                <div style={{ borderTop: '1.5px solid #000', display: 'inline-block', minWidth: 190, paddingTop: 3, fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>CUSTOMER&apos;S REPRESENTATIVE</div>
               </td>
             </tr>
           </tbody>
         </table>
 
-        {/* ── FOOTER ── */}
-        <div style={{ marginTop: 18, textAlign: 'left' }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/footer.jpg" alt="MedexOne Global Footer" style={{ maxWidth: '70%', width: '70%', height: 'auto' }} />
-        </div>
+        {/* Footer removed — address is now under the logo at the top */}
       </div>
 
       {/* ===== INTERACTIVE FORM — visible on screen, hidden when printing ===== */}
