@@ -44,16 +44,8 @@ interface CallLogDraft {
   callDate?: string
 }
 
-const DRAFTS_KEY = 'medex-ws-drafts'
 const AUTOSAVE_KEY = 'medex-ws-autosave'
 const MAX_ATTACHMENTS = 5
-function loadDrafts(): CallLogDraft[] {
-  try { return JSON.parse(localStorage.getItem(DRAFTS_KEY) || '[]') }
-  catch { return [] }
-}
-function persistDrafts(drafts: CallLogDraft[]) {
-  localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts))
-}
 
 export default function LogCallPage() {
   const router = useRouter()
@@ -184,7 +176,26 @@ export default function LogCallPage() {
       }
     }
 
-    setDrafts(loadDrafts())
+    // Load drafts from Supabase (persistent, survives browser clear)
+    async function fetchDrafts() {
+      const { data: { session: s } } = await supabase.auth.getSession()
+      if (!s?.user) return
+      const { data } = await supabase
+        .from('call_log_drafts')
+        .select('*')
+        .eq('user_id', s.user.id)
+        .order('updated_at', { ascending: false })
+      if (data) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        setDrafts(data.map((row: any) => ({
+          id: row.id,
+          label: row.label,
+          savedAt: row.updated_at,
+          ...row.form_data,
+        })))
+      }
+    }
+    fetchDrafts()
 
     try {
       const saved = localStorage.getItem(AUTOSAVE_KEY)
@@ -508,9 +519,8 @@ export default function LogCallPage() {
     }
 
     if (activeDraftId) {
-      const updated = drafts.filter(d => d.id !== activeDraftId)
-      persistDrafts(updated)
-      setDrafts(updated)
+      await supabase.from('call_log_drafts').delete().eq('id', activeDraftId)
+      setDrafts(prev => prev.filter(d => d.id !== activeDraftId))
     }
 
     submittedRef.current = true
@@ -519,7 +529,7 @@ export default function LogCallPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, callerTel, callDuration,
       myResponse, nextStep, timelineFromCustomer, internalTimeline, needTeamCheck,
-      timelineData, userId, userName, router, supabase, activeDraftId, drafts,
+      timelineData, userId, userName, router, supabase, activeDraftId,
       scheduleDate, scheduleTime, scheduleType, customScheduleType, attachments, callDate])
 
   useEffect(() => {
@@ -600,35 +610,29 @@ export default function LogCallPage() {
     localStorage.removeItem(AUTOSAVE_KEY)
   }
 
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     if (!selectedClinic && !pic && !issue && !callerTel) {
       toast('Nothing to save — form is empty', 'error')
       return
     }
-    const draft: CallLogDraft = {
-      id: crypto.randomUUID(),
-      label: selectedClinic?.clinic_name || pic || 'Draft',
-      savedAt: new Date().toISOString(),
-      selectedClinic,
-      callerTel,
-      pic,
-      clinicWa,
-      callDuration,
-      issueCategory,
-      issueType,
-      issue,
-      myResponse,
-      nextStep,
-      timelineFromCustomer,
-      internalTimeline,
-      needTeamCheck,
-      status,
-      jiraLink,
-      callDate,
+    const label = selectedClinic?.clinic_name || pic || 'Draft'
+    const formData = {
+      selectedClinic, callerTel, pic, clinicWa, callDuration,
+      issueCategory, issueType, issue, myResponse, nextStep,
+      timelineFromCustomer, internalTimeline, needTeamCheck,
+      status, jiraLink, callDate,
     }
-    const updated = [draft, ...drafts].slice(0, 10)
-    persistDrafts(updated)
-    setDrafts(updated)
+    const { data, error: err } = await supabase.from('call_log_drafts').insert({
+      user_id: userId,
+      label,
+      form_data: formData,
+    }).select().single()
+    if (err || !data) {
+      toast('Failed to save draft', 'error')
+      return
+    }
+    const newDraft: CallLogDraft = { id: data.id, label, savedAt: data.updated_at, ...formData }
+    setDrafts(prev => [newDraft, ...prev])
     resetFormSilent()
     toast('Draft saved — start your next call')
   }
@@ -660,10 +664,9 @@ export default function LogCallPage() {
     setFieldErrors({})
   }
 
-  const handleDeleteDraft = (draftId: string) => {
-    const updated = drafts.filter(d => d.id !== draftId)
-    persistDrafts(updated)
-    setDrafts(updated)
+  const handleDeleteDraft = async (draftId: string) => {
+    await supabase.from('call_log_drafts').delete().eq('id', draftId)
+    setDrafts(prev => prev.filter(d => d.id !== draftId))
     if (activeDraftId === draftId) setActiveDraftId(null)
   }
 
@@ -748,7 +751,7 @@ export default function LogCallPage() {
               }`}
             >
               <span className="truncate">{draft.label}</span>
-              <span className="text-text-muted text-[10px]">{format(new Date(draft.savedAt), 'HH:mm')}</span>
+              <span className="text-text-muted text-[10px]">{format(new Date(draft.savedAt), 'dd MMM HH:mm')}</span>
               <span
                 role="button"
                 onClick={(e) => { e.stopPropagation(); handleDeleteDraft(draft.id) }}
