@@ -370,6 +370,20 @@ export default function JobSheetDetailPage() {
           </svg>
           PDF
         </Button>
+        <Button variant="ghost" size="sm" onClick={() => {
+          const svcType = serviceTypes.length > 0 ? serviceTypes.join('/') : 'MTN'
+          const year = new Date().getFullYear()
+          const to = clinicEmail || ''
+          const cc = 'allsupport@medexoneglobal.com,celine.gan@medexoneglobal.com'
+          const subject = `JOBSHEET ${svcType.toUpperCase()} for ${clinicName} (${clinicCode})`
+          const body = `Dear Dr/PIC,\n\nKindly print out the attachment for job sheet done for ${svcType.toUpperCase()} ${year}.\nPlease sign and chop the job sheet form and email back the form.\n\nThanks & Regards,`
+          window.open(`mailto:${encodeURIComponent(to)}?cc=${encodeURIComponent(cc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_self')
+        }}>
+          <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+          Email
+        </Button>
         <Button variant="danger" size="sm" loading={deleting} onClick={handleDelete}>
           <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
