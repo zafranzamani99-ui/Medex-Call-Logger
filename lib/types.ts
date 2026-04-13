@@ -323,7 +323,9 @@ export interface JobSheetIssueCategory {
 export interface JobSheetImportantDetails {
   main_pc_name: string
   space_c: string
+  space_c_type: '' | 'SSD' | 'HDD'
   space_d: string
+  space_d_type: '' | 'SSD' | 'HDD'
   auto_backup_30days: boolean
   ext_hdd_backup: boolean
   service_db_size_before: string

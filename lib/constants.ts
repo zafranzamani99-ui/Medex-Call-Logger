@@ -274,7 +274,9 @@ export function getResourceCategoryColor(category: string) {
 export const DEFAULT_IMPORTANT_DETAILS = {
   main_pc_name: '',
   space_c: '',
+  space_c_type: '' as '' | 'SSD' | 'HDD',
   space_d: '',
+  space_d_type: '' as '' | 'SSD' | 'HDD',
   auto_backup_30days: false,
   ext_hdd_backup: false,
   service_db_size_before: '',

@@ -625,9 +625,9 @@ export default function JobSheetDetailPage() {
                     <tr><td style={{ fontSize: '9px' }}>Main PC =</td><td className="v" style={{ fontSize: '9px' }}>{importantDetails.main_pc_name}</td></tr>
                     <tr>
                       <td style={{ fontSize: '9px' }}>SPACE AVAILABLE</td>
-                      <td style={{ fontSize: '9px' }}><strong>C (SSD/HDD):</strong> <span style={{ color: '#1a3a8a' }}>{importantDetails.space_c}</span></td>
+                      <td style={{ fontSize: '9px' }}><strong>C ({importantDetails.space_c_type || 'SSD/HDD'}):</strong> <span className="v">{importantDetails.space_c}</span></td>
                     </tr>
-                    <tr><td className="nb"></td><td style={{ fontSize: '9px' }}><strong>D:</strong> <span style={{ color: '#1a3a8a' }}>{importantDetails.space_d}</span></td></tr>
+                    <tr><td className="nb"></td><td style={{ fontSize: '9px' }}><strong>D ({importantDetails.space_d_type || 'SSD/HDD'}):</strong> <span className="v">{importantDetails.space_d}</span></td></tr>
                     <tr>
                       <td colSpan={2} style={{ fontSize: '9px' }}>
                         <span className={importantDetails.auto_backup_30days ? 'ck ck-on' : 'ck'}>{importantDetails.auto_backup_30days ? '\u2713' : ''}</span> Auto-Backup &ndash; 30days. Image?
@@ -924,12 +924,26 @@ export default function JobSheetDetailPage() {
               <Input type="text" value={importantDetails.ram} onChange={(e) => updateDetail('ram', e.target.value)} placeholder="e.g. 16GB" />
             </div>
             <div>
-              <Label>C Drive (SSD/HDD)</Label>
-              <Input type="text" value={importantDetails.space_c} onChange={(e) => updateDetail('space_c', e.target.value)} placeholder="Space available" />
+              <Label>C Drive</Label>
+              <div className="flex gap-2">
+                <Select value={importantDetails.space_c_type || ''} onChange={(e) => updateDetail('space_c_type', e.target.value)} className="w-24 flex-shrink-0">
+                  <option value="">Type</option>
+                  <option value="SSD">SSD</option>
+                  <option value="HDD">HDD</option>
+                </Select>
+                <Input type="text" value={importantDetails.space_c} onChange={(e) => updateDetail('space_c', e.target.value)} placeholder="e.g. 326 GB" />
+              </div>
             </div>
             <div>
               <Label>D Drive</Label>
-              <Input type="text" value={importantDetails.space_d} onChange={(e) => updateDetail('space_d', e.target.value)} placeholder="Space available" />
+              <div className="flex gap-2">
+                <Select value={importantDetails.space_d_type || ''} onChange={(e) => updateDetail('space_d_type', e.target.value)} className="w-24 flex-shrink-0">
+                  <option value="">Type</option>
+                  <option value="SSD">SSD</option>
+                  <option value="HDD">HDD</option>
+                </Select>
+                <Input type="text" value={importantDetails.space_d} onChange={(e) => updateDetail('space_d', e.target.value)} placeholder="e.g. 500 GB" />
+              </div>
             </div>
             <div>
               <Label>Processor</Label>
