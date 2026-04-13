@@ -221,6 +221,7 @@ export default function JobSheetDetailPage() {
     if (newStatus) setStatus(newStatus)
     if (!silent) {
       toast(newStatus === 'completed' ? 'Job sheet completed' : 'Saved')
+      if (newStatus === 'draft') router.push('/job-sheets')
     } else {
       setAutoSaved(true)
       setTimeout(() => setAutoSaved(false), 2000)
@@ -333,43 +334,43 @@ export default function JobSheetDetailPage() {
 
   return (
     <div className="pb-20 md:pb-6">
-      {/* Sticky header bar */}
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3" data-print-hide>
-        <div className="flex items-center gap-3">
-          <button onClick={() => router.push('/job-sheets')} className="text-text-tertiary hover:text-text-primary transition-colors">
-            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-text-primary font-mono">{jsNumber}</h1>
-              <Badge bg={sc.bg} text={sc.text}>{status}</Badge>
-              {autoSaved && <span className="text-[11px] text-green-400 animate-fadeIn">Saved</span>}
-            </div>
-            <p className="text-[12px] text-text-tertiary">{clinicName}</p>
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6" data-print-hide>
+        <button onClick={() => router.push('/job-sheets')} className="text-text-tertiary hover:text-text-primary transition-colors">
+          <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold text-text-primary font-mono">{jsNumber}</h1>
+            <Badge bg={sc.bg} text={sc.text}>{status}</Badge>
+            {autoSaved && <span className="text-[11px] text-green-400 animate-fadeIn">Saved</span>}
           </div>
+          <p className="text-[12px] text-text-tertiary">{clinicName}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" loading={saving} onClick={() => handleSave('draft')}>
-            Save Draft
-          </Button>
-          <Button variant="success" size="sm" onClick={() => handleSave('completed')}>
-            Complete
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => window.print()}>
-            <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-            </svg>
-            PDF
-          </Button>
-          <Button variant="danger" size="sm" loading={deleting} onClick={handleDelete}>
-            <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-            </svg>
-            Delete
-          </Button>
-        </div>
+      </div>
+
+      {/* Sticky bottom action bar */}
+      <div className="fixed bottom-0 left-0 right-0 md:left-[var(--sidebar-width)] z-50 bg-surface border-t border-border px-4 py-3 flex items-center justify-center gap-2 transition-[left] duration-200 print:hidden" data-print-hide>
+        <Button variant="secondary" size="sm" loading={saving} onClick={() => handleSave('draft')}>
+          Save Draft
+        </Button>
+        <Button variant="success" size="sm" onClick={() => handleSave('completed')}>
+          Complete
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => window.print()}>
+          <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+          </svg>
+          PDF
+        </Button>
+        <Button variant="danger" size="sm" loading={deleting} onClick={handleDelete}>
+          <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+          Delete
+        </Button>
       </div>
 
       {/* ===== PRINT LAYOUT v3.0 — pixel-perfect replica of paper SERVICE JOB SHEET ===== */}
@@ -627,7 +628,7 @@ export default function JobSheetDetailPage() {
                       <td style={{ fontSize: '9px' }}>SPACE AVAILABLE</td>
                       <td style={{ fontSize: '9px' }}><strong>C ({importantDetails.space_c_type || 'SSD/HDD'}):</strong> <span className="v">{importantDetails.space_c}</span></td>
                     </tr>
-                    <tr><td className="nb"></td><td style={{ fontSize: '9px' }}><strong>D ({importantDetails.space_d_type || 'SSD/HDD'}):</strong> <span className="v">{importantDetails.space_d}</span></td></tr>
+                    <tr><td className="nb"></td><td style={{ fontSize: '9px' }}><strong>D:</strong> <span className="v">{importantDetails.space_d}</span></td></tr>
                     <tr>
                       <td colSpan={2} style={{ fontSize: '9px' }}>
                         <span className={importantDetails.auto_backup_30days ? 'ck ck-on' : 'ck'}>{importantDetails.auto_backup_30days ? '\u2713' : ''}</span> Auto-Backup &ndash; 30days. Image?
@@ -936,14 +937,7 @@ export default function JobSheetDetailPage() {
             </div>
             <div>
               <Label>D Drive</Label>
-              <div className="flex gap-2">
-                <Select value={importantDetails.space_d_type || ''} onChange={(e) => updateDetail('space_d_type', e.target.value)} className="w-24 flex-shrink-0">
-                  <option value="">Type</option>
-                  <option value="SSD">SSD</option>
-                  <option value="HDD">HDD</option>
-                </Select>
-                <Input type="text" value={importantDetails.space_d} onChange={(e) => updateDetail('space_d', e.target.value)} placeholder="e.g. 500 GB" />
-              </div>
+              <Input type="text" value={importantDetails.space_d} onChange={(e) => updateDetail('space_d', e.target.value)} placeholder="e.g. 500 GB" />
             </div>
             <div>
               <Label>Processor</Label>
