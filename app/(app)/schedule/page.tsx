@@ -96,7 +96,9 @@ export default function SchedulePage() {
   const [showCrmPanel, setShowCrmPanel] = useState(false)
   const [workNotes, setWorkNotes] = useState('')
   const workNotesRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const workNotesValueRef = useRef('')
   const [elapsedMinutes, setElapsedMinutes] = useState(0)
+  const [existingJobSheetId, setExistingJobSheetId] = useState<string | null>(null)
 
   // Clinic phone lookup (clinic_code → phone)
   const [clinicPhones, setClinicPhones] = useState<Record<string, string>>({})
@@ -254,8 +256,21 @@ export default function SchedulePage() {
     setSelectedSchedule(schedule)
     setShowDetailModal(true)
     setShowWorkPanel(schedule.status === 'in_progress')
+    setExistingJobSheetId(null)
     if (schedule.status === 'in_progress') {
       setWorkNotes(schedule.notes || '')
+      if (schedule.clinic_code && schedule.clinic_code !== 'MANUAL') {
+        const { data } = await supabase.from('clinics').select('*').eq('clinic_code', schedule.clinic_code).single()
+        setWorkClinic(data as Clinic | null)
+      } else {
+        setWorkClinic(null)
+      }
+    }
+    // For completed schedules, check if a job sheet already exists
+    if (schedule.status === 'completed') {
+      const { data: js } = await supabase.from('job_sheets').select('id').eq('schedule_id', schedule.id).maybeSingle()
+      setExistingJobSheetId(js?.id || null)
+      // Also fetch fresh clinic data for potential job sheet creation
       if (schedule.clinic_code && schedule.clinic_code !== 'MANUAL') {
         const { data } = await supabase.from('clinics').select('*').eq('clinic_code', schedule.clinic_code).single()
         setWorkClinic(data as Clinic | null)
@@ -474,17 +489,31 @@ export default function SchedulePage() {
   // Save work notes (debounced auto-save)
   const saveWorkNotes = useCallback(async (notes: string) => {
     if (!selectedSchedule) return
+    const now = new Date().toISOString()
     await supabase.from('schedules').update({
       notes: notes || null,
-      updated_at: new Date().toISOString(),
+      updated_at: now,
     }).eq('id', selectedSchedule.id)
+    // Update local state so reopening shows latest notes
+    setSchedules(prev => prev.map(s => s.id === selectedSchedule.id ? { ...s, notes: notes || null, updated_at: now } : s))
+    setSelectedSchedule(prev => prev ? { ...prev, notes: notes || null, updated_at: now } : prev)
   }, [selectedSchedule, supabase])
 
   const handleWorkNotesChange = (notes: string) => {
     setWorkNotes(notes)
+    workNotesValueRef.current = notes
     if (workNotesRef.current) clearTimeout(workNotesRef.current)
-    workNotesRef.current = setTimeout(() => saveWorkNotes(notes), 2000)
+    workNotesRef.current = setTimeout(() => { saveWorkNotes(notes); workNotesRef.current = null }, 2000)
   }
+
+  // Flush pending notes save immediately (call on panel close)
+  const flushWorkNotes = useCallback(() => {
+    if (workNotesRef.current) {
+      clearTimeout(workNotesRef.current)
+      workNotesRef.current = null
+      saveWorkNotes(workNotesValueRef.current)
+    }
+  }, [saveWorkNotes])
 
   // Format phone for WhatsApp link (strip non-digits, add 60 if needed)
   const formatWALink = (phone: string) => {
@@ -943,7 +972,7 @@ export default function SchedulePage() {
       {/* ===== Detail Modal ===== */}
       {showDetailModal && selectedSchedule && (
         <>
-          <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => { setShowDetailModal(false); setIsEditing(false) }} />
+          <div className="fixed inset-0 bg-black/40 z-[60]" onClick={() => { flushWorkNotes(); setShowDetailModal(false); setIsEditing(false); setShowWorkPanel(false) }} />
           <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-2 pb-20 sm:p-4 sm:pb-4 pointer-events-none">
             <div className={`bg-surface border border-border rounded-xl w-full ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'max-w-2xl' : 'max-w-lg'} max-h-[90vh] flex flex-col pointer-events-auto shadow-xl transition-all`}>
               {/* Header */}
@@ -951,7 +980,7 @@ export default function SchedulePage() {
                 <div className="flex items-center gap-2">
                   {/* Back arrow when in work panel */}
                   {(selectedSchedule.status === 'in_progress' && showWorkPanel && !isEditing) && (
-                    <button onClick={() => setShowWorkPanel(false)} className="text-text-tertiary hover:text-text-primary p-1 -ml-1 transition-colors" title="Back to details">
+                    <button onClick={() => { flushWorkNotes(); setShowWorkPanel(false) }} className="text-text-tertiary hover:text-text-primary p-1 -ml-1 transition-colors" title="Back to details">
                       <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                       </svg>
@@ -961,7 +990,7 @@ export default function SchedulePage() {
                     {isEditing ? 'Edit Schedule' : (selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'Work Panel' : 'Schedule Detail'}
                   </h3>
                 </div>
-                <button onClick={() => { setShowDetailModal(false); setIsEditing(false); setShowWorkPanel(false) }} className="text-text-tertiary hover:text-text-primary p-2 -mr-2 transition-colors">
+                <button onClick={() => { flushWorkNotes(); setShowDetailModal(false); setIsEditing(false); setShowWorkPanel(false) }} className="text-text-tertiary hover:text-text-primary p-2 -mr-2 transition-colors">
                   <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                   </svg>
@@ -1372,9 +1401,9 @@ export default function SchedulePage() {
                           sessionStorage.setItem('js-prefill', JSON.stringify({
                             schedule_id: selectedSchedule.id,
                             clinic_code: selectedSchedule.clinic_code,
-                            clinic_name: selectedSchedule.clinic_name,
+                            clinic_name: workClinic?.clinic_name || selectedSchedule.clinic_name,
                             contact_person: selectedSchedule.pic || '',
-                            contact_tel: selectedSchedule.clinic_wa || '',
+                            contact_tel: workClinic?.clinic_phone || selectedSchedule.clinic_wa || '',
                             service_date: selectedSchedule.schedule_date,
                             work_notes: workNotes || '',
                           }))
@@ -1605,6 +1634,47 @@ export default function SchedulePage() {
                         <Button size="sm" variant="secondary" onClick={() => handleStatusChange(selectedSchedule.id, 'scheduled')}>
                           Reopen
                         </Button>
+                      )}
+                      {/* Job Sheet — for completed schedules */}
+                      {selectedSchedule.status === 'completed' && selectedSchedule.clinic_code !== 'MANUAL' && (
+                        <button
+                          onClick={() => {
+                            if (existingJobSheetId) {
+                              router.push(`/job-sheets/${existingJobSheetId}`)
+                            } else {
+                              sessionStorage.setItem('js-prefill', JSON.stringify({
+                                schedule_id: selectedSchedule.id,
+                                clinic_code: selectedSchedule.clinic_code,
+                                clinic_name: workClinic?.clinic_name || selectedSchedule.clinic_name,
+                                contact_person: selectedSchedule.pic || '',
+                                contact_tel: workClinic?.clinic_phone || selectedSchedule.clinic_wa || '',
+                                service_date: selectedSchedule.schedule_date,
+                                work_notes: selectedSchedule.notes || '',
+                              }))
+                              router.push('/job-sheets?create=1')
+                            }
+                          }}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                            existingJobSheetId
+                              ? 'bg-green-500/10 text-green-400/60 border-green-500/20 hover:bg-green-500/15'
+                              : 'bg-orange-500/15 text-orange-400 border-orange-500/30 hover:bg-orange-500/25'
+                          }`}
+                          title={existingJobSheetId ? 'View existing job sheet' : 'Generate job sheet'}
+                        >
+                          <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          {existingJobSheetId ? (
+                            <>
+                              <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                              </svg>
+                              Job Sheet
+                            </>
+                          ) : (
+                            'Job Sheet'
+                          )}
+                        </button>
                       )}
                       {/* Delete — subtle icon, pushed to the right */}
                       <button
