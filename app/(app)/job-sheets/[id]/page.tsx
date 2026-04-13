@@ -359,7 +359,12 @@ export default function JobSheetDetailPage() {
         <Button variant="success" size="sm" onClick={() => handleSave('completed')}>
           Complete
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => window.print()}>
+        <Button variant="ghost" size="sm" onClick={() => {
+          const prev = document.title
+          document.title = `${clinicName} (${clinicCode})`
+          window.print()
+          document.title = prev
+        }}>
           <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
           </svg>
