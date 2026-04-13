@@ -61,11 +61,11 @@ export default function JobSheetsPage() {
       setFormDate(`${yyyy}-${mm}-${dd}`)
 
       // Check for schedule prefill — auto-create job sheet from work panel
-      const prefill = sessionStorage.getItem('js-prefill')
+      const prefill = localStorage.getItem('js-prefill')
       const shouldCreate = new URLSearchParams(window.location.search).get('create')
       if (prefill && shouldCreate) {
         const data = JSON.parse(prefill)
-        sessionStorage.removeItem('js-prefill')
+        localStorage.removeItem('js-prefill')
 
         if (data.clinic_code && data.work_notes?.trim()) {
           // Has notes from work panel — auto-create with AI parsing
@@ -128,6 +128,11 @@ export default function JobSheetsPage() {
 
     const checklist = JOB_SHEET_CHECKLIST_LABELS.map(label => {
       const item = { label, checked: false, notes: '' }
+      // CRM defaults first
+      if (clinicData?.workstation_count && label === 'Total Workstation') item.notes = clinicData.workstation_count
+      if (clinicData?.current_program_version && label === 'Install/Update Program Version No') item.notes = clinicData.current_program_version
+      if (clinicData?.current_db_version && label === 'Database Version (after update)') item.notes = clinicData.current_db_version
+      // AI-parsed values override CRM (agent notes are more current)
       if (parsed.total_workstation && label === 'Total Workstation') item.notes = parsed.total_workstation
       if (parsed.program_version_after && label === 'Install/Update Program Version No') item.notes = parsed.program_version_after
       if (parsed.db_version_after && label === 'Database Version (after update)') item.notes = parsed.db_version_after
@@ -147,6 +152,7 @@ export default function JobSheetsPage() {
     if (clinicData?.processor) importantDetails.processor = clinicData.processor
     if (clinicData?.has_backup) importantDetails.auto_backup_30days = true
     if (clinicData?.has_ext_hdd) importantDetails.ext_hdd_backup = true
+    if (clinicData?.db_size) importantDetails.service_db_size_before = clinicData.db_size
     // AI-parsed values override CRM defaults (agent notes are more current)
     if (parsed.main_pc_name) importantDetails.main_pc_name = parsed.main_pc_name
     if (parsed.space_c) importantDetails.space_c = parsed.space_c
@@ -214,6 +220,14 @@ export default function JobSheetsPage() {
 
     setFormSaving(true)
 
+    // Fetch fresh clinic data from CRM
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let clinicData: any = formClinic
+    if (!formClinic && clinicCode) {
+      const { data: clinic } = await supabase.from('clinics').select('*').eq('clinic_code', clinicCode).single()
+      clinicData = clinic
+    }
+
     // Parse work notes with AI if available
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let parsed: any = {}
@@ -231,28 +245,36 @@ export default function JobSheetsPage() {
 
     const defaultChecklist = JOB_SHEET_CHECKLIST_LABELS.map(label => {
       const item: { label: string; checked: boolean; notes: string } = { label, checked: false, notes: '' }
-      // Pre-fill checklist notes from parsed data
-      if (parsed.total_workstation && label === 'Total Workstation') {
-        item.notes = parsed.total_workstation
-      }
-      if (parsed.program_version_after && label === 'Install/Update Program Version No') {
-        item.notes = parsed.program_version_after
-      }
-      if (parsed.db_version_after && label === 'Database Version (after update)') {
-        item.notes = parsed.db_version_after
-      }
+      // CRM defaults first
+      if (clinicData?.workstation_count && label === 'Total Workstation') item.notes = clinicData.workstation_count
+      if (clinicData?.current_program_version && label === 'Install/Update Program Version No') item.notes = clinicData.current_program_version
+      if (clinicData?.current_db_version && label === 'Database Version (after update)') item.notes = clinicData.current_db_version
+      // AI-parsed values override CRM (agent notes are more current)
+      if (parsed.total_workstation && label === 'Total Workstation') item.notes = parsed.total_workstation
+      if (parsed.program_version_after && label === 'Install/Update Program Version No') item.notes = parsed.program_version_after
+      if (parsed.db_version_after && label === 'Database Version (after update)') item.notes = parsed.db_version_after
       // Apply any extra checklist_notes from AI
-      if (parsed.checklist_notes && parsed.checklist_notes[label]) {
-        item.notes = parsed.checklist_notes[label]
-      }
+      if (parsed.checklist_notes && parsed.checklist_notes[label]) item.notes = parsed.checklist_notes[label]
       return item
     })
     const defaultIssueCategories = JOB_SHEET_ISSUE_CATEGORIES.map(label => ({
       label, checked: false,
     }))
 
-    // Merge important details from parsed notes
+    // Merge important details — CRM first, then AI-parsed overrides
     const importantDetails = { ...DEFAULT_IMPORTANT_DETAILS }
+    // CRM defaults
+    if (clinicData?.main_pc_name) importantDetails.main_pc_name = clinicData.main_pc_name
+    if (clinicData?.ultraviewer_id) importantDetails.ultraviewer_id = clinicData.ultraviewer_id
+    if (clinicData?.ultraviewer_pw) importantDetails.ultraviewer_pw = clinicData.ultraviewer_pw
+    if (clinicData?.anydesk_id) importantDetails.anydesk_id = clinicData.anydesk_id
+    if (clinicData?.anydesk_pw) importantDetails.anydesk_pw = clinicData.anydesk_pw
+    if (clinicData?.ram) importantDetails.ram = clinicData.ram
+    if (clinicData?.processor) importantDetails.processor = clinicData.processor
+    if (clinicData?.has_backup) importantDetails.auto_backup_30days = true
+    if (clinicData?.has_ext_hdd) importantDetails.ext_hdd_backup = true
+    if (clinicData?.db_size) importantDetails.service_db_size_before = clinicData.db_size
+    // AI-parsed overrides
     if (parsed.main_pc_name) importantDetails.main_pc_name = parsed.main_pc_name
     if (parsed.space_c) importantDetails.space_c = parsed.space_c
     if (parsed.space_d) importantDetails.space_d = parsed.space_d
@@ -275,13 +297,13 @@ export default function JobSheetsPage() {
       service_by: userName,
       service_by_id: userId,
       clinic_code: clinicCode,
-      clinic_name: clinicName,
+      clinic_name: clinicData?.clinic_name || clinicName,
       contact_person: formContactPerson || parsed.contact_person || null,
-      contact_tel: formContactTel || formClinic?.clinic_phone || parsed.contact_tel || null,
-      clinic_email: formClinic?.email_main || null,
-      doctor_name: formClinic?.registered_contact || parsed.doctor_name || null,
+      contact_tel: clinicData?.clinic_phone || formContactTel || parsed.contact_tel || null,
+      clinic_email: clinicData?.email_main || null,
+      doctor_name: clinicData?.registered_contact || parsed.doctor_name || null,
       doctor_phone: parsed.doctor_phone || null,
-      program_type: formClinic?.product_type || null,
+      program_type: clinicData?.product_type || null,
       version_before: parsed.version_before || null,
       db_version_before: parsed.db_version_before || null,
       issue_detail: parsed.issue_detail || null,

@@ -1396,9 +1396,12 @@ export default function SchedulePage() {
                         View Ticket
                       </button>
                       {/* Job Sheet */}
-                      <button
+                      <a
+                        href="/job-sheets?create=1"
+                        target="_blank"
+                        rel="noopener noreferrer"
                         onClick={() => {
-                          sessionStorage.setItem('js-prefill', JSON.stringify({
+                          localStorage.setItem('js-prefill', JSON.stringify({
                             schedule_id: selectedSchedule.id,
                             clinic_code: selectedSchedule.clinic_code,
                             clinic_name: workClinic?.clinic_name || selectedSchedule.clinic_name,
@@ -1407,7 +1410,6 @@ export default function SchedulePage() {
                             service_date: selectedSchedule.schedule_date,
                             work_notes: workNotes || '',
                           }))
-                          router.push('/job-sheets?create=1')
                         }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20"
                       >
@@ -1415,7 +1417,7 @@ export default function SchedulePage() {
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                         Job Sheet
-                      </button>
+                      </a>
                       {/* Email */}
                       {(() => {
                         const email = workClinic?.email_main
@@ -1637,12 +1639,13 @@ export default function SchedulePage() {
                       )}
                       {/* Job Sheet — for completed schedules */}
                       {selectedSchedule.status === 'completed' && selectedSchedule.clinic_code !== 'MANUAL' && (
-                        <button
+                        <a
+                          href={existingJobSheetId ? `/job-sheets/${existingJobSheetId}` : '/job-sheets?create=1'}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           onClick={() => {
-                            if (existingJobSheetId) {
-                              router.push(`/job-sheets/${existingJobSheetId}`)
-                            } else {
-                              sessionStorage.setItem('js-prefill', JSON.stringify({
+                            if (!existingJobSheetId) {
+                              localStorage.setItem('js-prefill', JSON.stringify({
                                 schedule_id: selectedSchedule.id,
                                 clinic_code: selectedSchedule.clinic_code,
                                 clinic_name: workClinic?.clinic_name || selectedSchedule.clinic_name,
@@ -1651,7 +1654,6 @@ export default function SchedulePage() {
                                 service_date: selectedSchedule.schedule_date,
                                 work_notes: selectedSchedule.notes || '',
                               }))
-                              router.push('/job-sheets?create=1')
                             }
                           }}
                           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
@@ -1674,7 +1676,7 @@ export default function SchedulePage() {
                           ) : (
                             'Job Sheet'
                           )}
-                        </button>
+                        </a>
                       )}
                       {/* Delete — subtle icon, pushed to the right */}
                       <button
