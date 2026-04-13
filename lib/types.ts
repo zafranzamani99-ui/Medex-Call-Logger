@@ -410,11 +410,13 @@ export type ResourceCategory =
   | 'SOPs & Guides'
   | 'Training'
   | 'Tools & Utilities'
+  | 'SQL Scripts'
 
 export interface Resource {
   id: string
   title: string
-  url: string
+  url: string | null
+  content: string | null
   description: string | null
   category: ResourceCategory
   tags: string[]

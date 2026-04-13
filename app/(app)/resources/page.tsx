@@ -27,10 +27,13 @@ export default function ResourcesPage() {
   // Form state
   const [formTitle, setFormTitle] = useState('')
   const [formUrl, setFormUrl] = useState('')
+  const [formContent, setFormContent] = useState('')
   const [formCategory, setFormCategory] = useState<ResourceCategory>('System Versions')
   const [formDescription, setFormDescription] = useState('')
   const [formVersion, setFormVersion] = useState('')
   const [formTags, setFormTags] = useState('')
+
+  const isSqlCategory = formCategory === 'SQL Scripts'
 
   useEffect(() => {
     loadData()
@@ -69,6 +72,7 @@ export default function ResourcesPage() {
       list = list.filter(r =>
         r.title.toLowerCase().includes(q) ||
         r.description?.toLowerCase().includes(q) ||
+        r.content?.toLowerCase().includes(q) ||
         r.tags.some(t => t.toLowerCase().includes(q)) ||
         r.version?.toLowerCase().includes(q)
       )
@@ -104,6 +108,7 @@ export default function ResourcesPage() {
     setEditing(null)
     setFormTitle('')
     setFormUrl('')
+    setFormContent('')
     setFormCategory('System Versions')
     setFormDescription('')
     setFormVersion('')
@@ -114,7 +119,8 @@ export default function ResourcesPage() {
   function openEditModal(r: Resource) {
     setEditing(r)
     setFormTitle(r.title)
-    setFormUrl(r.url)
+    setFormUrl(r.url || '')
+    setFormContent(r.content || '')
     setFormCategory(r.category)
     setFormDescription(r.description || '')
     setFormVersion(r.version || '')
@@ -123,13 +129,16 @@ export default function ResourcesPage() {
   }
 
   async function handleSave() {
-    if (!formTitle.trim() || !formUrl.trim()) return
+    if (!formTitle.trim()) return
+    if (!isSqlCategory && !formUrl.trim()) return
+    if (isSqlCategory && !formContent.trim()) return
     setSaving(true)
 
     const tags = formTags.split(',').map(t => t.trim()).filter(Boolean)
     const payload = {
       title: formTitle.trim(),
-      url: formUrl.trim(),
+      url: isSqlCategory ? null : formUrl.trim(),
+      content: isSqlCategory ? formContent.trim() : null,
       category: formCategory,
       description: formDescription.trim() || null,
       version: formVersion.trim() || null,
@@ -331,6 +340,11 @@ export default function ResourcesPage() {
                           <p className="text-[12px] text-text-tertiary mb-1.5 line-clamp-2">{r.description}</p>
                         )}
 
+                        {/* SQL code preview */}
+                        {r.content && (
+                          <pre className="text-[11px] font-mono text-text-secondary bg-surface-inset border border-border rounded-md px-3 py-2 mb-1.5 max-h-32 overflow-auto whitespace-pre-wrap">{r.content}</pre>
+                        )}
+
                         {/* Bottom row: meta + actions */}
                         <div className="flex items-center justify-between">
                           <span className="text-[11px] text-text-muted">
@@ -342,11 +356,11 @@ export default function ResourcesPage() {
                           </span>
 
                           <div className="flex items-center gap-1">
-                            {/* Copy link */}
+                            {/* Copy link or SQL */}
                             <button
-                              onClick={() => handleCopy(r.url, r.id)}
+                              onClick={() => handleCopy(r.content || r.url || '', r.id)}
                               className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-inset transition-all"
-                              title="Copy link"
+                              title={r.content ? 'Copy SQL' : 'Copy link'}
                             >
                               {copied === r.id ? (
                                 <svg className="size-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -359,18 +373,20 @@ export default function ResourcesPage() {
                               )}
                             </button>
 
-                            {/* Open link */}
-                            <a
-                              href={r.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="p-1.5 rounded-md text-text-muted hover:text-indigo-400 hover:bg-indigo-500/10 transition-all"
-                              title="Open link"
-                            >
-                              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                              </svg>
-                            </a>
+                            {/* Open link — only for URL-based resources */}
+                            {r.url && (
+                              <a
+                                href={r.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 rounded-md text-text-muted hover:text-indigo-400 hover:bg-indigo-500/10 transition-all"
+                                title="Open link"
+                              >
+                                <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                </svg>
+                              </a>
+                            )}
 
                             {/* Admin actions */}
                             {isAdmin && (
@@ -447,16 +463,29 @@ export default function ResourcesPage() {
               />
             </div>
 
-            <div>
-              <label className="block text-[12px] font-medium text-text-tertiary mb-1.5">URL *</label>
-              <input
-                type="url"
-                value={formUrl}
-                onChange={(e) => setFormUrl(e.target.value)}
-                placeholder="https://1drv.ms/..."
-                className={inputClasses}
-              />
-            </div>
+            {isSqlCategory ? (
+              <div>
+                <label className="block text-[12px] font-medium text-text-tertiary mb-1.5">SQL Code *</label>
+                <textarea
+                  value={formContent}
+                  onChange={(e) => setFormContent(e.target.value)}
+                  placeholder="Paste your SQL migration here..."
+                  rows={10}
+                  className={`${inputClasses} font-mono text-[12px] leading-relaxed`}
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-[12px] font-medium text-text-tertiary mb-1.5">URL *</label>
+                <input
+                  type="url"
+                  value={formUrl}
+                  onChange={(e) => setFormUrl(e.target.value)}
+                  placeholder="https://1drv.ms/..."
+                  className={inputClasses}
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -499,7 +528,7 @@ export default function ResourcesPage() {
                 size="sm"
                 onClick={handleSave}
                 loading={saving}
-                disabled={!formTitle.trim() || !formUrl.trim()}
+                disabled={!formTitle.trim() || (isSqlCategory ? !formContent.trim() : !formUrl.trim())}
               >
                 {editing ? 'Save Changes' : 'Add Resource'}
               </Button>
