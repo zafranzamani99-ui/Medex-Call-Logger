@@ -1409,6 +1409,8 @@ export default function SchedulePage() {
                             contact_tel: workClinic?.clinic_phone || selectedSchedule.clinic_wa || '',
                             service_date: selectedSchedule.schedule_date,
                             work_notes: workNotes || '',
+                            started_at: selectedSchedule.started_at || '',
+                            completed_at: selectedSchedule.completed_at || '',
                           }))
                         }}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors bg-orange-500/10 text-orange-400 border-orange-500/30 hover:bg-orange-500/20"
@@ -1653,13 +1655,15 @@ export default function SchedulePage() {
                                 contact_tel: workClinic?.clinic_phone || selectedSchedule.clinic_wa || '',
                                 service_date: selectedSchedule.schedule_date,
                                 work_notes: selectedSchedule.notes || '',
+                                started_at: selectedSchedule.started_at || '',
+                                completed_at: selectedSchedule.completed_at || '',
                               }))
                             }
                           }}
                           className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                             existingJobSheetId
-                              ? 'bg-green-500/10 text-green-400/60 border-green-500/20 hover:bg-green-500/15'
-                              : 'bg-orange-500/15 text-orange-400 border-orange-500/30 hover:bg-orange-500/25'
+                              ? 'bg-green-600/15 text-green-700 border-green-600/30 hover:bg-green-600/25 dark:text-green-400 dark:border-green-500/30'
+                              : 'bg-orange-600/15 text-orange-700 border-orange-600/30 hover:bg-orange-600/25 dark:text-orange-400 dark:border-orange-500/30'
                           }`}
                           title={existingJobSheetId ? 'View existing job sheet' : 'Generate job sheet'}
                         >

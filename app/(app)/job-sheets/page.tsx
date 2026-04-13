@@ -41,6 +41,8 @@ export default function JobSheetsPage() {
   const [prefillClinicCode, setPrefillClinicCode] = useState('')
   const [prefillClinicName, setPrefillClinicName] = useState('')
   const [prefillWorkNotes, setPrefillWorkNotes] = useState('')
+  const [prefillStartedAt, setPrefillStartedAt] = useState('')
+  const [prefillCompletedAt, setPrefillCompletedAt] = useState('')
 
   useEffect(() => {
     async function init() {
@@ -81,6 +83,8 @@ export default function JobSheetsPage() {
         setFormContactTel(data.contact_tel || '')
         if (data.service_date) setFormDate(data.service_date)
         setPrefillWorkNotes(data.work_notes || '')
+        setPrefillStartedAt(data.started_at || '')
+        setPrefillCompletedAt(data.completed_at || '')
         setShowCreate(true)
       }
     }
@@ -170,9 +174,17 @@ export default function JobSheetsPage() {
     if (parsed.need_server === true) importantDetails.need_server = true
     if (parsed.brief_doctor === true) importantDetails.brief_doctor = true
 
+    // Format schedule timestamps to readable time (e.g. "10:30 AM")
+    const fmtTime = (ts: string) => {
+      if (!ts) return null
+      try { return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) } catch { return null }
+    }
+
     const { data: jsData, error } = await supabase.from('job_sheets').insert({
       js_number: '',
       service_date: data.service_date || new Date().toISOString().split('T')[0],
+      time_start: fmtTime(data.started_at) || null,
+      time_end: fmtTime(data.completed_at) || null,
       service_by: uname,
       service_by_id: uid,
       clinic_code: data.clinic_code,
@@ -291,9 +303,17 @@ export default function JobSheetsPage() {
     if (parsed.need_server === true) importantDetails.need_server = true
     if (parsed.brief_doctor === true) importantDetails.brief_doctor = true
 
+    // Format schedule timestamps to readable time
+    const fmtTime2 = (ts: string) => {
+      if (!ts) return null
+      try { return new Date(ts).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }) } catch { return null }
+    }
+
     const { data, error } = await supabase.from('job_sheets').insert({
       js_number: '',
       service_date: formDate,
+      time_start: fmtTime2(prefillStartedAt) || null,
+      time_end: fmtTime2(prefillCompletedAt) || null,
       service_by: userName,
       service_by_id: userId,
       clinic_code: clinicCode,

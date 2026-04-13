@@ -27,10 +27,10 @@ function Pill({ label, active, onClick }: { label: string; active: boolean; onCl
     <button
       type="button"
       onClick={onClick}
-      className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+      className={`px-3 py-1.5 rounded-lg text-xs font-medium border-2 transition-all ${
         active
-          ? 'bg-accent/15 text-accent border-accent/30'
-          : 'bg-surface border-border text-text-tertiary hover:text-text-secondary hover:border-border'
+          ? 'bg-blue-600 text-white border-blue-600'
+          : 'bg-transparent border-border text-text-primary hover:border-blue-400'
       }`}
     >
       {label}
@@ -221,7 +221,7 @@ export default function JobSheetDetailPage() {
     if (newStatus) setStatus(newStatus)
     if (!silent) {
       toast(newStatus === 'completed' ? 'Job sheet completed' : 'Saved')
-      if (newStatus === 'draft') router.push('/job-sheets')
+      if (newStatus === 'draft' || newStatus === 'completed') router.push('/job-sheets')
     } else {
       setAutoSaved(true)
       setTimeout(() => setAutoSaved(false), 2000)
@@ -352,7 +352,7 @@ export default function JobSheetDetailPage() {
       </div>
 
       {/* Sticky bottom action bar */}
-      <div className="fixed bottom-0 left-0 right-0 md:left-[var(--sidebar-width)] z-50 bg-surface border-t border-border px-4 py-3 flex items-center justify-center gap-2 transition-[left] duration-200 print:hidden" data-print-hide>
+      <div className="fixed bottom-4 left-1/2 md:left-[calc(var(--sidebar-width)+50%)] md:-translate-x-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface/80 backdrop-blur-md border border-border rounded-full px-4 py-2 shadow-lg transition-[left] duration-200 print:hidden" data-print-hide>
         <Button variant="secondary" size="sm" loading={saving} onClick={() => handleSave('draft')}>
           Save Draft
         </Button>
@@ -626,9 +626,9 @@ export default function JobSheetDetailPage() {
                     <tr><td style={{ fontSize: '9px' }}>Main PC =</td><td className="v" style={{ fontSize: '9px' }}>{importantDetails.main_pc_name}</td></tr>
                     <tr>
                       <td style={{ fontSize: '9px' }}>SPACE AVAILABLE</td>
-                      <td style={{ fontSize: '9px' }}><strong>C ({importantDetails.space_c_type || 'SSD/HDD'}):</strong> <span className="v">{importantDetails.space_c}</span></td>
+                      <td style={{ fontSize: '9px' }}><strong>C ({importantDetails.space_c_type || 'SSD/HDD'}):</strong> <span className="v" style={{ fontSize: '9px' }}>{importantDetails.space_c}</span></td>
                     </tr>
-                    <tr><td className="nb"></td><td style={{ fontSize: '9px' }}><strong>D:</strong> <span className="v">{importantDetails.space_d}</span></td></tr>
+                    <tr><td className="nb"></td><td style={{ fontSize: '9px' }}><strong>D:</strong> <span className="v" style={{ fontSize: '9px' }}>{importantDetails.space_d}</span></td></tr>
                     <tr>
                       <td colSpan={2} style={{ fontSize: '9px' }}>
                         <span className={importantDetails.auto_backup_30days ? 'ck ck-on' : 'ck'}>{importantDetails.auto_backup_30days ? '\u2713' : ''}</span> Auto-Backup &ndash; 30days. Image?
@@ -927,12 +927,12 @@ export default function JobSheetDetailPage() {
             <div>
               <Label>C Drive</Label>
               <div className="flex gap-2">
-                <Select value={importantDetails.space_c_type || ''} onChange={(e) => updateDetail('space_c_type', e.target.value)} className="w-24 flex-shrink-0">
+                <Select value={importantDetails.space_c_type || ''} onChange={(e) => updateDetail('space_c_type', e.target.value)} className="!w-24 flex-shrink-0">
                   <option value="">Type</option>
                   <option value="SSD">SSD</option>
                   <option value="HDD">HDD</option>
                 </Select>
-                <Input type="text" value={importantDetails.space_c} onChange={(e) => updateDetail('space_c', e.target.value)} placeholder="e.g. 326 GB" />
+                <Input type="text" value={importantDetails.space_c} onChange={(e) => updateDetail('space_c', e.target.value)} placeholder="e.g. 326 GB" className="flex-1" />
               </div>
             </div>
             <div>
