@@ -230,7 +230,7 @@ export default function SchedulePage() {
         .select('id, display_name')
         .eq('role', 'support')
         .order('display_name')
-      const list = (profiles || []).map((p: { id: string; display_name: string }) => ({ id: p.id, name: p.display_name }))
+      const list: { id: string; name: string }[] = (profiles || []).map((p: { id: string; display_name: string }) => ({ id: p.id, name: p.display_name }))
       // Add current user if they're not in the list (e.g. admin who also does support work)
       if (session?.user && !list.find(a => a.id === session.user.id)) {
         const { data: me } = await supabase.from('profiles').select('id, display_name').eq('id', session.user.id).single()
