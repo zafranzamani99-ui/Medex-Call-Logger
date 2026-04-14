@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { format } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic } from '@/lib/types'
@@ -133,26 +133,59 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
     setTimeout(() => setSubjectCopied(false), 2000)
   }
 
-  // === Email Header & Footer (both saved to localStorage) ===
+  // === Email Header & Footer (persisted in Supabase profiles.email_settings) ===
   const [emailHeader, setEmailHeader] = useState('Dear [Name],\nKindly create this for the clinic above. Thanks.')
   const [emailFooter, setEmailFooter] = useState('')
+  const headerRef = useRef(emailHeader)
+  const footerRef = useRef(emailFooter)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Load saved header & footer from localStorage on mount
+  // Load from Supabase (localStorage as instant fallback)
   useEffect(() => {
-    const savedHeader = localStorage.getItem('lk_email_header')
-    const savedFooter = localStorage.getItem('lk_email_footer')
-    if (savedHeader !== null) setEmailHeader(savedHeader)
-    if (savedFooter !== null) setEmailFooter(savedFooter)
+    // Instant: show localStorage values while Supabase loads
+    const localHeader = localStorage.getItem('lk_email_header')
+    const localFooter = localStorage.getItem('lk_email_footer')
+    if (localHeader !== null) { setEmailHeader(localHeader); headerRef.current = localHeader }
+    if (localFooter !== null) { setEmailFooter(localFooter); footerRef.current = localFooter }
+
+    // Then fetch from Supabase (source of truth)
+    ;(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.id) return
+      const { data } = await supabase.from('profiles').select('email_settings').eq('id', session.user.id).single()
+      const s = (data?.email_settings || {}) as Record<string, string>
+      if (s.lk_header !== undefined) { setEmailHeader(s.lk_header); headerRef.current = s.lk_header; localStorage.setItem('lk_email_header', s.lk_header) }
+      if (s.lk_footer !== undefined) { setEmailFooter(s.lk_footer); footerRef.current = s.lk_footer; localStorage.setItem('lk_email_footer', s.lk_footer) }
+    })()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Debounced save to Supabase (1.5s after last keystroke)
+  const scheduleSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = setTimeout(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.id) return
+      const { data } = await supabase.from('profiles').select('email_settings').eq('id', session.user.id).single()
+      const existing = (data?.email_settings || {}) as Record<string, string>
+      await supabase.from('profiles').update({
+        email_settings: { ...existing, lk_header: headerRef.current, lk_footer: footerRef.current }
+      }).eq('id', session.user.id)
+    }, 1500)
+  }, [supabase])
 
   const handleHeaderChange = (val: string) => {
     setEmailHeader(val)
+    headerRef.current = val
     localStorage.setItem('lk_email_header', val)
+    scheduleSave()
   }
 
   const handleFooterChange = (val: string) => {
     setEmailFooter(val)
+    footerRef.current = val
     localStorage.setItem('lk_email_footer', val)
+    scheduleSave()
   }
 
   // WHY: Outlook uses Word's HTML engine which is extremely picky.

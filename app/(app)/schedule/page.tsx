@@ -14,6 +14,7 @@ import Button from '@/components/ui/Button'
 import { Input, Label, Textarea } from '@/components/ui/Input'
 import ClinicSearch from '@/components/ClinicSearch'
 import ClinicProfilePanel from '@/components/ClinicProfilePanel'
+import RenewalBadge from '@/components/RenewalBadge'
 import type { Clinic } from '@/lib/types'
 import { useToast } from '@/components/ui/Toast'
 
@@ -103,6 +104,92 @@ export default function SchedulePage() {
   // Clinic phone lookup (clinic_code → phone)
   const [clinicPhones, setClinicPhones] = useState<Record<string, string>>({})
 
+  // Clinic schedule search (across all months/years)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchHits, setSearchHits] = useState<Clinic[]>([])
+  const [searchClinic, setSearchClinic] = useState<Clinic | null>(null)
+  const [searchResults, setSearchResults] = useState<Schedule[]>([])
+  const [searchIndex, setSearchIndex] = useState(0) // current result cursor
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [showSearchDrop, setShowSearchDrop] = useState(false)
+  const searchBoxRef = useRef<HTMLDivElement>(null)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) setShowSearchDrop(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const onSearchInput = (q: string) => {
+    setSearchQuery(q)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    if (!q.trim()) { setSearchHits([]); setShowSearchDrop(false); return }
+    searchTimer.current = setTimeout(async () => {
+      const { data } = await supabase
+        .from('clinics')
+        .select('*')
+        .or(`clinic_name.ilike.%${q}%,clinic_code.ilike.%${q}%`)
+        .order('clinic_name')
+        .limit(8)
+      setSearchHits((data || []) as Clinic[])
+      setShowSearchDrop(true)
+    }, 300)
+  }
+
+  const onPickSearchClinic = async (c: Clinic) => {
+    setSearchClinic(c)
+    setSearchQuery(c.clinic_name)
+    setShowSearchDrop(false)
+    setSearchHits([])
+    setSearchLoading(true)
+    // Search by clinic_code first; if nothing found, fallback to clinic_name
+    // Sort ascending (chronological) so arrows go forward in time
+    const { data: byCode } = await supabase
+      .from('schedules').select('*')
+      .eq('clinic_code', c.clinic_code)
+      .order('schedule_date', { ascending: true })
+    let results: Schedule[] = []
+    if (byCode && byCode.length > 0) {
+      results = byCode as Schedule[]
+    } else {
+      const { data: byName } = await supabase
+        .from('schedules').select('*')
+        .ilike('clinic_name', c.clinic_name)
+        .order('schedule_date', { ascending: true })
+      results = (byName || []) as Schedule[]
+    }
+    setSearchResults(results)
+    // Start at the nearest future result (or last past one if all are past)
+    const todayStr = format(new Date(), 'yyyy-MM-dd')
+    let startIdx = results.findIndex(s => s.schedule_date >= todayStr)
+    if (startIdx === -1) startIdx = results.length - 1 // all past → show most recent
+    if (startIdx < 0) startIdx = 0
+    setSearchIndex(startIdx)
+    if (results.length > 0) {
+      setCurrentMonth(new Date(results[startIdx].schedule_date + 'T00:00:00'))
+    }
+    setSearchLoading(false)
+  }
+
+  const goToSearchResult = (idx: number) => {
+    if (idx < 0 || idx >= searchResults.length) return
+    setSearchIndex(idx)
+    setCurrentMonth(new Date(searchResults[idx].schedule_date + 'T00:00:00'))
+  }
+
+  const clearSearch = () => {
+    setSearchQuery('')
+    setSearchHits([])
+    setSearchClinic(null)
+    setSearchResults([])
+    setSearchIndex(0)
+    setShowSearchDrop(false)
+  }
+
   // Reschedule reason modal state
   const [showRescheduleModal, setShowRescheduleModal] = useState(false)
   const [rescheduleTarget, setRescheduleTarget] = useState<Schedule | null>(null)
@@ -137,13 +224,20 @@ export default function SchedulePage() {
         if (profile) setUserName(profile.display_name)
       }
       setFilterReady(true)
-      // Load support agents for filter (exclude admins)
+      // Load support agents for PIC filter + include current user if admin
       const { data: profiles } = await supabase
         .from('profiles')
         .select('id, display_name')
         .eq('role', 'support')
         .order('display_name')
-      if (profiles) setAgents(profiles.map((p: { id: string; display_name: string }) => ({ id: p.id, name: p.display_name })))
+      const list = (profiles || []).map((p: { id: string; display_name: string }) => ({ id: p.id, name: p.display_name }))
+      // Add current user if they're not in the list (e.g. admin who also does support work)
+      if (session?.user && !list.find(a => a.id === session.user.id)) {
+        const { data: me } = await supabase.from('profiles').select('id, display_name').eq('id', session.user.id).single()
+        if (me) list.push({ id: me.id, name: me.display_name })
+        list.sort((a, b) => a.name.localeCompare(b.name))
+      }
+      setAgents(list)
     }
     init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -686,12 +780,42 @@ export default function SchedulePage() {
   return (
     <div className="pb-20 md:pb-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">Schedule</h1>
           <p className="text-[13px] text-text-tertiary mt-0.5">Manage appointments and visits</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" ref={searchBoxRef}>
+          {/* Search */}
+          <div className="relative w-[32rem]">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-tertiary pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              value={searchQuery}
+              onChange={(e) => onSearchInput(e.target.value)}
+              onFocus={() => { if (searchHits.length > 0 && !searchClinic) setShowSearchDrop(true) }}
+              placeholder="Search clinic..."
+              className="w-full pl-9 pr-8 py-1.5 bg-surface border border-border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+            />
+            {searchQuery && (
+              <button onClick={clearSearch} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-primary transition-colors">
+                <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            )}
+            {/* Suggestion dropdown */}
+            {showSearchDrop && searchHits.length > 0 && (
+              <div className="absolute top-full mt-1 w-full bg-surface border border-border rounded-lg shadow-lg z-20 overflow-hidden">
+                {searchHits.map(c => (
+                  <button key={c.id} onClick={() => onPickSearchClinic(c)} className="w-full text-left px-3 py-2 hover:bg-surface-raised flex items-center gap-2 text-sm transition-colors">
+                    <span className="text-text-primary truncate">{c.clinic_name}</span>
+                    <span className="text-text-tertiary text-xs flex-shrink-0">{c.clinic_code}</span>
+                    <RenewalBadge status={c.renewal_status} />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {/* PIC filter */}
           <select
             value={filterPic}
@@ -704,10 +828,67 @@ export default function SchedulePage() {
             ))}
           </select>
           <Button size="sm" onClick={() => { resetForm(); setShowAddModal(true) }}>
-            + Add Schedule
+            + Add
           </Button>
         </div>
       </div>
+
+      {/* Search results navigation bar */}
+      {searchClinic && !searchLoading && (
+        <div className="mb-3 flex flex-wrap items-center justify-end gap-3 text-xs">
+          <span className="font-medium text-text-primary text-sm">{searchClinic.clinic_name}</span>
+          <RenewalBadge status={searchClinic.renewal_status} />
+          {searchClinic.mtn_expiry && (
+            <span className="text-text-secondary">Exp: {format(new Date(searchClinic.mtn_expiry + 'T00:00:00'), 'dd MMM yyyy')}</span>
+          )}
+          {searchResults.length === 0 ? (
+            <>
+              <span className="text-text-muted">·</span>
+              <span className="text-text-muted">No schedules found</span>
+            </>
+          ) : (
+            <>
+              <span className="text-text-muted">·</span>
+              {/* Arrow navigation */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => goToSearchResult(searchIndex - 1)}
+                  disabled={searchIndex <= 0}
+                  className="p-0.5 rounded hover:bg-surface-raised text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <span className="text-text-primary font-medium tabular-nums min-w-[3rem] text-center">
+                  {searchIndex + 1} / {searchResults.length}
+                </span>
+                <button
+                  onClick={() => goToSearchResult(searchIndex + 1)}
+                  disabled={searchIndex >= searchResults.length - 1}
+                  className="p-0.5 rounded hover:bg-surface-raised text-text-secondary hover:text-text-primary disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                >
+                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
+              {/* Current result info */}
+              {searchResults[searchIndex] && (() => {
+                const s = searchResults[searchIndex]
+                const d = new Date(s.schedule_date + 'T00:00:00')
+                const st = STATUS_STYLES[s.status] || STATUS_STYLES.scheduled
+                return (
+                  <span className="flex items-center gap-2 text-text-secondary">
+                    <span className="font-medium text-text-primary">{format(d, 'dd MMM yyyy')}</span>
+                    <span>{formatTimeDisplay(s.schedule_time)}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium capitalize ${st.bg} ${st.text}`}>{s.status.replace(/_/g, ' ')}</span>
+                    <span>{s.schedule_type}</span>
+                    {s.pic_support && <span className="text-text-tertiary">{s.pic_support}</span>}
+                  </span>
+                )
+              })()}
+            </>
+          )}
+        </div>
+      )}
+      {searchLoading && <p className="mb-3 text-xs text-text-tertiary">Searching...</p>}
 
       {/* Month navigation */}
       <div className="flex items-center justify-between mb-4 bg-surface border border-border rounded-lg px-4 py-2">
@@ -785,16 +966,20 @@ export default function SchedulePage() {
                     const isStruck = isCancelled || isCompleted || isRescheduled
                     const now = new Date()
                     const isPastTime = today && s.status === 'scheduled' && parseTimeToMinutes(s.schedule_time) < (now.getHours() * 60 + now.getMinutes())
+                    const isSearchHit = searchClinic && (s.clinic_code === searchClinic.clinic_code || s.clinic_name.toLowerCase() === searchClinic.clinic_name.toLowerCase())
+                    const isSearchDimmed = searchClinic && !isSearchHit
                     return (
                       <div
                         key={s.id}
                         title={isRescheduled && s.reschedule_reason ? `Rescheduled: ${s.reschedule_reason}` : undefined}
-                        className={`w-full text-left px-1.5 py-0.5 rounded text-[10px] sm:text-xs ${
+                        className={`w-full text-left px-1.5 py-0.5 rounded text-[10px] sm:text-xs transition-opacity ${
                           isInProgress ? 'bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40'
                             : isNoAnswer ? 'bg-orange-500/20 text-orange-400'
                             : isRescheduled ? 'bg-red-500/20 text-red-400'
                             : `${colors.bg} ${colors.text}`
-                        } ${isStruck ? 'line-through' : ''} ${isCancelled ? 'opacity-50' : ''} ${isRescheduled ? 'opacity-60' : ''} ${isCompleted ? 'opacity-70' : ''} ${isNoAnswer ? 'opacity-70' : ''}`}
+                        } ${isStruck ? 'line-through' : ''} ${isCancelled ? 'opacity-50' : ''} ${isRescheduled ? 'opacity-60' : ''} ${isCompleted ? 'opacity-70' : ''} ${isNoAnswer ? 'opacity-70' : ''} ${
+                          isSearchHit ? 'ring-2 ring-blue-500 !opacity-100' : ''
+                        } ${isSearchDimmed ? '!opacity-20' : ''}`}
                       >
                         {isInProgress && <span className="inline-block size-1.5 rounded-full bg-amber-400 animate-pulse mr-0.5 align-middle" />}
                         {isPastTime && <span className="text-amber-400 mr-0.5">!</span>}
@@ -802,6 +987,7 @@ export default function SchedulePage() {
                         {isRescheduled && <span className="text-red-400 mr-0.5 no-underline" style={{ textDecoration: 'none' }}>↻</span>}
                         <span className="font-bold uppercase">{formatTimeDisplay(s.schedule_time)}</span>{' '}
                         {s.clinic_name}
+                        {s.pic_support && <span className="font-bold">{' · '}{s.pic_support}</span>}
                       </div>
                     )
                   })}
@@ -877,13 +1063,17 @@ export default function SchedulePage() {
                     const now = new Date()
                     const isDayToday = isToday(dateObj)
                     const isPastTime = isDayToday && s.status === 'scheduled' && parseTimeToMinutes(s.schedule_time) < (now.getHours() * 60 + now.getMinutes())
+                    const isSearchHitDay = searchClinic && (s.clinic_code === searchClinic.clinic_code || s.clinic_name.toLowerCase() === searchClinic.clinic_name.toLowerCase())
+                    const isSearchDimmedDay = searchClinic && !isSearchHitDay
                     return (
                       <button
                         key={s.id}
                         onClick={() => handleChipClick(s)}
-                        className={`w-full text-left px-5 py-3 hover:bg-surface-raised/60 transition-colors ${
+                        className={`w-full text-left px-5 py-3 hover:bg-surface-raised/60 transition-all ${
                           isCancelled ? 'opacity-40' : ''
-                        } ${isCompleted ? 'opacity-60' : ''} ${isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${isNoAnswer ? 'bg-orange-500/5 border-l-2 border-l-orange-400' : ''} ${isRescheduled ? 'bg-red-500/5 border-l-2 border-l-red-400' : ''}`}
+                        } ${isCompleted ? 'opacity-60' : ''} ${isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${isNoAnswer ? 'bg-orange-500/5 border-l-2 border-l-orange-400' : ''} ${isRescheduled ? 'bg-red-500/5 border-l-2 border-l-red-400' : ''} ${
+                          isSearchHitDay ? 'bg-blue-500/10 !opacity-100' : ''
+                        } ${isSearchDimmedDay ? '!opacity-20' : ''}`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div className="flex-1 min-w-0">

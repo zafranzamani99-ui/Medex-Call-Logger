@@ -95,8 +95,40 @@ export default function JobSheetDetailPage() {
   const [jobOutcome, setJobOutcome] = useState<JobOutcome>('completed')
   const [customerRepName, setCustomerRepName] = useState('')
 
+  // Email template (persisted in Supabase profiles.email_settings)
+  const JS_HEADER_DEFAULT = 'Dear Dr/PIC,\n\nKindly print out the attachment for job sheet done for {{SERVICE_TYPE}} {{YEAR}}.\nPlease sign and chop the job sheet form and email back the form.'
+  const [jsEmailHeader, setJsEmailHeader] = useState(JS_HEADER_DEFAULT)
+  const [jsEmailFooter, setJsEmailFooter] = useState('')
+  const jsHeaderRef = useRef(JS_HEADER_DEFAULT)
+  const jsFooterRef = useRef('')
+  const jsEmailSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const scheduleEmailSettingsSave = useCallback(() => {
+    if (jsEmailSaveRef.current) clearTimeout(jsEmailSaveRef.current)
+    jsEmailSaveRef.current = setTimeout(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.id) return
+      const { data } = await supabase.from('profiles').select('email_settings').eq('id', session.user.id).single()
+      const existing = (data?.email_settings || {}) as Record<string, string>
+      await supabase.from('profiles').update({
+        email_settings: { ...existing, js_header: jsHeaderRef.current, js_footer: jsFooterRef.current }
+      }).eq('id', session.user.id)
+    }, 1500)
+  }, [supabase])
+
   useEffect(() => {
     fetchJobSheet()
+    // Load email settings from Supabase
+    ;(async () => {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user?.id) return
+      const { data } = await supabase.from('profiles').select('email_settings').eq('id', session.user.id).single()
+      const s = (data?.email_settings || {}) as Record<string, string>
+      if (s.js_header !== undefined) { setJsEmailHeader(s.js_header); jsHeaderRef.current = s.js_header }
+      // Footer falls back to LK footer (shared signature)
+      const footer = s.js_footer || s.lk_footer || localStorage.getItem('lk_email_footer') || ''
+      setJsEmailFooter(footer); jsFooterRef.current = footer
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -370,20 +402,27 @@ export default function JobSheetDetailPage() {
           </svg>
           PDF
         </Button>
-        <Button variant="ghost" size="sm" onClick={() => {
-          const svcType = serviceTypes.length > 0 ? serviceTypes.join('/') : 'MTN'
-          const year = new Date().getFullYear()
-          const to = clinicEmail || ''
-          const cc = 'allsupport@medexoneglobal.com,celine.gan@medexoneglobal.com'
-          const subject = `JOBSHEET ${svcType.toUpperCase()} for ${clinicName} (${clinicCode})`
-          const body = `Dear Dr/PIC,\n\nKindly print out the attachment for job sheet done for ${svcType.toUpperCase()} ${year}.\nPlease sign and chop the job sheet form and email back the form.\n\nThanks & Regards,`
-          window.open(`mailto:${encodeURIComponent(to)}?cc=${encodeURIComponent(cc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_self')
-        }}>
-          <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-          </svg>
-          Email
-        </Button>
+        {status === 'completed' && (
+          <Button variant="ghost" size="sm" onClick={() => {
+            const svcType = serviceTypes.length > 0 ? serviceTypes.join('/') : 'MTN'
+            const year = new Date().getFullYear()
+            const to = clinicEmail || ''
+            const cc = 'allsupport@medexoneglobal.com; celine.gan@medexoneglobal.com'
+            const subject = `JOBSHEET ${svcType.toUpperCase()} for ${clinicName} (${clinicCode})`
+            const header = jsEmailHeader
+              .replace('{{SERVICE_TYPE}}', svcType.toUpperCase())
+              .replace('{{YEAR}}', String(year))
+            const body = `${header}\n\n${jsEmailFooter}`
+            const a = document.createElement('a')
+            a.href = `mailto:${to}?cc=${encodeURIComponent(cc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+            a.click()
+          }}>
+            <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+            Email
+          </Button>
+        )}
         <Button variant="danger" size="sm" loading={deleting} onClick={handleDelete}>
           <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1094,6 +1133,33 @@ export default function JobSheetDetailPage() {
             </div>
           </div>
         </Section>
+
+        {/* Email Template — editable, persisted to Supabase (print:hidden) */}
+        <div className="print:hidden" data-print-hide>
+          <Section title="Email Template (saved for next time)">
+            <div className="space-y-3">
+              <div>
+                <Label>Header / Body</Label>
+                <p className="text-[10px] text-text-muted mb-1">Use {'{{SERVICE_TYPE}}'} and {'{{YEAR}}'} as placeholders</p>
+                <Textarea
+                  value={jsEmailHeader}
+                  onChange={(e) => { setJsEmailHeader(e.target.value); jsHeaderRef.current = e.target.value; scheduleEmailSettingsSave() }}
+                  rows={4}
+                  placeholder="Dear Dr/PIC,&#10;&#10;Kindly print out the attachment..."
+                />
+              </div>
+              <div>
+                <Label>Footer / Signature</Label>
+                <Textarea
+                  value={jsEmailFooter}
+                  onChange={(e) => { setJsEmailFooter(e.target.value); jsFooterRef.current = e.target.value; scheduleEmailSettingsSave() }}
+                  rows={5}
+                  placeholder={"Thanks & Regards,\n\nYOUR NAME\nIT Professional Services Consultant\n..."}
+                />
+              </div>
+            </div>
+          </Section>
+        </div>
       </div>
 
       {/* CRM Profile Panel */}
