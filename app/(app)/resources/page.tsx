@@ -372,8 +372,8 @@ export default function ResourcesPage() {
                           </span>
 
                           <div className="flex items-center gap-1">
-                            {/* Copy link or SQL */}
-                            <button
+                            {/* Copy link or SQL — hidden for Support Scripts (has inline Copy button) */}
+                            {r.category !== 'Support Scripts' && <button
                               onClick={() => handleCopy(r.content || r.url || '', r.id)}
                               className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-inset transition-all"
                               title={r.content ? 'Copy SQL' : 'Copy link'}
@@ -387,7 +387,7 @@ export default function ResourcesPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                 </svg>
                               )}
-                            </button>
+                            </button>}
 
                             {/* Open link — only for URL-based resources */}
                             {r.url && (
