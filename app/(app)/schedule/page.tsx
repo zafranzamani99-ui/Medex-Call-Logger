@@ -114,6 +114,7 @@ export default function SchedulePage() {
   const [showSearchDrop, setShowSearchDrop] = useState(false)
   const searchBoxRef = useRef<HTMLDivElement>(null)
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const todayRef = useRef<HTMLDivElement>(null)
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -242,6 +243,13 @@ export default function SchedulePage() {
     init()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Auto-scroll to today's cell when calendar renders
+  useEffect(() => {
+    if (todayRef.current) {
+      todayRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [currentMonth])
 
   // Fetch schedules for current month (wait until filter is initialized)
   useEffect(() => {
@@ -937,6 +945,7 @@ export default function SchedulePage() {
             return (
               <div
                 key={i}
+                ref={today ? todayRef : undefined}
                 onClick={() => inMonth && handleDateClick(dateKey)}
                 className={`group min-h-[120px] sm:min-h-[160px] border-b border-r border-border p-1.5 ${
                   !inMonth ? 'bg-zinc-900/30' : 'bg-background'
