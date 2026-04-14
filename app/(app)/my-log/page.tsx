@@ -158,7 +158,7 @@ export default function MyLogPage() {
     let jsQuery = supabase
       .from('job_sheets')
       .select('id, js_number, clinic_name, service_date, status, service_types, created_at')
-      .eq('service_by_id', userId)
+      .or(`service_by_id.eq.${userId},created_by.eq.${userId}`)
 
     if (dateFrom) {
       if (dateRange === 'yesterday') {
