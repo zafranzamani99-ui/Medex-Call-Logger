@@ -36,6 +36,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [upcomingSchedules, setUpcomingSchedules] = useState<Schedule[]>([])
   const [activeWork, setActiveWork] = useState<Schedule[]>([])
+  const [jobSheetsToday, setJobSheetsToday] = useState(0)
+  const [kbDraftsCount, setKbDraftsCount] = useState(0)
   const [, setTick] = useState(0)
 
   const triageRef = useRef<HTMLDivElement>(null)
@@ -110,10 +112,26 @@ export default function DashboardPage() {
     setActiveWork(data || [])
   }
 
+  const fetchExtras = async () => {
+    const { data: { session } } = await supabase.auth.getSession()
+    if (!session?.user) return
+    const todayIso = startOfDay(new Date()).toISOString()
+
+    const [jsRes, kbRes] = await Promise.all([
+      supabase.from('job_sheets').select('id', { count: 'exact', head: true })
+        .eq('service_by_id', session.user.id).gte('created_at', todayIso),
+      supabase.from('knowledge_base').select('id', { count: 'exact', head: true })
+        .eq('status', 'draft'),
+    ])
+    setJobSheetsToday(jsRes.count ?? 0)
+    setKbDraftsCount(kbRes.count ?? 0)
+  }
+
   useEffect(() => {
     fetchData()
     fetchUpcomingSchedules()
     fetchActiveWork()
+    fetchExtras()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -238,6 +256,22 @@ export default function DashboardPage() {
           <span className="text-text-muted mx-1">·</span>
           <span className="text-text-primary font-bold tabular-nums">{stats.resolvedToday}</span>
           <span>resolved</span>
+          {jobSheetsToday > 0 && (
+            <>
+              <span className="text-text-muted mx-1">·</span>
+              <span className="text-text-primary font-bold tabular-nums">{jobSheetsToday}</span>
+              <span>job sheet{jobSheetsToday !== 1 ? 's' : ''}</span>
+            </>
+          )}
+          {kbDraftsCount > 0 && (
+            <>
+              <span className="text-text-muted mx-1">·</span>
+              <button onClick={() => router.push('/kb')} className="inline-flex items-center gap-1 hover:underline">
+                <span className="text-blue-400 font-bold tabular-nums">{kbDraftsCount}</span>
+                <span className="text-blue-400">KB draft{kbDraftsCount !== 1 ? 's' : ''}</span>
+              </button>
+            </>
+          )}
           {Object.keys(agentStats).length > 1 && (
             <>
               <span className="text-text-muted mx-1">·</span>
@@ -307,7 +341,7 @@ export default function DashboardPage() {
                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-white/[0.03] transition-colors"
                   >
                     <span className="font-mono text-[12px] text-accent tabular-nums">{s.schedule_time}</span>
-                    <span className="text-[13px] text-text-primary truncate max-w-[160px]">{s.clinic_name}</span>
+                    <span className="text-[13px] text-text-primary">{s.clinic_name}</span>
                     <span className={`text-[10px] px-1.5 py-0.5 rounded ${colors.bg} ${colors.text}`}>
                       {s.schedule_type}
                     </span>

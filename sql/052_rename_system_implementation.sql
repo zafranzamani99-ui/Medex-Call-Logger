@@ -1,0 +1,5 @@
+-- 052: Add "Service" issue category for schedule-generated tickets
+-- WHY: Manager wants schedules auto-tagged as "Service" instead of "System Implementation".
+-- Existing "System Implementation" tickets are kept as-is — both categories coexist.
+-- No data migration needed — only new schedules will use "Service".
+-- This file is documentation only; no schema change required (issue_category is plain TEXT).

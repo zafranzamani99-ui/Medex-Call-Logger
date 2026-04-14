@@ -34,6 +34,7 @@ export const DEFAULT_ISSUE_COLOR = { bg: 'bg-zinc-500/20', text: 'text-zinc-400'
 
 // Issue categories — parent classification above issue types
 export const ISSUE_CATEGORIES: string[] = [
+  'Service',
   'System Implementation',
   'User',
   'Data Issue',
@@ -43,6 +44,7 @@ export const ISSUE_CATEGORIES: string[] = [
 ]
 
 export const ISSUE_CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
+  'Service':               { bg: 'bg-cyan-500/20', text: 'text-cyan-400' },
   'System Implementation': { bg: 'bg-blue-500/20', text: 'text-blue-400' },
   'User':                  { bg: 'bg-emerald-500/20', text: 'text-emerald-400' },
   'Data Issue':            { bg: 'bg-amber-500/20', text: 'text-amber-400' },
@@ -255,6 +257,7 @@ export const RESOURCE_CATEGORIES = [
   'Training',
   'Tools & Utilities',
   'SQL Scripts',
+  'Support Scripts',
 ] as const
 
 export const RESOURCE_CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
@@ -264,7 +267,8 @@ export const RESOURCE_CATEGORY_COLORS: Record<string, { bg: string; text: string
   'SOPs & Guides':      { bg: 'bg-amber-500/10',    text: 'text-amber-400' },
   'Training':           { bg: 'bg-cyan-500/10',     text: 'text-cyan-400' },
   'Tools & Utilities':  { bg: 'bg-rose-500/10',     text: 'text-rose-400' },
-  'SQL Scripts':     { bg: 'bg-orange-500/10',   text: 'text-orange-400' },
+  'SQL Scripts':        { bg: 'bg-orange-500/10',   text: 'text-orange-400' },
+  'Support Scripts':    { bg: 'bg-green-500/10',    text: 'text-green-400' },
 }
 
 export function getResourceCategoryColor(category: string) {

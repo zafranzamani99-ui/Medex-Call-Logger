@@ -90,6 +90,8 @@ export default function LogCallPage() {
   const [scheduleType, setScheduleType] = useState<string | null>(null)
   const [customScheduleType, setCustomScheduleType] = useState('')
   const [scheduleMode, setScheduleMode] = useState<'Remote' | 'Onsite'>('Remote')
+  const [schedulePicSupport, setSchedulePicSupport] = useState('')
+  const [scheduleNotes, setScheduleNotes] = useState('')
 
   // Timeline entry
   const [timelineData, setTimelineData] = useState<{
@@ -504,6 +506,7 @@ export default function LogCallPage() {
         clinic_code: selectedClinic?.clinic_code || 'MANUAL',
         clinic_name: selectedClinic?.clinic_name || pic || 'Unknown',
         pic: pic || null,
+        pic_support: schedulePicSupport || null,
         schedule_date: scheduleDate,
         schedule_time: scheduleTime,
         schedule_type: scheduleType,
@@ -512,7 +515,7 @@ export default function LogCallPage() {
         mode: scheduleMode,
         agent_name: userName,
         agent_id: userId,
-        notes: issue.trim() || null,
+        notes: scheduleNotes.trim() || issue.trim() || null,
         clinic_wa: clinicWa.trim() || null,
         source_ticket_id: ticket.id,
       })
@@ -569,6 +572,8 @@ export default function LogCallPage() {
     setScheduleType(null)
     setCustomScheduleType('')
     setScheduleMode('Remote')
+    setSchedulePicSupport('')
+    setScheduleNotes('')
     setCallDate(format(new Date(), 'yyyy-MM-dd'))
     setEditingCallDate(false)
     setTimelineData(null)
@@ -601,6 +606,8 @@ export default function LogCallPage() {
     setScheduleType(null)
     setCustomScheduleType('')
     setScheduleMode('Remote')
+    setSchedulePicSupport('')
+    setScheduleNotes('')
     setCallDate(format(new Date(), 'yyyy-MM-dd'))
     setEditingCallDate(false)
     setTimelineData(null)
@@ -971,6 +978,11 @@ export default function LogCallPage() {
                   </svg>
                   Schedule Details
                 </h4>
+                {/* PIC Support — matches Schedule page */}
+                <div>
+                  <Label>PIC Support</Label>
+                  <Input type="text" value={schedulePicSupport} onChange={(e) => setSchedulePicSupport(e.target.value)} placeholder="Support agent" />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <Label required>Schedule Date</Label>
@@ -978,7 +990,7 @@ export default function LogCallPage() {
                   </div>
                   <div>
                     <Label required>Schedule Time</Label>
-                    <Input type="text" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} placeholder="e.g. 10AM, 2:30PM" />
+                    <Input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} />
                   </div>
                 </div>
                 <div>
@@ -1030,6 +1042,16 @@ export default function LogCallPage() {
                       </button>
                     ))}
                   </div>
+                </div>
+                {/* Schedule Notes */}
+                <div>
+                  <Label>Schedule Notes</Label>
+                  <Textarea
+                    value={scheduleNotes}
+                    onChange={(e) => setScheduleNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Additional notes for this schedule..."
+                  />
                 </div>
               </div>
             )}

@@ -33,7 +33,7 @@ export default function ResourcesPage() {
   const [formVersion, setFormVersion] = useState('')
   const [formTags, setFormTags] = useState('')
 
-  const isSqlCategory = formCategory === 'SQL Scripts'
+  const isContentCategory = formCategory === 'SQL Scripts' || formCategory === 'Support Scripts'
 
   useEffect(() => {
     loadData()
@@ -130,15 +130,15 @@ export default function ResourcesPage() {
 
   async function handleSave() {
     if (!formTitle.trim()) return
-    if (!isSqlCategory && !formUrl.trim()) return
-    if (isSqlCategory && !formContent.trim()) return
+    if (!isContentCategory && !formUrl.trim()) return
+    if (isContentCategory && !formContent.trim()) return
     setSaving(true)
 
     const tags = formTags.split(',').map(t => t.trim()).filter(Boolean)
     const payload = {
       title: formTitle.trim(),
-      url: isSqlCategory ? null : formUrl.trim(),
-      content: isSqlCategory ? formContent.trim() : null,
+      url: isContentCategory ? null : formUrl.trim(),
+      content: isContentCategory ? formContent.trim() : null,
       category: formCategory,
       description: formDescription.trim() || null,
       version: formVersion.trim() || null,
@@ -340,10 +340,26 @@ export default function ResourcesPage() {
                           <p className="text-[12px] text-text-tertiary mb-1.5 line-clamp-2">{r.description}</p>
                         )}
 
-                        {/* SQL code preview */}
-                        {r.content && (
+                        {/* Content preview — SQL or Support Script */}
+                        {r.content && r.category === 'Support Scripts' ? (
+                          <div className="relative group/script mb-1.5">
+                            <div className="text-[12px] text-text-secondary bg-green-500/5 border border-green-500/15 rounded-lg px-3.5 py-2.5 whitespace-pre-wrap leading-relaxed max-h-40 overflow-auto">
+                              {r.content}
+                            </div>
+                            <button
+                              onClick={() => handleCopy(r.content || '', r.id)}
+                              className={`absolute top-2 right-2 px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
+                                copied === r.id
+                                  ? 'bg-emerald-500/20 text-emerald-400'
+                                  : 'bg-surface/80 backdrop-blur-sm border border-border text-text-muted hover:text-text-primary hover:bg-surface-raised'
+                              }`}
+                            >
+                              {copied === r.id ? 'Copied!' : 'Copy'}
+                            </button>
+                          </div>
+                        ) : r.content ? (
                           <pre className="text-[11px] font-mono text-text-secondary bg-surface-inset border border-border rounded-md px-3 py-2 mb-1.5 max-h-32 overflow-auto whitespace-pre-wrap">{r.content}</pre>
-                        )}
+                        ) : null}
 
                         {/* Bottom row: meta + actions */}
                         <div className="flex items-center justify-between">
@@ -463,15 +479,19 @@ export default function ResourcesPage() {
               />
             </div>
 
-            {isSqlCategory ? (
+            {isContentCategory ? (
               <div>
-                <label className="block text-[12px] font-medium text-text-tertiary mb-1.5">SQL Code *</label>
+                <label className="block text-[12px] font-medium text-text-tertiary mb-1.5">
+                  {formCategory === 'Support Scripts' ? 'Script Text *' : 'SQL Code *'}
+                </label>
                 <textarea
                   value={formContent}
                   onChange={(e) => setFormContent(e.target.value)}
-                  placeholder="Paste your SQL migration here..."
-                  rows={10}
-                  className={`${inputClasses} font-mono text-[12px] leading-relaxed`}
+                  placeholder={formCategory === 'Support Scripts'
+                    ? 'Type your WhatsApp/email script template here...'
+                    : 'Paste your SQL migration here...'}
+                  rows={formCategory === 'Support Scripts' ? 6 : 10}
+                  className={`${inputClasses} ${formCategory === 'SQL Scripts' ? 'font-mono text-[12px]' : 'text-[13px]'} leading-relaxed`}
                 />
               </div>
             ) : (
@@ -528,7 +548,7 @@ export default function ResourcesPage() {
                 size="sm"
                 onClick={handleSave}
                 loading={saving}
-                disabled={!formTitle.trim() || (isSqlCategory ? !formContent.trim() : !formUrl.trim())}
+                disabled={!formTitle.trim() || (isContentCategory ? !formContent.trim() : !formUrl.trim())}
               >
                 {editing ? 'Save Changes' : 'Add Resource'}
               </Button>

@@ -57,6 +57,7 @@ export function getIssueHexColor(issueType: string): string {
 
 // Issue category hex colors for Recharts & inline style contexts
 export const ISSUE_CATEGORY_HEX_COLORS: Record<string, string> = {
+  'Service':               '#22d3ee',
   'System Implementation': '#818cf8',
   'User':                  '#34d399',
   'Data Issue':            '#fbbf24',

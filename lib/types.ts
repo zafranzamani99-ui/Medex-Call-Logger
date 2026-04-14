@@ -413,6 +413,7 @@ export type ResourceCategory =
   | 'Training'
   | 'Tools & Utilities'
   | 'SQL Scripts'
+  | 'Support Scripts'
 
 export interface Resource {
   id: string

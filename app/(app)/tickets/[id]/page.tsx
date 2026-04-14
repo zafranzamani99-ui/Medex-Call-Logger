@@ -35,7 +35,8 @@ export default function TicketDetailPage() {
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
-  const [linkedSchedule, setLinkedSchedule] = useState<{ actual_duration_minutes: number | null; duration_estimate: string | null } | null>(null)
+  const [linkedSchedule, setLinkedSchedule] = useState<{ id: string; actual_duration_minutes: number | null; duration_estimate: string | null; schedule_type: string; schedule_date: string; schedule_time: string; status: string; agent_name: string } | null>(null)
+  const [linkedJobSheet, setLinkedJobSheet] = useState<{ id: string; js_number: string; status: string; service_date: string } | null>(null)
 
   // UI state
   const { toast } = useToast()
@@ -123,11 +124,23 @@ export default function TicketDetailPage() {
     // Fetch linked schedule (if this ticket was created from a schedule)
     const { data: schedData } = await supabase
       .from('schedules')
-      .select('actual_duration_minutes, duration_estimate')
+      .select('id, actual_duration_minutes, duration_estimate, schedule_type, schedule_date, schedule_time, status, agent_name')
       .eq('source_ticket_id', ticketId)
       .limit(1)
       .maybeSingle()
     setLinkedSchedule(schedData)
+
+    // Fetch linked job sheet (chained from schedule)
+    if (schedData?.id) {
+      const { data: jsData } = await supabase
+        .from('job_sheets')
+        .select('id, js_number, status, service_date')
+        .eq('schedule_id', schedData.id)
+        .maybeSingle()
+      setLinkedJobSheet(jsData)
+    } else {
+      setLinkedJobSheet(null)
+    }
 
     setLoading(false)
   }
@@ -1043,6 +1056,62 @@ export default function TicketDetailPage() {
               </Button>
             </div>
           </div>
+
+          {/* Related Work — schedule & job sheet links */}
+          {linkedSchedule && (
+            <div className="card p-4">
+              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Related Work</h2>
+              <div className="space-y-2">
+                <button
+                  onClick={() => router.push('/schedule')}
+                  className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-inset hover:bg-surface-raised transition-colors text-left"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <svg className="size-4 text-text-tertiary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                    </svg>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-text-primary">{linkedSchedule.schedule_type}</p>
+                      <p className="text-[11px] text-text-muted truncate">
+                        {format(new Date(linkedSchedule.schedule_date + 'T00:00:00'), 'dd MMM')} at {linkedSchedule.schedule_time}
+                        {' · '}{toProperCase(linkedSchedule.agent_name)}
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                    linkedSchedule.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' :
+                    linkedSchedule.status === 'in_progress' ? 'bg-amber-500/20 text-amber-400' :
+                    linkedSchedule.status === 'cancelled' ? 'bg-red-500/20 text-red-400' :
+                    'bg-blue-500/20 text-blue-400'
+                  }`}>
+                    {linkedSchedule.status}
+                  </span>
+                </button>
+
+                {linkedJobSheet && (
+                  <button
+                    onClick={() => router.push(`/job-sheets/${linkedJobSheet.id}`)}
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-surface-inset hover:bg-surface-raised transition-colors text-left"
+                  >
+                    <div className="flex items-center gap-2">
+                      <svg className="size-4 text-text-tertiary flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <div>
+                        <p className="text-xs font-medium text-text-primary">Job Sheet {linkedJobSheet.js_number}</p>
+                        <p className="text-[11px] text-text-muted">{format(new Date(linkedJobSheet.service_date + 'T00:00:00'), 'dd MMM yyyy')}</p>
+                      </div>
+                    </div>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 ${
+                      linkedJobSheet.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                    }`}>
+                      {linkedJobSheet.status}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Audit Info — queries actual audit_log table for full history */}
           <div className="card p-4">

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { format } from 'date-fns'
 import type { JobSheet, JobSheetChecklistItem, JobSheetIssueCategory, JobSheetImportantDetails, BackupStatus, JobOutcome, PaymentMethod } from '@/lib/types'
 import { JOB_SHEET_CHECKLIST_LABELS, JOB_SHEET_ISSUE_CATEGORIES, JOB_SHEET_STATUS_COLORS, DEFAULT_IMPORTANT_DETAILS, toProperCase } from '@/lib/constants'
 import Button from '@/components/ui/Button'
@@ -47,6 +48,8 @@ export default function JobSheetDetailPage() {
 
   const [loading, setLoading] = useState(true)
   const [showCrmPanel, setShowCrmPanel] = useState(false)
+  const [sourceSchedule, setSourceSchedule] = useState<{ id: string; source_ticket_id: string | null; schedule_type: string; schedule_date: string } | null>(null)
+  const [sourceTicketRef, setSourceTicketRef] = useState<{ id: string; ticket_ref: string } | null>(null)
   const [savingToCrm, setSavingToCrm] = useState(false)
   const [saving, setSaving] = useState(false)
   const [autoSaved, setAutoSaved] = useState(false)
@@ -204,6 +207,29 @@ export default function JobSheetDetailPage() {
       }
     }
 
+    // Fetch source schedule & ticket (if this JS came from a schedule)
+    if (js.schedule_id) {
+      const { data: sched } = await supabase
+        .from('schedules')
+        .select('id, source_ticket_id, schedule_type, schedule_date')
+        .eq('id', js.schedule_id)
+        .maybeSingle()
+      setSourceSchedule(sched)
+      if (sched?.source_ticket_id) {
+        const { data: tkt } = await supabase
+          .from('tickets')
+          .select('id, ticket_ref')
+          .eq('id', sched.source_ticket_id)
+          .maybeSingle()
+        setSourceTicketRef(tkt)
+      } else {
+        setSourceTicketRef(null)
+      }
+    } else {
+      setSourceSchedule(null)
+      setSourceTicketRef(null)
+    }
+
     setLoading(false)
   }
 
@@ -345,6 +371,7 @@ export default function JobSheetDetailPage() {
   }
 
   const [deleting, setDeleting] = useState(false)
+  const [emailSending, setEmailSending] = useState(false)
   const handleDelete = async () => {
     if (!confirm('Delete this job sheet? This cannot be undone.')) return
     setDeleting(true)
@@ -383,6 +410,35 @@ export default function JobSheetDetailPage() {
         </div>
       </div>
 
+      {/* Source links — Schedule & Ticket this job sheet came from */}
+      {(sourceSchedule || sourceTicketRef) && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap print:hidden" data-print-hide>
+          <span className="text-[11px] text-text-muted">From:</span>
+          {sourceTicketRef && (
+            <button
+              onClick={() => router.push(`/tickets/${sourceTicketRef.id}`)}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-indigo-500/15 text-indigo-400 hover:bg-indigo-500/25 transition-colors"
+            >
+              <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              {sourceTicketRef.ticket_ref}
+            </button>
+          )}
+          {sourceSchedule && (
+            <button
+              onClick={() => router.push('/schedule')}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-violet-500/15 text-violet-400 hover:bg-violet-500/25 transition-colors"
+            >
+              <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+              </svg>
+              {sourceSchedule.schedule_type} ({format(new Date(sourceSchedule.schedule_date + 'T00:00:00'), 'dd MMM')})
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Sticky bottom action bar */}
       <div className="fixed bottom-4 left-1/2 md:left-[calc(var(--sidebar-width)+50%)] md:-translate-x-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-surface/80 backdrop-blur-md border border-border rounded-full px-4 py-2 shadow-lg transition-[left] duration-200 print:hidden" data-print-hide>
         <Button variant="secondary" size="sm" loading={saving} onClick={() => handleSave('draft')}>
@@ -403,19 +459,68 @@ export default function JobSheetDetailPage() {
           PDF
         </Button>
         {status === 'completed' && (
-          <Button variant="ghost" size="sm" onClick={() => {
-            const svcType = serviceTypes.length > 0 ? serviceTypes.join('/') : 'MTN'
-            const year = new Date().getFullYear()
-            const to = clinicEmail || ''
-            const cc = 'allsupport@medexoneglobal.com; celine.gan@medexoneglobal.com'
-            const subject = `JOBSHEET ${svcType.toUpperCase()} for ${clinicName} (${clinicCode})`
-            const header = jsEmailHeader
-              .replace('{{SERVICE_TYPE}}', svcType.toUpperCase())
-              .replace('{{YEAR}}', String(year))
-            const body = `${header}\n\n${jsEmailFooter}`
-            const a = document.createElement('a')
-            a.href = `mailto:${to}?cc=${encodeURIComponent(cc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-            a.click()
+          <Button variant="ghost" size="sm" loading={emailSending} onClick={async () => {
+            setEmailSending(true)
+            try {
+              // 1. Generate PDF from the print layout
+              const printEl = document.getElementById('js-print')
+              if (printEl) {
+                const clone = printEl.cloneNode(true) as HTMLElement
+                clone.id = 'js-print-pdf'
+
+                // Remove @media print wrapper so styles apply in screen context
+                const styleEl = clone.querySelector('style')
+                if (styleEl) {
+                  let css = styleEl.innerHTML
+                    .replace(/@media\s+print\s*\{/, '')
+                  css = css.replace(/\}\s*$/, '')
+                  css = css.replace(/#js-print/g, '#js-print-pdf')
+                  styleEl.innerHTML = css
+                }
+
+                // Position off-screen but rendered (html2canvas needs visible element)
+                clone.style.cssText = 'position:fixed;left:-9999px;top:0;display:block;width:794px;background:#fff;'
+                clone.classList.remove('hidden')
+                document.body.appendChild(clone)
+
+                try {
+                  const html2pdf = (await import('html2pdf.js')).default
+                  const svcType = serviceTypes.length > 0 ? serviceTypes.join('/') : 'MTN'
+                  const fileName = `JOBSHEET ${svcType.toUpperCase()} - ${clinicName} (${clinicCode}).pdf`
+
+                  await html2pdf().set({
+                    margin: 0,
+                    filename: fileName,
+                    image: { type: 'jpeg', quality: 0.98 },
+                    html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+                    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                  }).from(clone).save()
+                } finally {
+                  document.body.removeChild(clone)
+                }
+              }
+
+              // 2. Open Outlook with pre-filled fields (small delay so PDF download starts first)
+              setTimeout(() => {
+                const svcType = serviceTypes.length > 0 ? serviceTypes.join('/') : 'MTN'
+                const year = new Date().getFullYear()
+                const to = clinicEmail || ''
+                const cc = 'allsupport@medexoneglobal.com; celine.gan@medexoneglobal.com'
+                const subject = `JOBSHEET ${svcType.toUpperCase()} for ${clinicName} (${clinicCode})`
+                const header = jsEmailHeader
+                  .replace('{{SERVICE_TYPE}}', svcType.toUpperCase())
+                  .replace('{{YEAR}}', String(year))
+                const body = `${header}\n\n${jsEmailFooter}`
+                const a = document.createElement('a')
+                a.href = `mailto:${to}?cc=${encodeURIComponent(cc)}&subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+                a.click()
+              }, 500)
+            } catch (err) {
+              console.error('PDF generation failed:', err)
+              toast('Failed to generate PDF', 'error')
+            } finally {
+              setEmailSending(false)
+            }
           }}>
             <svg className="size-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />

@@ -8,7 +8,7 @@ import type { Ticket } from '@/lib/types'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
 import { IssueTypeBadge } from '@/components/FlagBadge'
-import { getDurationLabel } from '@/lib/constants'
+import { getDurationLabel, JOB_SHEET_STATUS_COLORS } from '@/lib/constants'
 import EmptyState, { EmptyIcons } from '@/components/ui/EmptyState'
 
 // WHY: Personal work tracker — each staff sees their own call logs, tickets, LK requests.
@@ -27,9 +27,11 @@ type DateRange = 'today' | 'yesterday' | 'week' | 'month' | 'all'
 export default function MyLogPage() {
   const supabase = createClient()
   const router = useRouter()
+  const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [lkRequests, setLkRequests] = useState<LKRequest[]>([])
+  const [jobSheets, setJobSheets] = useState<{ id: string; js_number: string; clinic_name: string; service_date: string; status: string; service_types: string[]; created_at: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     if (typeof window !== 'undefined') {
@@ -63,6 +65,7 @@ export default function MyLogPage() {
     async function loadUser() {
       const { data: { session } } = await supabase.auth.getSession()
       if (session) {
+        setUserId(session.user.id)
         const { data: profile } = await supabase
           .from('profiles')
           .select('display_name')
@@ -77,9 +80,9 @@ export default function MyLogPage() {
 
   // Fetch data when user or date range changes
   useEffect(() => {
-    if (userName) fetchData()
+    if (userName && userId) fetchData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userName, dateRange])
+  }, [userName, userId, dateRange])
 
   const getDateFilter = (): string | null => {
     const now = new Date()
@@ -151,18 +154,36 @@ export default function MyLogPage() {
 
     lkQuery = lkQuery.order('created_at', { ascending: false })
 
-    const queries: Promise<{ data: unknown }>[] = [ticketQuery, lkQuery]
+    // Fetch my job sheets
+    let jsQuery = supabase
+      .from('job_sheets')
+      .select('id, js_number, clinic_name, service_date, status, service_types, created_at')
+      .eq('service_by_id', userId)
+
+    if (dateFrom) {
+      if (dateRange === 'yesterday') {
+        jsQuery = jsQuery
+          .gte('created_at', dateFrom)
+          .lt('created_at', startOfDay(new Date()).toISOString())
+      } else {
+        jsQuery = jsQuery.gte('created_at', dateFrom)
+      }
+    }
+    jsQuery = jsQuery.order('created_at', { ascending: false })
+
+    const queries: Promise<{ data: unknown }>[] = [ticketQuery, lkQuery, jsQuery]
     if (updatedQuery) queries.push(updatedQuery)
     const results = await Promise.all(queries)
 
     const created = (results[0].data || []) as Ticket[]
     const createdIds = new Set(created.map(t => t.id))
-    const updated = updatedQuery ? ((results[2].data || []) as Ticket[]).filter(t => !createdIds.has(t.id)) : []
+    const updated = updatedQuery ? ((results[3].data || []) as Ticket[]).filter(t => !createdIds.has(t.id)) : []
 
     // Mark updated-only tickets so UI can show "Updated" badge
     updated.forEach(t => { (t as Ticket & { _isUpdatedOnly?: boolean })._isUpdatedOnly = true })
     setTickets([...created, ...updated])
     if (results[1].data) setLkRequests(results[1].data as LKRequest[])
+    setJobSheets((results[2].data || []) as typeof jobSheets)
     setLoading(false)
   }
 
@@ -245,6 +266,7 @@ export default function MyLogPage() {
                 {callLogs.length} call{callLogs.length !== 1 ? 's' : ''}
                 {ticketLogs.length > 0 && ` · ${ticketLogs.length} ticket${ticketLogs.length !== 1 ? 's' : ''}`}
                 {lkRequests.length > 0 && ` · ${lkRequests.length} LK`}
+                {jobSheets.length > 0 && ` · ${jobSheets.length} JS`}
               </p>
             </div>
             <div className="rounded-xl p-3 border border-border bg-surface-raised">
@@ -464,6 +486,51 @@ export default function MyLogPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* My Job Sheets */}
+          {jobSheets.length > 0 && !search && (
+            <div className="mt-6">
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Job Sheets</span>
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-[11px] text-text-muted tabular-nums">{jobSheets.length}</span>
+              </div>
+              <div className="card overflow-hidden divide-y divide-border">
+                {jobSheets.map((js) => {
+                  const sc = JOB_SHEET_STATUS_COLORS[js.status] || { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
+                  return (
+                    <div
+                      key={js.id}
+                      onClick={() => router.push(`/job-sheets/${js.id}`)}
+                      className="px-4 py-3 hover:bg-surface-raised/50 cursor-pointer transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono text-xs text-accent flex-shrink-0">{js.js_number}</span>
+                          <span className="text-sm text-text-primary truncate">{js.clinic_name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${sc.bg} ${sc.text}`}>
+                            {js.status}
+                          </span>
+                          <span className="text-xs text-text-tertiary tabular-nums">
+                            {format(new Date(js.service_date), 'dd MMM')}
+                          </span>
+                        </div>
+                      </div>
+                      {(js.service_types || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {js.service_types.map((t: string) => (
+                            <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400">{t}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
