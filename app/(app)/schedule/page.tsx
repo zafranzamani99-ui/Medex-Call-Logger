@@ -244,12 +244,25 @@ export default function SchedulePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Auto-scroll to today's cell when calendar renders
+  // Scroll to today's cell — fires on page load, refresh, and month changes (only if month contains today)
+  const scrollToToday = useCallback(() => {
+    requestAnimationFrame(() => {
+      if (todayRef.current) {
+        const rect = todayRef.current.getBoundingClientRect()
+        const offset = window.scrollY + rect.top - 20
+        window.scrollTo({ top: offset, behavior: 'smooth' })
+      }
+    })
+  }, [])
+
+  // Auto-scroll on mount and when switching to a month that contains today
   useEffect(() => {
-    if (todayRef.current) {
-      todayRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (isSameMonth(currentMonth, new Date())) {
+      scrollToToday()
+    } else {
+      window.scrollTo({ top: 0 })
     }
-  }, [currentMonth])
+  }, [currentMonth, scrollToToday])
 
   // Fetch schedules for current month (wait until filter is initialized)
   useEffect(() => {
