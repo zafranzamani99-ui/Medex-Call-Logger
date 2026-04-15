@@ -132,15 +132,15 @@ export default function JobSheetsPage() {
 
     const checklist = JOB_SHEET_CHECKLIST_LABELS.map(label => {
       const item = { label, checked: false, notes: '' }
-      // CRM defaults first
+      // CRM defaults first (full format e.g. "2026.1.1.23")
       if (clinicData?.workstation_count && label === 'Total Workstation') item.notes = clinicData.workstation_count
       if (clinicData?.current_program_version && label === 'Install/Update Program Version No') item.notes = clinicData.current_program_version
       if (clinicData?.current_db_version && label === 'Database Version (after update)') item.notes = clinicData.current_db_version
-      // AI-parsed values override CRM (agent notes are more current)
-      if (parsed.total_workstation && label === 'Total Workstation') item.notes = parsed.total_workstation
-      if (parsed.program_version_after && label === 'Install/Update Program Version No') item.notes = parsed.program_version_after
-      if (parsed.db_version_after && label === 'Database Version (after update)') item.notes = parsed.db_version_after
-      if (parsed.checklist_notes?.[label]) item.notes = parsed.checklist_notes[label]
+      // AI-parsed values only fill EMPTY checklist fields (CRM has proper full version format, AI has shorthand like "426")
+      if (parsed.total_workstation && label === 'Total Workstation' && !item.notes) item.notes = parsed.total_workstation
+      if (parsed.program_version_after && label === 'Install/Update Program Version No' && !item.notes) item.notes = parsed.program_version_after
+      if (parsed.db_version_after && label === 'Database Version (after update)' && !item.notes) item.notes = parsed.db_version_after
+      if (parsed.checklist_notes?.[label] && !item.notes) item.notes = parsed.checklist_notes[label]
       return item
     })
     const issueCategories = JOB_SHEET_ISSUE_CATEGORIES.map(label => ({ label, checked: false }))
@@ -160,7 +160,9 @@ export default function JobSheetsPage() {
     // AI-parsed values override CRM defaults (agent notes are more current)
     if (parsed.main_pc_name) importantDetails.main_pc_name = parsed.main_pc_name
     if (parsed.space_c) importantDetails.space_c = parsed.space_c
+    if (parsed.space_c_type) importantDetails.space_c_type = parsed.space_c_type
     if (parsed.space_d) importantDetails.space_d = parsed.space_d
+    if (parsed.space_d_type) importantDetails.space_d_type = parsed.space_d_type
     if (parsed.service_db_size_before) importantDetails.service_db_size_before = parsed.service_db_size_before
     if (parsed.service_db_size_after) importantDetails.service_db_size_after = parsed.service_db_size_after
     if (parsed.ultraviewer_id) importantDetails.ultraviewer_id = parsed.ultraviewer_id
@@ -170,6 +172,7 @@ export default function JobSheetsPage() {
     if (parsed.ram) importantDetails.ram = parsed.ram
     if (parsed.processor) importantDetails.processor = parsed.processor
     if (parsed.auto_backup_30days === true) importantDetails.auto_backup_30days = true
+    if (parsed.auto_backup_30days === false) importantDetails.auto_backup_30days = false
     if (parsed.ext_hdd_backup === true) importantDetails.ext_hdd_backup = true
     if (parsed.need_server === true) importantDetails.need_server = true
     if (parsed.brief_doctor === true) importantDetails.brief_doctor = true
@@ -190,7 +193,7 @@ export default function JobSheetsPage() {
       clinic_code: data.clinic_code,
       clinic_name: clinicData?.clinic_name || data.clinic_name,
       contact_person: data.contact_person || parsed.contact_person || null,
-      contact_tel: clinicData?.clinic_phone || data.contact_tel || parsed.contact_tel || null,
+      contact_tel: data.contact_tel || clinicData?.clinic_phone || parsed.contact_tel || null,
       clinic_email: clinicData?.email_main || null,
       doctor_name: clinicData?.registered_contact || parsed.doctor_name || null,
       doctor_phone: parsed.doctor_phone || null,
@@ -232,10 +235,10 @@ export default function JobSheetsPage() {
 
     setFormSaving(true)
 
-    // Fetch fresh clinic data from CRM
+    // Always fetch full clinic data from CRM (ClinicSearch only loads a subset of columns)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let clinicData: any = formClinic
-    if (!formClinic && clinicCode) {
+    let clinicData: any = null
+    if (clinicCode) {
       const { data: clinic } = await supabase.from('clinics').select('*').eq('clinic_code', clinicCode).single()
       clinicData = clinic
     }
@@ -257,16 +260,15 @@ export default function JobSheetsPage() {
 
     const defaultChecklist = JOB_SHEET_CHECKLIST_LABELS.map(label => {
       const item: { label: string; checked: boolean; notes: string } = { label, checked: false, notes: '' }
-      // CRM defaults first
+      // CRM defaults first (full format e.g. "2026.1.1.23")
       if (clinicData?.workstation_count && label === 'Total Workstation') item.notes = clinicData.workstation_count
       if (clinicData?.current_program_version && label === 'Install/Update Program Version No') item.notes = clinicData.current_program_version
       if (clinicData?.current_db_version && label === 'Database Version (after update)') item.notes = clinicData.current_db_version
-      // AI-parsed values override CRM (agent notes are more current)
-      if (parsed.total_workstation && label === 'Total Workstation') item.notes = parsed.total_workstation
-      if (parsed.program_version_after && label === 'Install/Update Program Version No') item.notes = parsed.program_version_after
-      if (parsed.db_version_after && label === 'Database Version (after update)') item.notes = parsed.db_version_after
-      // Apply any extra checklist_notes from AI
-      if (parsed.checklist_notes && parsed.checklist_notes[label]) item.notes = parsed.checklist_notes[label]
+      // AI-parsed values only fill EMPTY checklist fields (CRM has proper full version format, AI has shorthand like "426")
+      if (parsed.total_workstation && label === 'Total Workstation' && !item.notes) item.notes = parsed.total_workstation
+      if (parsed.program_version_after && label === 'Install/Update Program Version No' && !item.notes) item.notes = parsed.program_version_after
+      if (parsed.db_version_after && label === 'Database Version (after update)' && !item.notes) item.notes = parsed.db_version_after
+      if (parsed.checklist_notes && parsed.checklist_notes[label] && !item.notes) item.notes = parsed.checklist_notes[label]
       return item
     })
     const defaultIssueCategories = JOB_SHEET_ISSUE_CATEGORIES.map(label => ({
@@ -289,7 +291,9 @@ export default function JobSheetsPage() {
     // AI-parsed overrides
     if (parsed.main_pc_name) importantDetails.main_pc_name = parsed.main_pc_name
     if (parsed.space_c) importantDetails.space_c = parsed.space_c
+    if (parsed.space_c_type) importantDetails.space_c_type = parsed.space_c_type
     if (parsed.space_d) importantDetails.space_d = parsed.space_d
+    if (parsed.space_d_type) importantDetails.space_d_type = parsed.space_d_type
     if (parsed.service_db_size_before) importantDetails.service_db_size_before = parsed.service_db_size_before
     if (parsed.service_db_size_after) importantDetails.service_db_size_after = parsed.service_db_size_after
     if (parsed.ultraviewer_id) importantDetails.ultraviewer_id = parsed.ultraviewer_id
@@ -299,6 +303,7 @@ export default function JobSheetsPage() {
     if (parsed.ram) importantDetails.ram = parsed.ram
     if (parsed.processor) importantDetails.processor = parsed.processor
     if (parsed.auto_backup_30days === true) importantDetails.auto_backup_30days = true
+    if (parsed.auto_backup_30days === false) importantDetails.auto_backup_30days = false
     if (parsed.ext_hdd_backup === true) importantDetails.ext_hdd_backup = true
     if (parsed.need_server === true) importantDetails.need_server = true
     if (parsed.brief_doctor === true) importantDetails.brief_doctor = true
@@ -319,7 +324,7 @@ export default function JobSheetsPage() {
       clinic_code: clinicCode,
       clinic_name: clinicData?.clinic_name || clinicName,
       contact_person: formContactPerson || parsed.contact_person || null,
-      contact_tel: clinicData?.clinic_phone || formContactTel || parsed.contact_tel || null,
+      contact_tel: formContactTel || clinicData?.clinic_phone || parsed.contact_tel || null,
       clinic_email: clinicData?.email_main || null,
       doctor_name: clinicData?.registered_contact || parsed.doctor_name || null,
       doctor_phone: parsed.doctor_phone || null,

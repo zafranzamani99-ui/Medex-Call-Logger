@@ -45,7 +45,7 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
   const [activeTab, setActiveTab] = useState<'form' | 'preview'>('form')
 
   // === License Key Information ===
-  const [programType, setProgramType] = useState(clinic.product_type || '')
+  const [baseProductType, setBaseProductType] = useState(clinic.product_type || '')
   const [mtnStart, setMtnStart] = useState(formatDate(clinic.mtn_start))
   const [mtnEnd, setMtnEnd] = useState(formatDate(clinic.mtn_expiry))
   const [clinicName, setClinicName] = useState(clinic.lkey_line1 || clinic.clinic_name || '')
@@ -56,10 +56,10 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
   )
   const [address3, setAddress3] = useState(clinic.lkey_line4 || '')
   const [tel, setTel] = useState(clinic.lkey_line5 || clinic.clinic_phone || '')
-  const [registrationNo, setRegistrationNo] = useState('')
-  const [startDate, setStartDate] = useState('')
-  const [submission, setSubmission] = useState('')
-  const [frequency, setFrequency] = useState('')
+  const [registrationNo, setRegistrationNo] = useState(clinic.sst_registration_no || '')
+  const [startDate, setStartDate] = useState(clinic.sst_start_date || '')
+  const [submission, setSubmission] = useState(clinic.sst_submission || '')
+  const [frequency, setFrequency] = useState(clinic.sst_frequency || '')
 
   // === Additional Customer Information ===
   const [hqClinicName, setHqClinicName] = useState('')
@@ -82,18 +82,29 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
   const [environment, setEnvironment] = useState('LIVE')
   const [internalUse, setInternalUse] = useState('No')
   const [serverName, setServerName] = useState(clinic.main_pc_name || 'SERVER')
-  const [deviceId, setDeviceId] = useState('')
+  const [deviceId, setDeviceId] = useState(clinic.device_id || '')
 
   // === Activations ===
-  const [eInvoice, setEInvoice] = useState('No')
-  const [eInvoicePort, setEInvoicePort] = useState('')
-  const [waActive, setWaActive] = useState('No')
-  const [waAccountNo, setWaAccountNo] = useState('')
-  const [waApiKey, setWaApiKey] = useState('')
+  const [eInvoice, setEInvoice] = useState(clinic.has_e_invoice ? 'Yes' : 'No')
+  const [eInvoicePort, setEInvoicePort] = useState('60001')
+  const [waActive, setWaActive] = useState(clinic.has_whatsapp ? 'Yes' : 'No')
+  const [waAccountNo, setWaAccountNo] = useState(clinic.wa_account_no || '')
+  const [waApiKey, setWaApiKey] = useState(clinic.wa_api_key || '')
   const [emailActive, setEmailActive] = useState('No')
   const [emailType, setEmailType] = useState('')
   const [emailAddress, setEmailAddress] = useState('')
   const [emailPassword, setEmailPassword] = useState('')
+
+  // SST auto-detected from Registration No field
+  const hasSst = !!registrationNo.trim()
+
+  // Computed program type — base + active modules
+  const programType = [
+    baseProductType,
+    eInvoice === 'Yes' && 'EINV',
+    waActive === 'Yes' && 'WS',
+    hasSst && 'SST',
+  ].filter(Boolean).join(' + ')
 
   // === Subject Line ===
   const [selectedActions, setSelectedActions] = useState<string[]>([])
@@ -255,7 +266,7 @@ ${r('22', 'For Internal Use *', internalUse)}
 ${r('23', 'Server Name', serverName)}
 ${r('24', 'Device ID', deviceId)}
 ${actHdr('e-Invoice Activation', eInvoice)}
-${r('25', 'clinvoiceClientAPI Port No', eInvoicePort)}
+${r('25', 'E-Invoice Client API Port No', eInvoicePort)}
 ${actHdr('Medex Communication API : Whatsapp Activation', waActive)}
 <tr><td ${nc('#FFFFFF')}><font color="#000000">&nbsp;</font></td><td ${lc('#FFFFFF')}><font color="#000000">&nbsp;</font></td><td ${vc('#FFFFFF')}>${red('* Only 1 Whatsapp account will be used to sending message. Other Whatsapp account register will used for backup')}</td></tr>
 ${r('24', 'Whatsapp Account Number**', waAccountNo)}
@@ -317,6 +328,21 @@ ${r('28', 'Email Password', emailPassword)}
         created_by: agentName,
         subject: currentSubject,
       }).then(() => setSaved(true))
+
+      // Update CRM with LK form data — keeps clinic record current
+      supabase.from('clinics').update({
+        main_pc_name: serverName || null,
+        device_id: deviceId || null,
+        has_e_invoice: eInvoice === 'Yes',
+        has_sst: hasSst,
+        has_whatsapp: waActive === 'Yes',
+        wa_account_no: waAccountNo || null,
+        wa_api_key: waApiKey || null,
+        sst_registration_no: registrationNo || null,
+        sst_start_date: startDate || null,
+        sst_submission: submission || null,
+        sst_frequency: frequency || null,
+      }).eq('clinic_code', clinic.clinic_code).then(() => {})
     }
   }
 
@@ -423,7 +449,10 @@ ${r('28', 'Email Password', emailPassword)}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <div className={labelClass}>1. Program Type</div>
-                    <input value={programType} onChange={(e) => setProgramType(e.target.value)} className={inputClass} placeholder="e.g. GP" />
+                    <input value={baseProductType} onChange={(e) => setBaseProductType(e.target.value)} className={inputClass} placeholder="e.g. GP" />
+                    {programType !== baseProductType && (
+                      <p className="text-[11px] text-indigo-400 font-medium mt-1">{programType}</p>
+                    )}
                   </div>
                   <div>
                     <div className={labelClass}>4. Clinic Client Code</div>
@@ -548,7 +577,7 @@ ${r('28', 'Email Password', emailPassword)}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <div className={labelClass}>21. Environment (TEST / LIVE)</div>
-                    <select value={environment} onChange={(e) => setEnvironment(e.target.value)} className={selectClass}>
+                    <select value={environment} onChange={(e) => { setEnvironment(e.target.value); setEInvoicePort(e.target.value === 'LIVE' ? '60001' : '60002') }} className={selectClass}>
                       <option value="LIVE">LIVE</option>
                       <option value="TEST">TEST</option>
                     </select>
@@ -583,7 +612,7 @@ ${r('28', 'Email Password', emailPassword)}
                     </select>
                   </div>
                   <div>
-                    <div className={labelClass}>25. clinvoiceClientAPI Port No</div>
+                    <div className={labelClass}>25. E-Invoice Client API Port No</div>
                     <input value={eInvoicePort} onChange={(e) => setEInvoicePort(e.target.value)} className={inputClass} placeholder="e.g. 60001" />
                   </div>
                 </div>

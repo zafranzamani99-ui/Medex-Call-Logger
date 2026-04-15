@@ -372,7 +372,8 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
             <h4 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">System Info</h4>
             <div className="grid grid-cols-3 gap-x-4 gap-y-1">
               <EditableField label="Workstation Count" value={clinic.workstation_count} onSave={v => saveField('workstation_count', v)} />
-              <EditableField label="Main PC Name" value={clinic.main_pc_name} onSave={v => saveField('main_pc_name', v)} mono />
+              <EditableField label="Server Name" value={clinic.main_pc_name} onSave={v => saveField('main_pc_name', v)} mono />
+              <EditableField label="Device ID" value={clinic.device_id} onSave={v => saveField('device_id', v)} mono />
               <EditableField label="Program Version" value={clinic.current_program_version} onSave={v => saveField('current_program_version', v)} mono />
               <EditableField label="DB Version" value={clinic.current_db_version} onSave={v => saveField('current_db_version', v)} mono />
               <EditableField label="DB Size" value={clinic.db_size} onSave={v => saveField('db_size', v)} mono />
@@ -400,6 +401,26 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
                 <ToggleFlag label="WhatsApp" value={clinic.has_whatsapp} onToggle={v => saveField('has_whatsapp', v)} />
                 <ToggleFlag label="Auto Backup" value={clinic.has_backup} onToggle={v => saveField('has_backup', v)} />
                 <ToggleFlag label="External HDD" value={clinic.has_ext_hdd} onToggle={v => saveField('has_ext_hdd', v)} />
+              </div>
+            </div>
+
+            {/* WhatsApp Details */}
+            <div className="mt-3">
+              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">WhatsApp Details</span>
+              <div className="grid grid-cols-2 gap-x-4 mt-1">
+                <EditableField label="WS Account No" value={clinic.wa_account_no} onSave={v => saveField('wa_account_no', v)} mono />
+                <EditableField label="WS API Key" value={clinic.wa_api_key} onSave={v => saveField('wa_api_key', v)} mono />
+              </div>
+            </div>
+
+            {/* SST Details */}
+            <div className="mt-3">
+              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">SST Details</span>
+              <div className="grid grid-cols-2 gap-x-4 mt-1">
+                <EditableField label="Registration No" value={clinic.sst_registration_no} onSave={v => saveField('sst_registration_no', v)} mono />
+                <EditableField label="Start Date" value={clinic.sst_start_date} onSave={v => saveField('sst_start_date', v)} />
+                <EditableField label="Submission" value={clinic.sst_submission} onSave={v => saveField('sst_submission', v)} />
+                <EditableField label="Frequency" value={clinic.sst_frequency} onSave={v => saveField('sst_frequency', v)} />
               </div>
             </div>
           </div>

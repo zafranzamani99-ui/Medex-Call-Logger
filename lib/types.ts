@@ -68,6 +68,7 @@ export interface Clinic {
   // Operational fields (agent-managed, never overwritten by CRM upload)
   workstation_count: string | null
   main_pc_name: string | null
+  device_id: string | null
   current_program_version: string | null
   current_db_version: string | null
   db_size: string | null
@@ -82,6 +83,12 @@ export interface Clinic {
   has_whatsapp: boolean
   has_backup: boolean
   has_ext_hdd: boolean
+  wa_account_no: string | null
+  wa_api_key: string | null
+  sst_registration_no: string | null
+  sst_start_date: string | null
+  sst_submission: string | null
+  sst_frequency: string | null
   clinic_notes: string | null
   last_updated_by: string | null
   last_updated_by_name: string | null

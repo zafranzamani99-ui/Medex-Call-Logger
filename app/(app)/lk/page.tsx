@@ -132,9 +132,16 @@ export default function LKPage() {
               <span className="text-text-tertiary text-xs">Clinic Name</span>
               <p className="text-text-primary">{selectedClinic.clinic_name}</p>
             </div>
-            <div>
+            <div className="col-span-2 sm:col-span-3">
               <span className="text-text-tertiary text-xs">Product</span>
-              <p className="text-text-primary">{selectedClinic.product_type || '-'}</p>
+              <p className="text-text-primary font-medium">
+                {[
+                  selectedClinic.product_type,
+                  selectedClinic.has_e_invoice && 'EINV',
+                  selectedClinic.has_whatsapp && 'WS',
+                  selectedClinic.has_sst && 'SST',
+                ].filter(Boolean).join(' + ') || '-'}
+              </p>
             </div>
             <div>
               <span className="text-text-tertiary text-xs">MTN Start</span>
@@ -147,6 +154,14 @@ export default function LKPage() {
             <div>
               <span className="text-text-tertiary text-xs">Location</span>
               <p className="text-text-primary">{[selectedClinic.city, selectedClinic.state].filter(Boolean).join(', ') || '-'}</p>
+            </div>
+            <div>
+              <span className="text-text-tertiary text-xs">Server Name</span>
+              <p className="text-text-primary font-mono">{selectedClinic.main_pc_name || '-'}</p>
+            </div>
+            <div>
+              <span className="text-text-tertiary text-xs">Device ID</span>
+              <p className="text-text-primary font-mono">{selectedClinic.device_id || '-'}</p>
             </div>
           </div>
 
@@ -235,7 +250,13 @@ export default function LKPage() {
         <LicenseKeyModal
           clinic={selectedClinic}
           agentName={userName}
-          onClose={() => { setShowModal(false); refreshHistory() }}
+          onClose={async () => {
+            setShowModal(false)
+            refreshHistory()
+            // Re-fetch clinic to reflect CRM updates from the LK form (e.g. EINV, WS, SST flags)
+            const { data } = await supabase.from('clinics').select('*').eq('clinic_code', selectedClinic.clinic_code).single()
+            if (data) setSelectedClinic(data as Clinic)
+          }}
         />
       )}
 
