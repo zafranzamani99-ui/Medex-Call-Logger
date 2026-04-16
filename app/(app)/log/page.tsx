@@ -3,8 +3,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import type { Clinic, OpenTicketWarning, IssueType, TicketStatus, Channel, KnowledgeBaseEntry } from '@/lib/types'
-import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor, ISSUE_TYPES, toProperCase } from '@/lib/constants'
+import type { Clinic, OpenTicketWarning, IssueType, TicketStatus, Channel, KnowledgeBaseEntry, UserRole } from '@/lib/types'
+import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor, ISSUE_TYPES, toProperCase, ADMIN_PRIORITY_CATEGORIES } from '@/lib/constants'
 import ClinicSearch from '@/components/ClinicSearch'
 import OpenTicketBanner from '@/components/OpenTicketBanner'
 import TimelineBuilder from '@/components/TimelineBuilder'
@@ -36,6 +36,8 @@ interface CallLogDraft {
   issue: string
   myResponse: string
   nextStep: string
+  nextStepPic: string
+  nextStepContact: string
   timelineFromCustomer: string
   internalTimeline: string
   needTeamCheck: boolean
@@ -54,6 +56,7 @@ export default function LogCallPage() {
   // Current user
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
+  const [userRole, setUserRole] = useState<UserRole>('support')
 
   // Clinic
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null)
@@ -70,6 +73,8 @@ export default function LogCallPage() {
   const [issue, setIssue] = useState('')
   const [myResponse, setMyResponse] = useState('')
   const [nextStep, setNextStep] = useState('')
+  const [nextStepPic, setNextStepPic] = useState('')
+  const [nextStepContact, setNextStepContact] = useState('')
   const [timelineFromCustomer, setTimelineFromCustomer] = useState('')
   const [internalTimeline, setInternalTimeline] = useState('')
   const [needTeamCheck, setNeedTeamCheck] = useState(false)
@@ -130,10 +135,13 @@ export default function LogCallPage() {
         setUserId(session.user.id)
         const { data: profile } = await supabase
           .from('profiles')
-          .select('display_name')
+          .select('display_name, role')
           .eq('id', session.user.id)
           .single()
-        if (profile) setUserName(profile.display_name)
+        if (profile) {
+          setUserName(profile.display_name)
+          setUserRole((profile.role as UserRole) || 'support')
+        }
       }
     }
     getUser()
@@ -225,6 +233,8 @@ export default function LogCallPage() {
       setIssue(draft.issue)
       setMyResponse(draft.myResponse)
       setNextStep(draft.nextStep)
+      setNextStepPic(draft.nextStepPic || '')
+      setNextStepContact(draft.nextStepContact || '')
       setTimelineFromCustomer(draft.timelineFromCustomer)
       setInternalTimeline(draft.internalTimeline)
       setNeedTeamCheck(draft.needTeamCheck)
@@ -252,11 +262,11 @@ export default function LogCallPage() {
       savedAt: new Date().toISOString(),
       selectedClinic, callerTel, pic, clinicWa,
       callDuration, issueCategory, issueType, issue, myResponse,
-      nextStep, timelineFromCustomer, internalTimeline,
+      nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline,
       needTeamCheck, status, jiraLink, callDate,
     }
   }, [selectedClinic, callerTel, pic, clinicWa, callDuration, issueCategory, issueType, issue,
-      myResponse, nextStep, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink, callDate])
+      myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink, callDate])
 
   useEffect(() => {
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current)
@@ -335,6 +345,15 @@ export default function LogCallPage() {
     e.fix.toLowerCase().includes(kbSearch.toLowerCase()) ||
     e.issue_type.toLowerCase().includes(kbSearch.toLowerCase())
   ), [kbEntries, kbSearch])
+
+  // WHY: Admin (clerk) uses AR & MTN categories most — put them first.
+  // Support agents see them at the end (normal order).
+  const orderedCategories = useMemo(() => {
+    if (userRole !== 'admin') return ISSUE_CATEGORIES
+    const priority = ADMIN_PRIORITY_CATEGORIES
+    const rest = ISSUE_CATEGORIES.filter(c => !priority.includes(c))
+    return [...priority, ...rest]
+  }, [userRole])
 
   const uploadFile = useCallback(async (file: File) => {
     if (attachments.length >= MAX_ATTACHMENTS) {
@@ -464,6 +483,8 @@ export default function LogCallPage() {
       issue: issue.trim(),
       my_response: myResponse.trim() || null,
       next_step: nextStep.trim() || null,
+      next_step_pic: nextStepPic.trim() || null,
+      next_step_contact: nextStepContact.trim() || null,
       timeline_from_customer: timelineFromCustomer.trim() || null,
       internal_timeline: internalTimeline.trim() || null,
       status,
@@ -531,7 +552,7 @@ export default function LogCallPage() {
     router.push(`/tickets/${ticket.id}`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, callerTel, callDuration,
-      myResponse, nextStep, timelineFromCustomer, internalTimeline, needTeamCheck,
+      myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck,
       timelineData, userId, userName, router, supabase, activeDraftId,
       scheduleDate, scheduleTime, scheduleType, customScheduleType, attachments, callDate])
 
@@ -561,6 +582,8 @@ export default function LogCallPage() {
     setIssue('')
     setMyResponse('')
     setNextStep('')
+    setNextStepPic('')
+    setNextStepContact('')
     setTimelineFromCustomer('')
     setInternalTimeline('')
     setNeedTeamCheck(false)
@@ -595,6 +618,8 @@ export default function LogCallPage() {
     setIssue('')
     setMyResponse('')
     setNextStep('')
+    setNextStepPic('')
+    setNextStepContact('')
     setTimelineFromCustomer('')
     setInternalTimeline('')
     setNeedTeamCheck(false)
@@ -625,7 +650,7 @@ export default function LogCallPage() {
     const label = selectedClinic?.clinic_name || pic || 'Draft'
     const formData = {
       selectedClinic, callerTel, pic, clinicWa, callDuration,
-      issueCategory, issueType, issue, myResponse, nextStep,
+      issueCategory, issueType, issue, myResponse, nextStep, nextStepPic, nextStepContact,
       timelineFromCustomer, internalTimeline, needTeamCheck,
       status, jiraLink, callDate,
     }
@@ -660,6 +685,8 @@ export default function LogCallPage() {
     setIssue(draft.issue)
     setMyResponse(draft.myResponse)
     setNextStep(draft.nextStep)
+    setNextStepPic(draft.nextStepPic || '')
+    setNextStepContact(draft.nextStepContact || '')
     setTimelineFromCustomer(draft.timelineFromCustomer)
     setInternalTimeline(draft.internalTimeline)
     setNeedTeamCheck(draft.needTeamCheck)
@@ -948,7 +975,7 @@ export default function LogCallPage() {
               <PillSelector
                 label="Category"
                 required
-                options={ISSUE_CATEGORIES.map(c => ({ value: c, label: c, colors: getIssueCategoryColor(c) }))}
+                options={orderedCategories.map(c => ({ value: c, label: c, colors: getIssueCategoryColor(c) }))}
                 value={issueCategory}
                 onChange={(v) => {
                   setIssueCategory(v)
@@ -966,6 +993,7 @@ export default function LogCallPage() {
                   setFieldErrors(prev => ({ ...prev, issueType: false }))
                 }}
                 required
+                userRole={userRole}
               />
             </div>
 
@@ -1186,6 +1214,10 @@ export default function LogCallPage() {
             <div>
               <Label>Next Step</Label>
               <Input type="text" value={nextStep} onChange={(e) => setNextStep(e.target.value)} placeholder="What happens next..." />
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <Input type="text" value={nextStepPic} onChange={(e) => setNextStepPic(e.target.value)} placeholder="PIC — who to follow up with" />
+                <Input type="text" value={nextStepContact} onChange={(e) => setNextStepContact(e.target.value)} placeholder="Contact — phone / WhatsApp" />
+              </div>
             </div>
 
             {/* Timeline from Customer */}

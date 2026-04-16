@@ -1051,20 +1051,20 @@ export default function JobSheetDetailPage() {
         {/* 8. Checklist */}
         <Section title="Checklist">
           <div className="space-y-1">
-            <div className="grid grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 items-center text-xs text-text-tertiary font-medium pb-1 border-b border-border">
+            <div className="grid grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 items-center text-xs text-text-secondary font-medium pb-1 border-b border-border">
               <span className="w-5"></span>
               <span>Item</span>
               <span>Notes</span>
             </div>
             {checklist.map((item, idx) => (
-              <div key={item.label} className="grid grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 items-center py-1.5 border-b border-border/50">
+              <div key={item.label} className="grid grid-cols-[auto_1fr_1fr] gap-x-3 gap-y-1 items-center py-1.5 border-b border-zinc-500/10">
                 <input
                   type="checkbox"
                   checked={item.checked}
                   onChange={(e) => updateChecklistItem(idx, 'checked', e.target.checked)}
                   className="rounded border-border text-accent focus:ring-accent/30 bg-surface-inset"
                 />
-                <span className={`text-sm ${item.checked ? 'text-text-primary' : 'text-text-tertiary'}`}>{item.label}</span>
+                <span className={`text-sm ${item.checked ? 'text-text-primary' : 'text-text-secondary'}`}>{item.label}</span>
                 <Input
                   type="text"
                   value={item.notes}

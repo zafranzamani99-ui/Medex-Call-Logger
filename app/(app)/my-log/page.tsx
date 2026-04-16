@@ -339,7 +339,11 @@ export default function MyLogPage() {
                             {format(new Date(ticket.created_at), 'HH:mm')}
                           </span>
                         </div>
-                        <p className="text-xs text-zinc-400 line-clamp-1">{ticket.issue}</p>
+                        {ticket.next_step ? (
+                          <p className="text-xs text-violet-400 line-clamp-1">NEXT: {ticket.next_step}{ticket.next_step_pic ? ` — ${ticket.next_step_pic}` : ''}</p>
+                        ) : (
+                          <p className="text-xs text-zinc-400 line-clamp-1">{ticket.issue}</p>
+                        )}
                       </div>
                       <div className="shrink-0 mt-1 flex items-center gap-1 text-[11px] font-medium text-amber-400 group-hover:text-amber-300 transition-colors">
                         <span className="hidden sm:inline">Follow-up</span>

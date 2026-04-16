@@ -51,6 +51,8 @@ export default function TicketDetailPage() {
   const [editIssue, setEditIssue] = useState('')
   const [editResponse, setEditResponse] = useState('')
   const [editNextStep, setEditNextStep] = useState('')
+  const [editNextStepPic, setEditNextStepPic] = useState('')
+  const [editNextStepContact, setEditNextStepContact] = useState('')
   const [editStatus, setEditStatus] = useState<TicketStatus | null>(null)
   const [editNeedCheck, setEditNeedCheck] = useState(false)
   const [editJiraLink, setEditJiraLink] = useState('')
@@ -106,6 +108,8 @@ export default function TicketDetailPage() {
       setEditIssue(t.issue)
       setEditResponse(t.my_response || '')
       setEditNextStep(t.next_step || '')
+      setEditNextStepPic(t.next_step_pic || '')
+      setEditNextStepContact(t.next_step_contact || '')
       setEditStatus(t.status as TicketStatus)
       setEditNeedCheck(t.need_team_check)
       setEditJiraLink(t.jira_link || '')
@@ -197,6 +201,8 @@ export default function TicketDetailPage() {
         issue: editIssue,
         my_response: editResponse || null,
         next_step: editNextStep || null,
+        next_step_pic: editNextStepPic || null,
+        next_step_contact: editNextStepContact || null,
         timeline_from_customer: editTimelineFromCustomer || null,
         internal_timeline: editInternalTimeline || null,
         status: editStatus,
@@ -257,6 +263,10 @@ export default function TicketDetailPage() {
   const [followUpResponse, setFollowUpResponse] = useState('')
   const [followUpTimeline, setFollowUpTimeline] = useState('')
   const [followUpInternal, setFollowUpInternal] = useState('')
+  const [followUpJiraLink, setFollowUpJiraLink] = useState('')
+  const [followUpNextStep, setFollowUpNextStep] = useState('')
+  const [followUpNextStepPic, setFollowUpNextStepPic] = useState('')
+  const [followUpNextStepContact, setFollowUpNextStepContact] = useState('')
 
   const handleAddUpdate = async (data: {
     entryDate: string; channel: Channel; notes: string; formattedString: string
@@ -281,8 +291,18 @@ export default function TicketDetailPage() {
     }
     // Optional: update status if agent changed it
     if (followUpStatus && followUpStatus !== ticket.status) {
+      // Require Jira link when escalating via Add Update
+      if (followUpStatus === 'Escalated' && !followUpJiraLink.trim()) {
+        toast('Jira link is required when escalating', 'error')
+        setSaving(false)
+        return
+      }
       ticketUpdate.status = followUpStatus
       ticketUpdate.last_change_note = `Status → ${followUpStatus} (${data.channel})`
+    }
+    // Optional: update Jira link
+    if (followUpJiraLink.trim()) {
+      ticketUpdate.jira_link = followUpJiraLink.trim()
     }
     // Optional: append to my_response if agent added follow-up notes
     if (followUpResponse.trim()) {
@@ -291,6 +311,16 @@ export default function TicketDetailPage() {
       ticketUpdate.my_response = existing
         ? `${existing}\n\n[${timestamp} - ${userName}] ${followUpResponse.trim()}`
         : `[${timestamp} - ${userName}] ${followUpResponse.trim()}`
+    }
+    // Optional: update next step fields
+    if (followUpNextStep.trim()) {
+      ticketUpdate.next_step = followUpNextStep.trim()
+    }
+    if (followUpNextStepPic.trim()) {
+      ticketUpdate.next_step_pic = followUpNextStepPic.trim()
+    }
+    if (followUpNextStepContact.trim()) {
+      ticketUpdate.next_step_contact = followUpNextStepContact.trim()
     }
     // Optional: update timeline fields
     if (followUpTimeline.trim()) {
@@ -310,6 +340,10 @@ export default function TicketDetailPage() {
     setFollowUpResponse('')
     setFollowUpTimeline('')
     setFollowUpInternal('')
+    setFollowUpJiraLink('')
+    setFollowUpNextStep('')
+    setFollowUpNextStepPic('')
+    setFollowUpNextStepContact('')
     setUpdateAttachments([])
     fetchTicket()
     setSaving(false)
@@ -635,12 +669,27 @@ export default function TicketDetailPage() {
                   <p className="text-text-primary mt-1 whitespace-pre-wrap">{ticket.my_response || '-'}</p>
                 )}
               </div>
-              <div>
+              <div className="sm:col-span-2">
                 <span className="text-text-tertiary text-xs">Next Step</span>
                 {editing ? (
-                  <Input value={editNextStep} onChange={(e) => setEditNextStep(e.target.value)} className="mt-1" />
+                  <>
+                    <Input value={editNextStep} onChange={(e) => setEditNextStep(e.target.value)} className="mt-1" placeholder="What happens next..." />
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <Input value={editNextStepPic} onChange={(e) => setEditNextStepPic(e.target.value)} placeholder="PIC — who to follow up with" />
+                      <Input value={editNextStepContact} onChange={(e) => setEditNextStepContact(e.target.value)} placeholder="Contact — phone / WhatsApp" />
+                    </div>
+                  </>
                 ) : (
-                  <p className="text-text-primary mt-1">{ticket.next_step || '-'}</p>
+                  <>
+                    <p className="text-text-primary mt-1">{ticket.next_step || '-'}</p>
+                    {(ticket.next_step_pic || ticket.next_step_contact) && (
+                      <p className="text-text-secondary text-sm mt-0.5">
+                        {ticket.next_step_pic && <span>{ticket.next_step_pic}</span>}
+                        {ticket.next_step_pic && ticket.next_step_contact && <span className="text-text-muted"> · </span>}
+                        {ticket.next_step_contact && <span className="text-text-tertiary">{ticket.next_step_contact}</span>}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
               <div>
@@ -787,6 +836,20 @@ export default function TicketDetailPage() {
                       )
                     })}
                   </div>
+                  {/* Jira link — required when Escalated */}
+                  {followUpStatus === 'Escalated' && (
+                    <div className="mt-2">
+                      <input
+                        value={followUpJiraLink}
+                        onChange={(e) => setFollowUpJiraLink(e.target.value)}
+                        placeholder="https://medex.atlassian.net/browse/..."
+                        className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                      />
+                      {!followUpJiraLink.trim() && (
+                        <p className="text-xs text-red-400 mt-1">Jira link is required when escalating</p>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {/* Optional: Append to response */}
                 <div className="mt-3">
@@ -847,6 +910,30 @@ export default function TicketDetailPage() {
                       value={followUpInternal}
                       onChange={(e) => setFollowUpInternal(e.target.value)}
                       placeholder='e.g. "By Hazleen: 06/04/2026"'
+                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                    />
+                  </div>
+                </div>
+                {/* Optional: Next Step fields */}
+                <div className="mt-3">
+                  <p className="text-xs text-text-muted mb-1">Update next step <span className="text-text-tertiary">(optional)</span></p>
+                  <input
+                    value={followUpNextStep}
+                    onChange={(e) => setFollowUpNextStep(e.target.value)}
+                    placeholder="What happens next..."
+                    className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                  />
+                  <div className="grid grid-cols-2 gap-2 mt-2">
+                    <input
+                      value={followUpNextStepPic}
+                      onChange={(e) => setFollowUpNextStepPic(e.target.value)}
+                      placeholder="PIC — who to follow up with"
+                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                    />
+                    <input
+                      value={followUpNextStepContact}
+                      onChange={(e) => setFollowUpNextStepContact(e.target.value)}
+                      placeholder="Contact — phone / WhatsApp"
                       className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
                     />
                   </div>

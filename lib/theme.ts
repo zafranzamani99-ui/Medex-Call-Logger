@@ -47,6 +47,8 @@ export const ISSUE_HEX_COLORS: Record<string, string> = {
   'Corp Invoice':     '#6ee7b7',
   'Training':         '#818cf8',
   'Bug':              '#f87171',
+  'Active Customer':  '#4ade80',
+  'Expired Customer': '#fca5a5',
 }
 
 export const DEFAULT_ISSUE_HEX = '#5c6278'
@@ -63,6 +65,9 @@ export const ISSUE_CATEGORY_HEX_COLORS: Record<string, string> = {
   'Data Issue':            '#fbbf24',
   'System Issue':          '#f87171',
   'Change Request':        '#a78bfa',
+  'Hardware':              '#a1a1aa',
+  'AR':                    '#4ade80',
+  'MTN':                   '#38bdf8',
 }
 
 export function getIssueCategoryHexColor(cat: string): string {

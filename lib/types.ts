@@ -143,6 +143,8 @@ export interface Ticket {
   issue: string
   my_response: string | null
   next_step: string | null
+  next_step_pic: string | null
+  next_step_contact: string | null
   timeline_from_customer: string | null
   internal_timeline: string | null
 
@@ -262,6 +264,8 @@ export interface NewTicketInput {
   issue: string
   my_response: string | null
   next_step: string | null
+  next_step_pic: string | null
+  next_step_contact: string | null
   timeline_from_customer: string | null
   internal_timeline: string | null
   call_duration: number | null

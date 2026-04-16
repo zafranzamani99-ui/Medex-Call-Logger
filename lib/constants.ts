@@ -27,12 +27,15 @@ export const ISSUE_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
   'Corp Invoice':   { bg: 'bg-emerald-600/20', text: 'text-emerald-300' },  // corporate money — green
   'Training':       { bg: 'bg-indigo-500/20', text: 'text-indigo-400' },    // learning — deep/calm
   'Bug':            { bg: 'bg-red-500/20', text: 'text-red-400' },          // danger — error/defect
+  'Active Customer':  { bg: 'bg-green-500/20', text: 'text-green-400' },    // active — healthy status
+  'Expired Customer': { bg: 'bg-red-400/20', text: 'text-red-300' },        // expired — needs attention
 }
 
 // Default fallback color for custom issue types
 export const DEFAULT_ISSUE_COLOR = { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
 
 // Issue categories — parent classification above issue types
+// Admin-specific categories (AR, MTN) are reordered to top for admin role at the UI level
 export const ISSUE_CATEGORIES: string[] = [
   'Service',
   'System Implementation',
@@ -41,7 +44,12 @@ export const ISSUE_CATEGORIES: string[] = [
   'System Issue',
   'Change Request',
   'Hardware',
+  'AR',
+  'MTN',
 ]
+
+// Admin-priority categories — shown first for admin role
+export const ADMIN_PRIORITY_CATEGORIES = ['AR', 'MTN']
 
 export const ISSUE_CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
   'Service':               { bg: 'bg-cyan-500/20', text: 'text-cyan-400' },
@@ -51,6 +59,8 @@ export const ISSUE_CATEGORY_COLORS: Record<string, { bg: string; text: string }>
   'System Issue':          { bg: 'bg-red-500/20', text: 'text-red-400' },
   'Change Request':        { bg: 'bg-violet-500/20', text: 'text-violet-400' },
   'Hardware':              { bg: 'bg-zinc-600/20', text: 'text-zinc-300' },
+  'AR':                    { bg: 'bg-green-500/20', text: 'text-green-400' },
+  'MTN':                   { bg: 'bg-sky-500/20', text: 'text-sky-400' },
 }
 
 export const DEFAULT_CATEGORY_COLOR = { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
@@ -85,6 +95,7 @@ export const RENEWAL_COLORS: Record<string, { bg: string; text: string }> = {
 export const CHANNELS: Channel[] = ['Call', 'WhatsApp', 'Email', 'Internal']
 
 // Default issue type options — order matches team's priority
+// Admin-specific types (Active Customer, Expired Customer) reordered to top for admin role at UI level
 export const ISSUE_TYPES: string[] = [
   'Enquiry',
   'Login Issue',
@@ -104,7 +115,12 @@ export const ISSUE_TYPES: string[] = [
   'Corp Invoice',
   'Training',
   'Bug',
+  'Active Customer',
+  'Expired Customer',
 ]
+
+// Admin-priority issue types — shown first for admin role
+export const ADMIN_PRIORITY_ISSUE_TYPES = ['Active Customer', 'Expired Customer']
 
 // Status options (spec Section 4.3)
 export const STATUSES: TicketStatus[] = [

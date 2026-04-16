@@ -306,7 +306,7 @@ export default function HistoryPage() {
   const handleExport = () => {
     const headers = [
       'Ref', 'Type', 'Date', 'Duration', 'Clinic Code', 'Clinic Name', 'City', 'State', 'Product',
-      'MTN Expiry', 'Renewal', 'Category', 'Issue Type', 'Issue', 'My Response', 'Jira Link', 'Next Step',
+      'MTN Expiry', 'Renewal', 'Category', 'Issue Type', 'Issue', 'My Response', 'Jira Link', 'Next Step', 'Next Step PIC', 'Next Step Contact',
       'Status', 'PIC', 'Caller Tel', 'Logged By', 'Need Team Check'
     ]
     const rows = filtered.map((t) => [
@@ -319,7 +319,7 @@ export default function HistoryPage() {
       t.issue_category || '', t.issue_type,
       `"${(t.issue || '').replace(/"/g, '""')}"`,
       `"${(t.my_response || '').replace(/"/g, '""')}"`,
-      t.jira_link || '', t.next_step || '', t.status, t.pic || '', t.caller_tel || '',
+      t.jira_link || '', t.next_step || '', t.next_step_pic || '', t.next_step_contact || '', t.status, t.pic || '', t.caller_tel || '',
       t.created_by_name, t.need_team_check ? 'Yes' : 'No',
     ])
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
@@ -815,6 +815,13 @@ export default function HistoryPage() {
                       </td>
                       <td className="px-4 py-3 align-top">
                         <span className="text-xs text-violet-400">{ticket.next_step || ''}</span>
+                        {(ticket.next_step_pic || ticket.next_step_contact) && (
+                          <p className="text-[11px] text-text-secondary mt-0.5">
+                            {ticket.next_step_pic && <span>{ticket.next_step_pic}</span>}
+                            {ticket.next_step_pic && ticket.next_step_contact && <span className="text-text-muted"> · </span>}
+                            {ticket.next_step_contact && <span className="text-text-tertiary">{ticket.next_step_contact}</span>}
+                          </p>
+                        )}
                       </td>
                       <td className="px-4 py-3 align-top">
                         <span className="text-xs text-accent font-medium">{toProperCase(ticket.created_by_name)}</span>
@@ -899,7 +906,7 @@ export default function HistoryPage() {
                   <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic || ''}</span></p>
                   <p className="truncate"><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
                   <p className="truncate"><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response || ''}</span></p>
-                  <p className="truncate"><span className="text-violet-400 font-medium">NEXT:</span> <span className="text-text-secondary">{ticket.next_step || ''}</span></p>
+                  <p className="truncate"><span className="text-violet-400 font-medium">NEXT:</span> <span className="text-text-secondary">{ticket.next_step || ''}</span>{ticket.next_step_pic && <span className="text-text-tertiary"> — {ticket.next_step_pic}</span>}{ticket.next_step_contact && <span className="text-text-muted"> {ticket.next_step_contact}</span>}</p>
                   <p className="truncate"><span className="text-orange-400 font-medium">TIMELINE:</span> <span className="text-text-secondary">{ticket.timeline_from_customer || ''}</span></p>
                   <p className="truncate"><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline || ''}</span></p>
                 </div>
