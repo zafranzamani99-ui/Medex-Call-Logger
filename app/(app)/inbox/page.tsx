@@ -1,0 +1,380 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { format, formatDistanceToNow } from 'date-fns'
+import type { InboxMessage } from '@/lib/types'
+import { toProperCase } from '@/lib/constants'
+import EmptyState from '@/components/ui/EmptyState'
+import { useToast } from '@/components/ui/Toast'
+
+// WHY: Shared inbox for "Escalated to Admin" messages.
+// All agents can see all messages. Read tracking is per-user (timestamp-based).
+// Admin can reply and mark messages as "Done".
+
+export default function InboxPage() {
+  const router = useRouter()
+  const supabase = createClient()
+  const { toast } = useToast()
+
+  const [messages, setMessages] = useState<InboxMessage[]>([])
+  const [loading, setLoading] = useState(true)
+  const [lastReadAt, setLastReadAt] = useState<string | null>(null)
+  const [userName, setUserName] = useState('')
+  const [userRole, setUserRole] = useState('')
+  const [userId, setUserId] = useState('')
+  const [replyingTo, setReplyingTo] = useState<string | null>(null)
+  const [replyText, setReplyText] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [filter, setFilter] = useState<'all' | 'open' | 'done'>('all')
+
+  const fetchMessages = useCallback(async () => {
+    const { data } = await supabase
+      .from('inbox_messages')
+      .select('*')
+      .order('created_at', { ascending: false })
+    if (data) setMessages(data as InboxMessage[])
+  }, [supabase])
+
+  useEffect(() => {
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.user) return
+      const uid = session.user.id
+      setUserId(uid)
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('display_name, role')
+        .eq('id', uid)
+        .single()
+      if (profile) {
+        setUserName(profile.display_name)
+        setUserRole(profile.role)
+      }
+
+      // Fetch user's last read timestamp BEFORE marking as read
+      const { data: readStatus } = await supabase
+        .from('inbox_read_status')
+        .select('last_read_at')
+        .eq('user_id', uid)
+        .maybeSingle()
+
+      setLastReadAt(readStatus?.last_read_at || '1970-01-01T00:00:00Z')
+
+      await fetchMessages()
+      setLoading(false)
+
+      // Mark all as read (upsert last_read_at to now)
+      await supabase.from('inbox_read_status').upsert({
+        user_id: uid,
+        last_read_at: new Date().toISOString(),
+      })
+    }
+    init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Real-time subscription for new messages
+  useEffect(() => {
+    const channel = supabase
+      .channel('inbox-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'inbox_messages' },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          setMessages(prev => [payload.new as InboxMessage, ...prev])
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [supabase])
+
+  const roleLabel = userRole === 'admin' ? 'Admin' : 'Support'
+  const nameWithRole = `${toProperCase(userName)} (${roleLabel})`
+
+  const handleReply = async (msgId: string) => {
+    if (!replyText.trim()) return
+    setSaving(true)
+    const { error } = await supabase
+      .from('inbox_messages')
+      .update({
+        admin_reply: replyText.trim(),
+        replied_by: userId,
+        replied_by_name: nameWithRole,
+        replied_at: new Date().toISOString(),
+      })
+      .eq('id', msgId)
+
+    if (!error) {
+      setMessages(prev => prev.map(m => m.id === msgId ? {
+        ...m,
+        admin_reply: replyText.trim(),
+        replied_by: userId,
+        replied_by_name: nameWithRole,
+        replied_at: new Date().toISOString(),
+      } : m))
+      setReplyingTo(null)
+      setReplyText('')
+      toast('Reply sent')
+    } else {
+      toast('Failed to reply', 'error')
+    }
+    setSaving(false)
+  }
+
+  const handleMarkDone = async (msgId: string) => {
+    const { error } = await supabase
+      .from('inbox_messages')
+      .update({
+        status: 'done',
+        replied_by: userId,
+        replied_by_name: nameWithRole,
+        replied_at: new Date().toISOString(),
+      })
+      .eq('id', msgId)
+
+    if (!error) {
+      setMessages(prev => prev.map(m => m.id === msgId ? {
+        ...m,
+        status: 'done' as const,
+        replied_by: userId,
+        replied_by_name: nameWithRole,
+        replied_at: new Date().toISOString(),
+      } : m))
+      toast('Marked as done')
+    }
+  }
+
+  const handleReopen = async (msgId: string) => {
+    const { error } = await supabase
+      .from('inbox_messages')
+      .update({ status: 'open', admin_reply: null, replied_by: null, replied_by_name: null, replied_at: null })
+      .eq('id', msgId)
+
+    if (!error) {
+      setMessages(prev => prev.map(m => m.id === msgId ? {
+        ...m,
+        status: 'open' as const,
+        admin_reply: null,
+        replied_by: null,
+        replied_by_name: null,
+        replied_at: null,
+      } : m))
+      toast('Reopened')
+    }
+  }
+
+  const isUnread = (msg: InboxMessage) => {
+    if (!lastReadAt) return false
+    return new Date(msg.created_at) > new Date(lastReadAt)
+  }
+
+  const filtered = filter === 'all' ? messages : messages.filter(m => m.status === filter)
+  const openCount = messages.filter(m => m.status === 'open').length
+  const unreadCount = messages.filter(isUnread).length
+
+  if (loading) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <div className="h-8 w-32 skeleton rounded mb-6" />
+        <div className="space-y-3">
+          {[1, 2, 3].map(i => (
+            <div key={i} className="h-24 skeleton rounded-lg" />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-4">
+        <h1 className="text-xl font-bold text-text-primary">Inbox</h1>
+        {unreadCount > 0 && (
+          <span className="px-2 py-0.5 text-xs font-medium bg-purple-500/20 text-purple-400 rounded-full">
+            {unreadCount} new
+          </span>
+        )}
+        {openCount > 0 && (
+          <span className="px-2 py-0.5 text-xs font-medium bg-amber-500/20 text-amber-400 rounded-full">
+            {openCount} open
+          </span>
+        )}
+      </div>
+
+      {/* Filter tabs */}
+      <div className="flex gap-1.5 mb-5">
+        {(['all', 'open', 'done'] as const).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              filter === f
+                ? f === 'open' ? 'bg-amber-500/20 text-amber-400' : f === 'done' ? 'bg-green-500/20 text-green-400' : 'bg-purple-500/20 text-purple-400'
+                : 'bg-surface-raised text-text-tertiary hover:text-text-primary'
+            }`}
+          >
+            {f === 'all' ? `All (${messages.length})` : f === 'open' ? `Open (${openCount})` : `Done (${messages.length - openCount})`}
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <EmptyState
+          icon={
+            <svg className="size-8 text-text-muted" fill="none" stroke="currentColor" strokeWidth={1.2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+            </svg>
+          }
+          title={filter === 'all' ? 'No messages yet' : filter === 'open' ? 'No open messages' : 'No completed messages'}
+          description={filter === 'all' ? 'Messages will appear here when tickets are escalated to admin.' : undefined}
+        />
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((msg) => {
+            const unread = isUnread(msg)
+            const isDone = msg.status === 'done'
+            const isReplying = replyingTo === msg.id
+            return (
+              <div
+                key={msg.id}
+                className={`relative p-4 rounded-lg border transition-colors ${
+                  isDone
+                    ? 'border-border bg-surface opacity-75'
+                    : unread
+                      ? 'border-l-4 border-l-purple-500 border-t-border border-r-border border-b-border bg-purple-500/5'
+                      : 'border-border bg-surface'
+                }`}
+              >
+                {/* Done badge — top right */}
+                {isDone && (
+                  <span className="absolute top-3 right-3 px-2 py-0.5 text-[10px] font-medium bg-green-500/20 text-green-400 rounded">
+                    Done
+                  </span>
+                )}
+
+                {/* Header row */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-medium text-text-primary">
+                        {toProperCase(msg.sent_by_name)}
+                      </span>
+                      <span className="text-xs text-text-tertiary">
+                        {formatDistanceToNow(new Date(msg.created_at), { addSuffix: true })}
+                      </span>
+                      {!isDone && unread && (
+                        <span className="size-2 rounded-full bg-purple-400 flex-shrink-0" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <button
+                        onClick={() => router.push(`/tickets/${msg.ticket_id}`)}
+                        className="text-xs font-mono text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded hover:bg-purple-500/20 transition-colors"
+                      >
+                        {msg.ticket_ref}
+                      </button>
+                      <span className="text-xs text-text-secondary truncate">
+                        {msg.clinic_name}
+                      </span>
+                    </div>
+                    <p className="text-sm text-text-secondary">
+                      {msg.message}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Admin reply (if exists) */}
+                {msg.admin_reply && (
+                  <div className="mt-3 ml-4 pl-3 border-l-2 border-green-500/30">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-medium text-green-400">
+                        {msg.replied_by_name || 'Admin'}
+                      </span>
+                      {msg.replied_at && (
+                        <span className="text-xs text-text-muted">
+                          {formatDistanceToNow(new Date(msg.replied_at), { addSuffix: true })}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm text-text-secondary">{msg.admin_reply}</p>
+                  </div>
+                )}
+
+                {/* Action buttons */}
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => router.push(`/tickets/${msg.ticket_id}`)}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-raised border border-border text-text-secondary hover:text-text-primary hover:border-zinc-500/30 transition-colors"
+                  >
+                    View Ticket
+                  </button>
+                  {isDone ? (
+                    <button
+                      onClick={() => handleReopen(msg.id)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20 transition-colors"
+                    >
+                      Reopen
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => {
+                          setReplyingTo(isReplying ? null : msg.id)
+                          setReplyText('')
+                        }}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition-colors"
+                      >
+                        {isReplying ? 'Cancel' : 'Reply'}
+                      </button>
+                      <button
+                        onClick={() => handleMarkDone(msg.id)}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 transition-colors"
+                      >
+                        Mark Done
+                      </button>
+                    </>
+                  )}
+                  <span className="ml-auto text-[11px] text-text-muted">
+                    {format(new Date(msg.created_at), 'dd MMM yyyy, h:mm a')}
+                  </span>
+                </div>
+
+                {/* Reply input */}
+                {isReplying && (
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                      placeholder="Type your reply..."
+                      className="flex-1 px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-purple-500/50"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && replyText.trim()) {
+                          e.preventDefault()
+                          handleReply(msg.id)
+                        }
+                      }}
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => handleReply(msg.id)}
+                      disabled={!replyText.trim() || saving}
+                      className="px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg text-sm font-medium hover:bg-purple-500/30 transition-colors disabled:opacity-40"
+                    >
+                      {saving ? '...' : 'Send'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}

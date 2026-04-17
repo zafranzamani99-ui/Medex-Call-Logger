@@ -32,6 +32,7 @@ export default function TicketDetailPage() {
   const [timeline, setTimeline] = useState<TimelineEntry[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [auditEntries, setAuditEntries] = useState<{ action: string; changed_by: string; created_at: string; old_data: Record<string, unknown>; new_data: Record<string, unknown> }[]>([])
+  const [auditOpen, setAuditOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
@@ -56,8 +57,10 @@ export default function TicketDetailPage() {
   const [editStatus, setEditStatus] = useState<TicketStatus | null>(null)
   const [editNeedCheck, setEditNeedCheck] = useState(false)
   const [editJiraLink, setEditJiraLink] = useState('')
+  const [editAdminMessage, setEditAdminMessage] = useState('')
   const [editPic, setEditPic] = useState('')
   const [editCallerTel, setEditCallerTel] = useState('')
+  const [editClinicName, setEditClinicName] = useState('')
   const [editTimelineFromCustomer, setEditTimelineFromCustomer] = useState('')
   const [editInternalTimeline, setEditInternalTimeline] = useState('')
   const [editIssueCategory, setEditIssueCategory] = useState<string | null>(null)
@@ -113,8 +116,10 @@ export default function TicketDetailPage() {
       setEditStatus(t.status as TicketStatus)
       setEditNeedCheck(t.need_team_check)
       setEditJiraLink(t.jira_link || '')
+      setEditAdminMessage(t.admin_message || '')
       setEditPic(t.pic || '')
       setEditCallerTel(t.caller_tel || '')
+      setEditClinicName(t.clinic_name || '')
       setEditTimelineFromCustomer(t.timeline_from_customer || '')
       setEditInternalTimeline(t.internal_timeline || '')
       setEditIssueCategory(t.issue_category || null)
@@ -180,6 +185,11 @@ export default function TicketDetailPage() {
       toast('Jira link is required when escalating a ticket', 'error')
       return
     }
+    // Require admin message when escalating to admin
+    if (editStatus === 'Escalated to Admin' && !editAdminMessage.trim()) {
+      toast('Message is required when escalating to admin', 'error')
+      return
+    }
 
     setSaving(true)
 
@@ -194,10 +204,12 @@ export default function TicketDetailPage() {
     if ((editIssueCategory || null) !== (ticket.issue_category || null)) changes.push(`Category: ${ticket.issue_category || 'None'} → ${editIssueCategory || 'None'}`)
     if (editIssueType !== ticket.issue_type) changes.push(`Type: ${ticket.issue_type} → ${editIssueType}`)
     if ((editDuration || null) !== (ticket.call_duration || null)) changes.push(`Duration: ${getDurationLabel(ticket.call_duration)} → ${getDurationLabel(editDuration)}`)
+    if (ticket.clinic_code === 'MANUAL' && editClinicName !== ticket.clinic_name) changes.push(`Name: ${ticket.clinic_name} → ${editClinicName}`)
 
     const { error } = await supabase
       .from('tickets')
       .update({
+        ...(ticket.clinic_code === 'MANUAL' && editClinicName !== ticket.clinic_name ? { clinic_name: editClinicName } : {}),
         issue: editIssue,
         my_response: editResponse || null,
         next_step: editNextStep || null,
@@ -211,6 +223,7 @@ export default function TicketDetailPage() {
         issue_type: editIssueType,
         call_duration: editDuration,
         jira_link: editJiraLink || null,
+        admin_message: editStatus === 'Escalated to Admin' ? editAdminMessage.trim() : (editAdminMessage.trim() || null),
         pic: editPic || null,
         caller_tel: editCallerTel || null,
         last_updated_by: userId,
@@ -223,6 +236,17 @@ export default function TicketDetailPage() {
     if (!error) {
       if (editStatus === 'Resolved' && ticket.status !== 'Resolved') {
         triggerKBGeneration({ ...ticket, issue: editIssue, my_response: editResponse || null, next_step: editNextStep || null })
+      }
+      // Insert inbox message when escalated to admin
+      if (editStatus === 'Escalated to Admin' && ticket.status !== 'Escalated to Admin' && editAdminMessage.trim()) {
+        await supabase.from('inbox_messages').insert({
+          ticket_id: ticket.id,
+          ticket_ref: ticket.ticket_ref,
+          clinic_name: ticket.clinic_name,
+          message: editAdminMessage.trim(),
+          sent_by: userId,
+          sent_by_name: userName,
+        })
       }
       setEditing(false)
       fetchTicket()
@@ -240,6 +264,13 @@ export default function TicketDetailPage() {
       setEditing(true)
       setEditStatus('Escalated')
       toast('Please add a Jira link before escalating', 'error')
+      return
+    }
+    // Block quick-escalate to admin — always force edit mode (message required)
+    if (newStatus === 'Escalated to Admin') {
+      setEditing(true)
+      setEditStatus('Escalated to Admin')
+      toast('Please add a message before escalating to admin', 'error')
       return
     }
     await supabase
@@ -264,6 +295,7 @@ export default function TicketDetailPage() {
   const [followUpTimeline, setFollowUpTimeline] = useState('')
   const [followUpInternal, setFollowUpInternal] = useState('')
   const [followUpJiraLink, setFollowUpJiraLink] = useState('')
+  const [followUpAdminMessage, setFollowUpAdminMessage] = useState('')
   const [followUpNextStep, setFollowUpNextStep] = useState('')
   const [followUpNextStepPic, setFollowUpNextStepPic] = useState('')
   const [followUpNextStepContact, setFollowUpNextStepContact] = useState('')
@@ -297,12 +329,22 @@ export default function TicketDetailPage() {
         setSaving(false)
         return
       }
+      // Require admin message when escalating to admin via Add Update
+      if (followUpStatus === 'Escalated to Admin' && !followUpAdminMessage.trim()) {
+        toast('Message is required when escalating to admin', 'error')
+        setSaving(false)
+        return
+      }
       ticketUpdate.status = followUpStatus
       ticketUpdate.last_change_note = `Status → ${followUpStatus} (${data.channel})`
     }
     // Optional: update Jira link
     if (followUpJiraLink.trim()) {
       ticketUpdate.jira_link = followUpJiraLink.trim()
+    }
+    // Optional: update admin message when escalating to admin
+    if (followUpStatus === 'Escalated to Admin' && followUpAdminMessage.trim()) {
+      ticketUpdate.admin_message = followUpAdminMessage.trim()
     }
     // Optional: append to my_response if agent added follow-up notes
     if (followUpResponse.trim()) {
@@ -335,12 +377,24 @@ export default function TicketDetailPage() {
       ticketUpdate.attachment_urls = [...existing, ...updateAttachments]
     }
     await supabase.from('tickets').update(ticketUpdate).eq('id', ticket.id)
+    // Insert inbox message when escalating to admin via follow-up
+    if (followUpStatus === 'Escalated to Admin' && followUpAdminMessage.trim()) {
+      await supabase.from('inbox_messages').insert({
+        ticket_id: ticket.id,
+        ticket_ref: ticket.ticket_ref,
+        clinic_name: ticket.clinic_name,
+        message: followUpAdminMessage.trim(),
+        sent_by: userId,
+        sent_by_name: userName,
+      })
+    }
     setShowAddUpdate(false)
     setFollowUpStatus(null)
     setFollowUpResponse('')
     setFollowUpTimeline('')
     setFollowUpInternal('')
     setFollowUpJiraLink('')
+    setFollowUpAdminMessage('')
     setFollowUpNextStep('')
     setFollowUpNextStepPic('')
     setFollowUpNextStepContact('')
@@ -506,7 +560,16 @@ export default function TicketDetailPage() {
               <span className="font-mono text-xs text-indigo-400">{ticket.clinic_code}</span>
               <span className="font-mono text-xs text-text-muted">{ticket.ticket_ref}</span>
             </div>
-            <h1 className="text-2xl font-bold text-text-primary">{ticket.clinic_name}</h1>
+            {editing && ticket.clinic_code === 'MANUAL' ? (
+              <input
+                value={editClinicName}
+                onChange={(e) => setEditClinicName(e.target.value)}
+                className="text-2xl font-bold text-text-primary bg-surface-inset border border-border rounded px-2 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-accent"
+                placeholder="Clinic / Customer name"
+              />
+            ) : (
+              <h1 className="text-2xl font-bold text-text-primary">{ticket.clinic_name}</h1>
+            )}
           </div>
           {/* Inline status change */}
           {!editing && (
@@ -694,7 +757,12 @@ export default function TicketDetailPage() {
               </div>
               <div>
                 <span className="text-text-tertiary text-xs">Logged By</span>
-                <p className="text-text-primary mt-1">{toProperCase(ticket.created_by_name)}</p>
+                <p className="text-text-primary mt-1">
+                  {toProperCase(ticket.created_by_name)}
+                  <span className="text-text-tertiary text-xs ml-2">
+                    {format(new Date(ticket.created_at), 'dd MMM yyyy, h:mm a')}
+                  </span>
+                </p>
               </div>
               <div>
                 <span className="text-text-tertiary text-xs">Timeline from Customer</span>
@@ -727,6 +795,28 @@ export default function TicketDetailPage() {
                   <p className="text-text-primary mt-1">-</p>
                 )}
               </div>
+              {/* Admin Message */}
+              {editing ? (
+                editStatus === 'Escalated to Admin' && (
+                  <div className="sm:col-span-2">
+                    <Label required>Message to Admin</Label>
+                    <textarea
+                      value={editAdminMessage}
+                      onChange={(e) => setEditAdminMessage(e.target.value)}
+                      placeholder="Describe why this needs admin attention..."
+                      rows={3}
+                      className={`w-full px-3 py-2 bg-surface-inset border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-purple-500/50 resize-none mt-1 ${!editAdminMessage.trim() ? 'border-red-500' : 'border-border'}`}
+                    />
+                  </div>
+                )
+              ) : ticket.admin_message ? (
+                <div className="sm:col-span-2">
+                  <span className="text-text-tertiary text-xs">Admin Message</span>
+                  <p className="mt-1 text-sm text-purple-400 bg-purple-500/10 rounded-lg p-3 border border-purple-500/20">
+                    {ticket.admin_message}
+                  </p>
+                </div>
+              ) : null}
             </div>
 
             {/* Status + flag toggle in edit mode */}
@@ -777,6 +867,9 @@ export default function TicketDetailPage() {
                   onChange={(v) => setEditStatus(v as TicketStatus)} />
                 {editStatus === 'Escalated' && !editJiraLink.trim() && (
                   <p className="text-xs text-red-400">Jira link is required when escalating</p>
+                )}
+                {editStatus === 'Escalated to Admin' && !editAdminMessage.trim() && (
+                  <p className="text-xs text-purple-400">Admin message is required when escalating to admin</p>
                 )}
                 <div className="flex items-center gap-3">
                   <button type="button" onClick={() => setEditNeedCheck(!editNeedCheck)}
@@ -847,6 +940,21 @@ export default function TicketDetailPage() {
                       />
                       {!followUpJiraLink.trim() && (
                         <p className="text-xs text-red-400 mt-1">Jira link is required when escalating</p>
+                      )}
+                    </div>
+                  )}
+                  {/* Admin message — required when Escalated to Admin */}
+                  {followUpStatus === 'Escalated to Admin' && (
+                    <div className="mt-2">
+                      <textarea
+                        value={followUpAdminMessage}
+                        onChange={(e) => setFollowUpAdminMessage(e.target.value)}
+                        placeholder="Describe why this needs admin attention..."
+                        rows={3}
+                        className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-purple-500/50 resize-none"
+                      />
+                      {!followUpAdminMessage.trim() && (
+                        <p className="text-xs text-purple-400 mt-1">Message is required when escalating to admin</p>
                       )}
                     </div>
                   )}
@@ -1201,9 +1309,21 @@ export default function TicketDetailPage() {
           )}
 
           {/* Audit Info — queries actual audit_log table for full history */}
-          <div className="card p-4">
-            <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-3">Audit Trail</h2>
-            <div className="space-y-3 text-xs text-text-tertiary max-h-64 overflow-y-auto">
+          <div className="card">
+            <button
+              type="button"
+              onClick={() => setAuditOpen(prev => !prev)}
+              className="w-full flex items-center justify-between p-4 text-left hover:bg-surface-raised/50 transition-colors rounded-lg"
+            >
+              <h2 className="text-xs font-semibold text-text-muted uppercase tracking-wider">Audit Trail</h2>
+              <svg
+                className={`size-4 text-text-muted transition-transform duration-200 ${auditOpen ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {auditOpen && <div className="space-y-3 text-xs text-text-tertiary max-h-64 overflow-y-auto px-4 pb-4">
               {auditEntries.length > 0 ? (
                 auditEntries.map((entry, i) => {
                   const isInsert = entry.action === 'INSERT'
@@ -1277,7 +1397,7 @@ export default function TicketDetailPage() {
                   )}
                 </>
               )}
-            </div>
+            </div>}
           </div>
         </div>
       </div>

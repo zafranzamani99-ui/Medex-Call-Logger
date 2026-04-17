@@ -81,6 +81,7 @@ export const STATUS_COLORS: Record<TicketStatus, { bg: string; text: string }> =
   'Pending Customer': { bg: 'bg-amber-500/20', text: 'text-amber-400' },
   'Pending Team':     { bg: 'bg-orange-500/20', text: 'text-orange-400' },
   'Escalated':        { bg: 'bg-red-500/20', text: 'text-red-400' },
+  'Escalated to Admin': { bg: 'bg-purple-500/20', text: 'text-purple-400' },
 }
 
 // Renewal status colours (spec Section 13.2)
@@ -129,6 +130,7 @@ export const STATUSES: TicketStatus[] = [
   'Pending Customer',
   'Pending Team',
   'Escalated',
+  'Escalated to Admin',
 ]
 
 // Record type colours — call logs vs tickets

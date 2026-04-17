@@ -14,6 +14,7 @@ interface NavBarProps {
   todayCalls?: number
   openTickets?: number
   kbDrafts?: number
+  inboxUnread?: number
 }
 
 const NAV_ITEMS = [
@@ -24,6 +25,10 @@ const NAV_ITEMS = [
   {
     href: '/my-log', label: 'My Log', shortLabel: 'My Log', dotKey: null,
     icon: <svg className="size-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>,
+  },
+  {
+    href: '/inbox', label: 'Inbox', shortLabel: 'Inbox', dotKey: 'inboxUnread' as const,
+    icon: <svg className="size-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg>,
   },
   {
     href: '/tickets', label: 'History', shortLabel: 'History', dotKey: 'openTickets' as const,
@@ -79,6 +84,7 @@ const MOBILE_TABS = [
 ]
 
 const MORE_ITEMS = [
+  { href: '/inbox', label: 'Inbox', icon: <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" /></svg> },
   { href: '/crm', label: 'CRM', icon: <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21" /></svg> },
   { href: '/schedule', label: 'Calendar', icon: <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5m-9-6h.008v.008H12v-.008zM12 15h.008v.008H12V15zm0 2.25h.008v.008H12v-.008zM9.75 15h.008v.008H9.75V15zm0 2.25h.008v.008H9.75v-.008zM7.5 15h.008v.008H7.5V15zm0 2.25h.008v.008H7.5v-.008zm6.75-4.5h.008v.008h-.008v-.008zm0 2.25h.008v.008h-.008V15zm0 2.25h.008v.008h-.008v-.008zm2.25-4.5h.008v.008H16.5v-.008zm0 2.25h.008v.008H16.5V15z" /></svg> },
   { href: '/resources', label: 'Resources', icon: <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H2.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" /></svg> },
@@ -93,9 +99,10 @@ const MORE_ITEMS = [
 const DOT_COLORS: Record<string, string> = {
   openTickets: 'bg-red-400',
   kbDrafts: 'bg-blue-400',
+  inboxUnread: 'bg-purple-400',
 }
 
-export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, kbDrafts = 0 }: NavBarProps) {
+export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, kbDrafts = 0, inboxUnread = 0 }: NavBarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
@@ -121,7 +128,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
     return pathname.startsWith(href)
   }
 
-  const dotCounts: Record<string, number> = { openTickets, kbDrafts }
+  const dotCounts: Record<string, number> = { openTickets, kbDrafts, inboxUnread }
 
   // Render a nav link with optional notification dot
   const renderNavLink = (item: { href: string; label: string; icon: React.ReactNode; dotKey: string | null }, isCollapsed: boolean) => {

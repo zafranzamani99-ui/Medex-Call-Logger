@@ -43,6 +43,7 @@ interface CallLogDraft {
   needTeamCheck: boolean
   status: TicketStatus | null
   jiraLink: string
+  adminMessage: string
   callDate?: string
 }
 
@@ -80,6 +81,7 @@ export default function LogCallPage() {
   const [needTeamCheck, setNeedTeamCheck] = useState(false)
   const [status, setStatus] = useState<TicketStatus | null>('Resolved')
   const [jiraLink, setJiraLink] = useState('')
+  const [adminMessage, setAdminMessage] = useState('')
   const [attachments, setAttachments] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
@@ -119,6 +121,7 @@ export default function LogCallPage() {
   const durationRef = useRef<HTMLDivElement>(null)
   const statusRef = useRef<HTMLDivElement>(null)
   const jiraLinkRef = useRef<HTMLDivElement>(null)
+  const adminMessageRef = useRef<HTMLDivElement>(null)
   const { toast } = useToast()
   const [drafts, setDrafts] = useState<CallLogDraft[]>([])
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
@@ -240,6 +243,7 @@ export default function LogCallPage() {
       setNeedTeamCheck(draft.needTeamCheck)
       setStatus(draft.status)
       setJiraLink(draft.jiraLink)
+      setAdminMessage(draft.adminMessage || '')
       if (draft.callDate) setCallDate(draft.callDate)
       toast('Form restored')
     }
@@ -263,10 +267,10 @@ export default function LogCallPage() {
       selectedClinic, callerTel, pic, clinicWa,
       callDuration, issueCategory, issueType, issue, myResponse,
       nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline,
-      needTeamCheck, status, jiraLink, callDate,
+      needTeamCheck, status, jiraLink, adminMessage, callDate,
     }
   }, [selectedClinic, callerTel, pic, clinicWa, callDuration, issueCategory, issueType, issue,
-      myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink, callDate])
+      myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink, adminMessage, callDate])
 
   useEffect(() => {
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current)
@@ -421,6 +425,7 @@ export default function LogCallPage() {
     if (!callDuration) errors.duration = true
     if (!status) errors.status = true
     if (status === 'Escalated' && !jiraLink.trim()) errors.jiraLink = true
+    if (status === 'Escalated to Admin' && !adminMessage.trim()) errors.adminMessage = true
 
     if (Object.keys(errors).length > 0) {
       setFieldErrors(errors)
@@ -433,6 +438,7 @@ export default function LogCallPage() {
       if (errors.duration) missing.push('duration')
       if (errors.status) missing.push('status')
       if (errors.jiraLink) missing.push('Jira link')
+      if (errors.adminMessage) missing.push('admin message')
       setError(`Required: ${missing.join(', ')}`)
 
       // Scroll to first errored field
@@ -445,6 +451,7 @@ export default function LogCallPage() {
         { key: 'duration', ref: durationRef },
         { key: 'status', ref: statusRef },
         { key: 'jiraLink', ref: jiraLinkRef },
+        { key: 'adminMessage', ref: adminMessageRef },
       ]
       const firstError = fieldOrder.find(f => errors[f.key])
       if (firstError?.ref.current) {
@@ -490,6 +497,7 @@ export default function LogCallPage() {
       status,
       need_team_check: needTeamCheck,
       jira_link: status === 'Escalated' ? jiraLink.trim() : null,
+      admin_message: status === 'Escalated to Admin' ? adminMessage.trim() : null,
       attachment_urls: attachments.length > 0 ? attachments : [],
       created_at: createdAt,
       created_by: userId,
@@ -518,6 +526,18 @@ export default function LogCallPage() {
         notes: timelineData.formattedString || timelineData.notes,
         added_by: userId,
         added_by_name: userName,
+      })
+    }
+
+    // Insert inbox message when escalated to admin
+    if (status === 'Escalated to Admin' && adminMessage.trim()) {
+      await supabase.from('inbox_messages').insert({
+        ticket_id: ticket.id,
+        ticket_ref: ticket.ticket_ref,
+        clinic_name: ticketData.clinic_name,
+        message: adminMessage.trim(),
+        sent_by: userId,
+        sent_by_name: userName,
       })
     }
 
@@ -551,7 +571,7 @@ export default function LogCallPage() {
     localStorage.removeItem(AUTOSAVE_KEY)
     router.push(`/tickets/${ticket.id}`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, callerTel, callDuration,
+  }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, adminMessage, callerTel, callDuration,
       myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck,
       timelineData, userId, userName, router, supabase, activeDraftId,
       scheduleDate, scheduleTime, scheduleType, customScheduleType, attachments, callDate])
@@ -589,6 +609,7 @@ export default function LogCallPage() {
     setNeedTeamCheck(false)
     setStatus('Resolved')
     setJiraLink('')
+    setAdminMessage('')
     setAttachments([])
     setScheduleDate('')
     setScheduleTime('')
@@ -625,6 +646,7 @@ export default function LogCallPage() {
     setNeedTeamCheck(false)
     setStatus('Resolved')
     setJiraLink('')
+    setAdminMessage('')
     setAttachments([])
     setScheduleDate('')
     setScheduleTime('')
@@ -652,7 +674,7 @@ export default function LogCallPage() {
       selectedClinic, callerTel, pic, clinicWa, callDuration,
       issueCategory, issueType, issue, myResponse, nextStep, nextStepPic, nextStepContact,
       timelineFromCustomer, internalTimeline, needTeamCheck,
-      status, jiraLink, callDate,
+      status, jiraLink, adminMessage, callDate,
     }
     const { data, error: err } = await supabase.from('call_log_drafts').insert({
       user_id: userId,
@@ -692,6 +714,7 @@ export default function LogCallPage() {
     setNeedTeamCheck(draft.needTeamCheck)
     setStatus(draft.status)
     setJiraLink(draft.jiraLink)
+    setAdminMessage(draft.adminMessage || '')
     if (draft.callDate) setCallDate(draft.callDate)
     setActiveDraftId(draftId)
     setError('')
@@ -1282,6 +1305,23 @@ export default function LogCallPage() {
                   }}
                   placeholder="https://medex.atlassian.net/browse/..."
                   error={fieldErrors.jiraLink}
+                />
+              </div>
+            )}
+
+            {/* Admin Message */}
+            {status === 'Escalated to Admin' && (
+              <div ref={adminMessageRef}>
+                <Label required>Message to Admin</Label>
+                <textarea
+                  value={adminMessage}
+                  onChange={(e) => {
+                    setAdminMessage(e.target.value)
+                    if (e.target.value.trim()) setFieldErrors(prev => ({ ...prev, adminMessage: false }))
+                  }}
+                  placeholder="Describe why this needs admin attention..."
+                  rows={3}
+                  className={`w-full px-3 py-2 bg-surface-inset border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-purple-500/50 resize-none ${fieldErrors.adminMessage ? 'border-red-500' : 'border-border'}`}
                 />
               </div>
             )}

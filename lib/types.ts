@@ -101,6 +101,7 @@ export type TicketStatus =
   | 'Pending Customer'
   | 'Pending Team'
   | 'Escalated'
+  | 'Escalated to Admin'
 
 // Issue types — dynamic (defaults + custom from DB)
 export type IssueType = string
@@ -153,6 +154,7 @@ export interface Ticket {
   status: TicketStatus
   need_team_check: boolean
   jira_link: string | null
+  admin_message: string | null
 
   // Audit
   created_by: string
@@ -272,6 +274,24 @@ export interface NewTicketInput {
   status: TicketStatus
   need_team_check: boolean
   jira_link: string | null
+  admin_message: string | null
+}
+
+// For inbox messages (Escalated to Admin)
+export interface InboxMessage {
+  id: string
+  ticket_id: string
+  ticket_ref: string
+  clinic_name: string
+  message: string
+  sent_by: string
+  sent_by_name: string
+  status: 'open' | 'done'
+  admin_reply: string | null
+  replied_by: string | null
+  replied_by_name: string | null
+  replied_at: string | null
+  created_at: string
 }
 
 // For the timeline entry form
