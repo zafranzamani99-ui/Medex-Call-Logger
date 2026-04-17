@@ -1,17 +1,18 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format, formatDistanceToNow } from 'date-fns'
-import type { InboxMessage } from '@/lib/types'
+import type { InboxMessage, InboxReply } from '@/lib/types'
 import { toProperCase } from '@/lib/constants'
 import EmptyState from '@/components/ui/EmptyState'
 import { useToast } from '@/components/ui/Toast'
+import { SlidePanel } from '@/components/Modal'
 
 // WHY: Shared inbox for "Escalated to Admin" messages.
 // All agents can see all messages. Read tracking is per-user (timestamp-based).
-// Admin can reply and mark messages as "Done".
+// Replies are stored in inbox_replies table (append-only chat thread).
 
 export default function InboxPage() {
   const router = useRouter()
@@ -24,10 +25,19 @@ export default function InboxPage() {
   const [userName, setUserName] = useState('')
   const [userRole, setUserRole] = useState('')
   const [userId, setUserId] = useState('')
-  const [replyingTo, setReplyingTo] = useState<string | null>(null)
-  const [replyText, setReplyText] = useState('')
   const [saving, setSaving] = useState(false)
   const [filter, setFilter] = useState<'all' | 'open' | 'done'>('all')
+
+  // Chat thread state
+  const [chatOpenFor, setChatOpenFor] = useState<string | null>(null)
+  const [chatReplies, setChatReplies] = useState<InboxReply[]>([])
+  const [chatText, setChatText] = useState('')
+  const [loadingChat, setLoadingChat] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  const chatOpenForRef = useRef<string | null>(null)
+
+  // Keep ref in sync so real-time handler can read current value
+  useEffect(() => { chatOpenForRef.current = chatOpenFor }, [chatOpenFor])
 
   const fetchMessages = useCallback(async () => {
     const { data } = await supabase
@@ -76,7 +86,7 @@ export default function InboxPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Real-time subscription for new messages
+  // Real-time subscription for messages + replies
   useEffect(() => {
     const channel = supabase
       .channel('inbox-realtime')
@@ -88,40 +98,102 @@ export default function InboxPage() {
           setMessages(prev => [payload.new as InboxMessage, ...prev])
         }
       )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'inbox_messages' },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          setMessages(prev => prev.map(m =>
+            m.id === payload.new.id ? { ...m, ...payload.new } : m
+          ))
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'inbox_replies' },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          const newReply = payload.new as InboxReply
+          // If chat for this message is open, append reply (deduplicate)
+          if (chatOpenForRef.current === newReply.inbox_message_id) {
+            setChatReplies(prev => {
+              if (prev.some(r => r.id === newReply.id)) return prev
+              return [...prev, newReply]
+            })
+          }
+          // Update reply_count in list
+          setMessages(prev => prev.map(m =>
+            m.id === newReply.inbox_message_id
+              ? { ...m, reply_count: (m.reply_count || 0) + 1 }
+              : m
+          ))
+        }
+      )
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
   }, [supabase])
 
+  // Auto-scroll chat to bottom when replies change
+  useEffect(() => {
+    if (chatOpenFor && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [chatReplies, chatOpenFor])
+
   const roleLabel = userRole === 'admin' ? 'Admin' : 'Support'
   const nameWithRole = `${toProperCase(userName)} (${roleLabel})`
 
-  const handleReply = async (msgId: string) => {
-    if (!replyText.trim()) return
-    setSaving(true)
-    const { error } = await supabase
-      .from('inbox_messages')
-      .update({
-        admin_reply: replyText.trim(),
-        replied_by: userId,
-        replied_by_name: nameWithRole,
-        replied_at: new Date().toISOString(),
-      })
-      .eq('id', msgId)
+  const openChat = async (msgId: string) => {
+    setChatOpenFor(msgId)
+    setLoadingChat(true)
+    setChatText('')
+    setChatReplies([])
+    const { data } = await supabase
+      .from('inbox_replies')
+      .select('*')
+      .eq('inbox_message_id', msgId)
+      .order('created_at', { ascending: true })
+    if (data) setChatReplies(data as InboxReply[])
+    setLoadingChat(false)
+  }
 
-    if (!error) {
-      setMessages(prev => prev.map(m => m.id === msgId ? {
-        ...m,
-        admin_reply: replyText.trim(),
-        replied_by: userId,
-        replied_by_name: nameWithRole,
-        replied_at: new Date().toISOString(),
-      } : m))
-      setReplyingTo(null)
-      setReplyText('')
+  const closeChat = () => {
+    setChatOpenFor(null)
+    setChatReplies([])
+    setChatText('')
+  }
+
+  // The message currently open in the chat panel
+  const chatMessage = chatOpenFor ? messages.find(m => m.id === chatOpenFor) : null
+
+  const handleSendReply = async (msgId: string) => {
+    if (!chatText.trim()) return
+    setSaving(true)
+    const { data, error } = await supabase
+      .from('inbox_replies')
+      .insert({
+        inbox_message_id: msgId,
+        message: chatText.trim(),
+        sent_by: userId,
+        sent_by_name: nameWithRole,
+      })
+      .select()
+      .single()
+
+    if (!error && data) {
+      // Optimistic: append locally (real-time will deduplicate)
+      setChatReplies(prev => {
+        if (prev.some(r => r.id === data.id)) return prev
+        return [...prev, data as InboxReply]
+      })
+      setMessages(prev => prev.map(m =>
+        m.id === msgId ? { ...m, reply_count: (m.reply_count || 0) + 1 } : m
+      ))
+      setChatText('')
       toast('Reply sent')
     } else {
-      toast('Failed to reply', 'error')
+      toast('Failed to send reply', 'error')
     }
     setSaving(false)
   }
@@ -129,22 +201,11 @@ export default function InboxPage() {
   const handleMarkDone = async (msgId: string) => {
     const { error } = await supabase
       .from('inbox_messages')
-      .update({
-        status: 'done',
-        replied_by: userId,
-        replied_by_name: nameWithRole,
-        replied_at: new Date().toISOString(),
-      })
+      .update({ status: 'done' })
       .eq('id', msgId)
 
     if (!error) {
-      setMessages(prev => prev.map(m => m.id === msgId ? {
-        ...m,
-        status: 'done' as const,
-        replied_by: userId,
-        replied_by_name: nameWithRole,
-        replied_at: new Date().toISOString(),
-      } : m))
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'done' as const } : m))
       toast('Marked as done')
     }
   }
@@ -152,18 +213,11 @@ export default function InboxPage() {
   const handleReopen = async (msgId: string) => {
     const { error } = await supabase
       .from('inbox_messages')
-      .update({ status: 'open', admin_reply: null, replied_by: null, replied_by_name: null, replied_at: null })
+      .update({ status: 'open' })
       .eq('id', msgId)
 
     if (!error) {
-      setMessages(prev => prev.map(m => m.id === msgId ? {
-        ...m,
-        status: 'open' as const,
-        admin_reply: null,
-        replied_by: null,
-        replied_by_name: null,
-        replied_at: null,
-      } : m))
+      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'open' as const } : m))
       toast('Reopened')
     }
   }
@@ -239,7 +293,7 @@ export default function InboxPage() {
           {filtered.map((msg) => {
             const unread = isUnread(msg)
             const isDone = msg.status === 'done'
-            const isReplying = replyingTo === msg.id
+            const hasReplies = (msg.reply_count || 0) > 0
             return (
               <div
                 key={msg.id}
@@ -289,23 +343,6 @@ export default function InboxPage() {
                   </div>
                 </div>
 
-                {/* Admin reply (if exists) */}
-                {msg.admin_reply && (
-                  <div className="mt-3 ml-4 pl-3 border-l-2 border-green-500/30">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-medium text-green-400">
-                        {msg.replied_by_name || 'Admin'}
-                      </span>
-                      {msg.replied_at && (
-                        <span className="text-xs text-text-muted">
-                          {formatDistanceToNow(new Date(msg.replied_at), { addSuffix: true })}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-text-secondary">{msg.admin_reply}</p>
-                  </div>
-                )}
-
                 {/* Action buttons */}
                 <div className="mt-3 flex items-center gap-2 flex-wrap">
                   <button
@@ -313,6 +350,13 @@ export default function InboxPage() {
                     className="px-3 py-1.5 text-xs font-medium rounded-lg bg-surface-raised border border-border text-text-secondary hover:text-text-primary hover:border-zinc-500/30 transition-colors"
                   >
                     View Ticket
+                  </button>
+                  {/* Chat / Reply button */}
+                  <button
+                    onClick={() => openChat(msg.id)}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition-colors"
+                  >
+                    {hasReplies ? `Chat (${msg.reply_count})` : 'Reply'}
                   </button>
                   {isDone ? (
                     <button
@@ -322,59 +366,120 @@ export default function InboxPage() {
                       Reopen
                     </button>
                   ) : (
-                    <>
-                      <button
-                        onClick={() => {
-                          setReplyingTo(isReplying ? null : msg.id)
-                          setReplyText('')
-                        }}
-                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-500/10 border border-purple-500/20 text-purple-400 hover:bg-purple-500/20 transition-colors"
-                      >
-                        {isReplying ? 'Cancel' : 'Reply'}
-                      </button>
-                      <button
-                        onClick={() => handleMarkDone(msg.id)}
-                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 transition-colors"
-                      >
-                        Mark Done
-                      </button>
-                    </>
+                    <button
+                      onClick={() => handleMarkDone(msg.id)}
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20 transition-colors"
+                    >
+                      Mark Done
+                    </button>
                   )}
                   <span className="ml-auto text-[11px] text-text-muted">
                     {format(new Date(msg.created_at), 'dd MMM yyyy, h:mm a')}
                   </span>
                 </div>
 
-                {/* Reply input */}
-                {isReplying && (
-                  <div className="mt-3 flex gap-2">
-                    <input
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      placeholder="Type your reply..."
-                      className="flex-1 px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-purple-500/50"
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey && replyText.trim()) {
-                          e.preventDefault()
-                          handleReply(msg.id)
-                        }
-                      }}
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => handleReply(msg.id)}
-                      disabled={!replyText.trim() || saving}
-                      className="px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg text-sm font-medium hover:bg-purple-500/30 transition-colors disabled:opacity-40"
-                    >
-                      {saving ? '...' : 'Send'}
-                    </button>
-                  </div>
-                )}
               </div>
             )
           })}
         </div>
       )}
+
+      {/* Floating chat panel */}
+      <SlidePanel
+        open={!!chatOpenFor}
+        onClose={closeChat}
+        title={chatMessage ? `${chatMessage.ticket_ref} — ${chatMessage.clinic_name}` : 'Chat'}
+      >
+        {chatMessage && (
+          <div className="flex flex-col h-full -mx-4 -mb-4">
+            {/* Chat messages */}
+            <div className="flex-1 overflow-y-auto px-4 pb-3 space-y-4">
+              {/* Original escalation message */}
+              <div className="flex gap-2.5">
+                <div className="size-7 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <span className="text-[11px] font-semibold text-purple-400">
+                    {chatMessage.sent_by_name.charAt(0).toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-xs font-medium text-purple-400">
+                      {toProperCase(chatMessage.sent_by_name)}
+                    </span>
+                    <span className="text-[10px] text-text-muted">
+                      {format(new Date(chatMessage.created_at), 'dd MMM, h:mm a')}
+                    </span>
+                  </div>
+                  <p className="text-sm text-text-secondary">{chatMessage.message}</p>
+                </div>
+              </div>
+
+              {/* Divider */}
+              {(chatReplies.length > 0 || loadingChat) && (
+                <div className="flex items-center gap-3">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-[10px] text-text-muted uppercase">Replies</span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              )}
+
+              {/* Replies */}
+              {loadingChat ? (
+                <div className="space-y-3">
+                  <div className="h-12 skeleton rounded" />
+                  <div className="h-12 skeleton rounded" />
+                </div>
+              ) : (
+                chatReplies.map((reply) => (
+                  <div key={reply.id} className="flex gap-2.5">
+                    <div className="size-7 rounded-full bg-green-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-[11px] font-semibold text-green-400">
+                        {reply.sent_by_name.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5">
+                        <span className="text-xs font-medium text-green-400">
+                          {reply.sent_by_name}
+                        </span>
+                        <span className="text-[10px] text-text-muted">
+                          {format(new Date(reply.created_at), 'dd MMM, h:mm a')}
+                        </span>
+                      </div>
+                      <p className="text-sm text-text-secondary">{reply.message}</p>
+                    </div>
+                  </div>
+                ))
+              )}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* Reply input — pinned at bottom */}
+            <div className="border-t border-border px-4 py-3 flex gap-2">
+              <input
+                value={chatText}
+                onChange={(e) => setChatText(e.target.value)}
+                placeholder="Type a reply..."
+                className="flex-1 px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-purple-500/50"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && chatText.trim()) {
+                    e.preventDefault()
+                    handleSendReply(chatOpenFor!)
+                  }
+                }}
+                autoFocus
+              />
+              <button
+                onClick={() => handleSendReply(chatOpenFor!)}
+                disabled={!chatText.trim() || saving}
+                className="px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg text-sm font-medium hover:bg-purple-500/30 transition-colors disabled:opacity-40"
+              >
+                {saving ? '...' : 'Send'}
+              </button>
+            </div>
+          </div>
+        )}
+      </SlidePanel>
     </div>
   )
 }

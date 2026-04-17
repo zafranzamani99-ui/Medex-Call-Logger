@@ -291,6 +291,17 @@ export interface InboxMessage {
   replied_by: string | null
   replied_by_name: string | null
   replied_at: string | null
+  reply_count: number
+  created_at: string
+}
+
+// Individual reply in an inbox chat thread
+export interface InboxReply {
+  id: string
+  inbox_message_id: string
+  message: string
+  sent_by: string
+  sent_by_name: string
   created_at: string
 }
 
