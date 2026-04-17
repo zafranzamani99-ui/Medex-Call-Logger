@@ -43,25 +43,53 @@ export default function DashboardPage() {
   const triageRef = useRef<HTMLDivElement>(null)
 
   const fetchData = async () => {
-    const { data: rawTickets } = await supabase
-      .from('tickets')
-      .select('*')
-      .order('created_at', { ascending: false })
+    // WHY: Previously fetched every ticket ever created on every dashboard load
+    // (and every realtime change), which got slow as the table grew. Now we
+    // fetch only what the UI actually renders: open tickets (any age) +
+    // recent tickets (last 30 days, for today's activity and the 14-day chart).
+    // resolvedToday is a scalar count so it's a lightweight count query.
+    const today = startOfDay(new Date())
+    const todayIso = today.toISOString()
+    const thirtyDaysAgoIso = subDays(today, 30).toISOString()
 
-    if (!rawTickets) return
+    const [recentRes, openRes, resolvedTodayRes] = await Promise.all([
+      supabase
+        .from('tickets')
+        .select('*')
+        .gte('created_at', thirtyDaysAgoIso)
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('tickets')
+        .select('*')
+        .neq('status', 'Resolved')
+        .order('created_at', { ascending: false }),
+      supabase
+        .from('tickets')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'Resolved')
+        .gte('updated_at', todayIso),
+    ])
 
-    const allTickets = rawTickets as Ticket[]
+    const recent = (recentRes.data || []) as Ticket[]
+    const open = (openRes.data || []) as Ticket[]
+
+    // Merge + dedupe (open tickets created in the last 30 days are in both sets)
+    const byId = new Map<string, Ticket>()
+    for (const t of recent) byId.set(t.id, t)
+    for (const t of open) byId.set(t.id, t)
+    const allTickets = Array.from(byId.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    )
     setTickets(allTickets)
 
-    const today = startOfDay(new Date())
     const todayStr = format(today, 'yyyy-MM-dd')
 
-    const callsToday = allTickets.filter((t) => t.created_at.startsWith(todayStr)).length
-    const openCallsCount = allTickets.filter((t) => t.record_type === 'call' && t.status !== 'Resolved').length
-    const openTicketsCount = allTickets.filter((t) => t.record_type === 'ticket' && t.status !== 'Resolved').length
-    const needsAttention = allTickets.filter((t) => t.need_team_check && (t.record_type === 'call' || t.status !== 'Resolved')).length
-    const staleCount = allTickets.filter((t) => isStale(t)).length
-    const resolvedToday = allTickets.filter((t) => t.status === 'Resolved' && t.updated_at.startsWith(todayStr)).length
+    const callsToday = recent.filter((t) => t.created_at.startsWith(todayStr)).length
+    const openCallsCount = open.filter((t) => t.record_type === 'call').length
+    const openTicketsCount = open.filter((t) => t.record_type === 'ticket').length
+    const needsAttention = open.filter((t) => t.need_team_check).length
+    const staleCount = open.filter((t) => isStale(t)).length
+    const resolvedToday = resolvedTodayRes.count ?? 0
 
     setStats({ callsToday, openCalls: openCallsCount, openTickets: openTicketsCount, needsAttention, stale: staleCount, resolvedToday })
 
@@ -70,12 +98,12 @@ export default function DashboardPage() {
       const d = subDays(new Date(), i)
       const dateStr = format(d, 'yyyy-MM-dd')
       const label = format(d, 'dd/MM')
-      const count = allTickets.filter((t) => t.created_at.startsWith(dateStr)).length
+      const count = recent.filter((t) => t.created_at.startsWith(dateStr)).length
       dailyCalls.push({ date: label, count })
     }
 
     const issueCounts: Record<string, number> = {}
-    allTickets.forEach((t) => {
+    recent.forEach((t) => {
       issueCounts[t.issue_type] = (issueCounts[t.issue_type] || 0) + 1
     })
     const issueBreakdown = Object.entries(issueCounts).map(([name, count]) => ({ name, count }))

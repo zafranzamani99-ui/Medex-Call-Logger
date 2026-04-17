@@ -175,13 +175,29 @@ export default function HistoryPage() {
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
   }, [])
 
+  // WHY: Previously fetched every ticket ever created with a timeline_entries
+  // count subquery on every page load. That payload scales linearly with the
+  // table and was the main source of slowness. Now we default to the last
+  // 90 days (which covers almost all real usage) and expose a button to load
+  // older history when needed.
+  const [loadAllHistory, setLoadAllHistory] = useState(false)
+  const HISTORY_WINDOW_DAYS = 90
+
   // Fetch tickets + timeline counts
   useEffect(() => {
     async function fetchTickets() {
-      const { data } = await supabase
+      setLoading(true)
+      let query = supabase
         .from('tickets')
         .select('*, timeline_entries(count)')
         .order('created_at', { ascending: false })
+
+      if (!loadAllHistory) {
+        const windowStart = new Date(Date.now() - HISTORY_WINDOW_DAYS * 86400000).toISOString()
+        query = query.gte('created_at', windowStart)
+      }
+
+      const { data } = await query
 
       if (data) {
         const typed = data as (Ticket & { timeline_entries: [{ count: number }] })[]
@@ -198,7 +214,7 @@ export default function HistoryPage() {
     }
     fetchTickets()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [loadAllHistory])
 
   // Apply filters
   const filtered = useMemo(() => {
@@ -414,9 +430,17 @@ export default function HistoryPage() {
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-2xl font-bold text-text-primary">History</h1>
-          <p className="text-[13px] text-text-tertiary mt-0.5">{filtered.length} records</p>
+          <p className="text-[13px] text-text-tertiary mt-0.5">
+            {filtered.length} records
+            {!loadAllHistory && <span className="text-text-muted"> · last {HISTORY_WINDOW_DAYS} days</span>}
+          </p>
         </div>
         <div className="flex items-center gap-2">
+          {!loadAllHistory && (
+            <Button variant="secondary" size="sm" onClick={() => setLoadAllHistory(true)}>
+              Load all history
+            </Button>
+          )}
           <Button variant="secondary" size="sm" onClick={handleExport}>
             <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
