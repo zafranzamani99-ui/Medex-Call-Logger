@@ -199,6 +199,7 @@ export default function InboxPage() {
   }
 
   const handleMarkDone = async (msgId: string) => {
+    const msg = messages.find(m => m.id === msgId)
     const { error } = await supabase
       .from('inbox_messages')
       .update({ status: 'done' })
@@ -206,11 +207,25 @@ export default function InboxPage() {
 
     if (!error) {
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'done' as const } : m))
-      toast('Marked as done')
+      // Also resolve the linked ticket
+      if (msg) {
+        await supabase
+          .from('tickets')
+          .update({
+            status: 'Resolved',
+            last_updated_by: userId,
+            last_updated_by_name: nameWithRole,
+            last_change_note: 'Resolved via Inbox',
+            last_activity_at: new Date().toISOString(),
+          })
+          .eq('id', msg.ticket_id)
+      }
+      toast('Marked as done & ticket resolved')
     }
   }
 
   const handleReopen = async (msgId: string) => {
+    const msg = messages.find(m => m.id === msgId)
     const { error } = await supabase
       .from('inbox_messages')
       .update({ status: 'open' })
@@ -218,7 +233,20 @@ export default function InboxPage() {
 
     if (!error) {
       setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'open' as const } : m))
-      toast('Reopened')
+      // Revert ticket back to Escalated to Admin
+      if (msg) {
+        await supabase
+          .from('tickets')
+          .update({
+            status: 'Escalated to Admin',
+            last_updated_by: userId,
+            last_updated_by_name: nameWithRole,
+            last_change_note: 'Reopened via Inbox',
+            last_activity_at: new Date().toISOString(),
+          })
+          .eq('id', msg.ticket_id)
+      }
+      toast('Reopened & ticket re-escalated')
     }
   }
 
@@ -393,26 +421,39 @@ export default function InboxPage() {
         {chatMessage && (
           <div className="flex flex-col h-full -mx-4 -mb-4">
             {/* Chat messages */}
-            <div className="flex-1 overflow-y-auto px-4 pb-3 space-y-4">
+            <div className="flex-1 overflow-y-auto px-4 pb-3 space-y-3">
               {/* Original escalation message */}
-              <div className="flex gap-2.5">
-                <div className="size-7 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <span className="text-[11px] font-semibold text-purple-400">
-                    {chatMessage.sent_by_name.charAt(0).toUpperCase()}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="text-xs font-medium text-purple-400">
-                      {toProperCase(chatMessage.sent_by_name)}
-                    </span>
-                    <span className="text-[10px] text-text-muted">
-                      {format(new Date(chatMessage.created_at), 'dd MMM, h:mm a')}
-                    </span>
+              {chatMessage.sent_by === userId ? (
+                <div className="flex justify-end">
+                  <div className="max-w-[80%]">
+                    <div className="flex items-center gap-2 mb-0.5 justify-end">
+                      <span className="text-[10px] text-text-muted">
+                        {format(new Date(chatMessage.created_at), 'dd MMM, h:mm a')}
+                      </span>
+                      <span className="text-xs font-medium text-purple-400">You</span>
+                    </div>
+                    <div className="bg-purple-500/15 rounded-2xl rounded-tr-sm px-3 py-2">
+                      <p className="text-sm text-text-primary">{chatMessage.message}</p>
+                    </div>
                   </div>
-                  <p className="text-sm text-text-secondary">{chatMessage.message}</p>
                 </div>
-              </div>
+              ) : (
+                <div className="flex justify-start">
+                  <div className="max-w-[80%]">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <span className="text-xs font-medium text-purple-400">
+                        {toProperCase(chatMessage.sent_by_name)}
+                      </span>
+                      <span className="text-[10px] text-text-muted">
+                        {format(new Date(chatMessage.created_at), 'dd MMM, h:mm a')}
+                      </span>
+                    </div>
+                    <div className="bg-surface-raised rounded-2xl rounded-tl-sm px-3 py-2">
+                      <p className="text-sm text-text-primary">{chatMessage.message}</p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Divider */}
               {(chatReplies.length > 0 || loadingChat) && (
@@ -430,26 +471,40 @@ export default function InboxPage() {
                   <div className="h-12 skeleton rounded" />
                 </div>
               ) : (
-                chatReplies.map((reply) => (
-                  <div key={reply.id} className="flex gap-2.5">
-                    <div className="size-7 rounded-full bg-green-500/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <span className="text-[11px] font-semibold text-green-400">
-                        {reply.sent_by_name.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-0.5">
-                        <span className="text-xs font-medium text-green-400">
-                          {reply.sent_by_name}
-                        </span>
-                        <span className="text-[10px] text-text-muted">
-                          {format(new Date(reply.created_at), 'dd MMM, h:mm a')}
-                        </span>
+                chatReplies.map((reply) => {
+                  const isMe = reply.sent_by === userId
+                  return isMe ? (
+                    <div key={reply.id} className="flex justify-end">
+                      <div className="max-w-[80%]">
+                        <div className="flex items-center gap-2 mb-0.5 justify-end">
+                          <span className="text-[10px] text-text-muted">
+                            {format(new Date(reply.created_at), 'dd MMM, h:mm a')}
+                          </span>
+                          <span className="text-xs font-medium text-green-400">You</span>
+                        </div>
+                        <div className="bg-green-500/15 rounded-2xl rounded-tr-sm px-3 py-2">
+                          <p className="text-sm text-text-primary">{reply.message}</p>
+                        </div>
                       </div>
-                      <p className="text-sm text-text-secondary">{reply.message}</p>
                     </div>
-                  </div>
-                ))
+                  ) : (
+                    <div key={reply.id} className="flex justify-start">
+                      <div className="max-w-[80%]">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="text-xs font-medium text-green-400">
+                            {reply.sent_by_name}
+                          </span>
+                          <span className="text-[10px] text-text-muted">
+                            {format(new Date(reply.created_at), 'dd MMM, h:mm a')}
+                          </span>
+                        </div>
+                        <div className="bg-surface-raised rounded-2xl rounded-tl-sm px-3 py-2">
+                          <p className="text-sm text-text-primary">{reply.message}</p>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })
               )}
               <div ref={chatEndRef} />
             </div>

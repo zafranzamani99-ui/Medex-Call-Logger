@@ -564,7 +564,7 @@ export default function TicketDetailPage() {
               <input
                 value={editClinicName}
                 onChange={(e) => setEditClinicName(e.target.value)}
-                className="text-2xl font-bold text-text-primary bg-surface-inset border border-border rounded px-2 py-0.5 w-full focus:outline-none focus:ring-1 focus:ring-accent"
+                className="text-2xl font-bold text-text-primary bg-surface-inset border border-border rounded-lg px-3 py-2 w-full focus:outline-none focus:ring-1 focus:ring-accent"
                 placeholder="Clinic / Customer name"
               />
             ) : (
