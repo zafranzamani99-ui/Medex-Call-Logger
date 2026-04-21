@@ -59,7 +59,11 @@ function safeDate(dateStr: string | null): string {
   if (!dateStr) return '—'
   const d = new Date(dateStr)
   if (isNaN(d.getTime())) return dateStr
-  return d.toISOString().slice(0, 10)
+  // Malaysian format — DD/MM/YYYY
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  return `${dd}/${mm}/${yyyy}`
 }
 
 function waHref(raw: string | null | undefined): string | null {
@@ -268,7 +272,7 @@ function printReportNewWindow(opts: {
     <thead><tr>${opts.headers.map(h => `<th>${escapeHtml(h)}</th>`).join('')}</tr></thead>
     <tbody>${bodyHtml || `<tr><td colspan="${opts.headers.length}" style="text-align:center;padding:20px;color:#94a3b8">No records</td></tr>`}</tbody>
   </table>
-  <div class="footer">Medex Call Logger — ${new Date().toISOString().slice(0, 10)}</div>
+  <div class="footer">Medex Call Logger — ${safeDate(new Date().toISOString())}</div>
 </body>
 </html>`)
   win.document.close()
@@ -405,7 +409,7 @@ function PrintPreviewModal({ data, onClose }: { data: PrintData | null; onClose:
             </div>
 
             <p className="text-[9px] text-gray-400 mt-4 border-t border-gray-200 pt-2">
-              Medex Call Logger — {new Date().toISOString().slice(0, 10)}
+              Medex Call Logger — {safeDate(new Date().toISOString())}
             </p>
           </div>
         </div>
@@ -495,9 +499,7 @@ function SearchableSelect({
     return q ? options.filter(o => o.toLowerCase().includes(q)) : options
   }, [options, search])
 
-  const MAX = 10
-  const visible = filtered.slice(0, MAX)
-  const more = filtered.length - visible.length
+  const visible = filtered
 
   const isActive = value !== 'all'
 
@@ -567,12 +569,6 @@ function SearchableSelect({
                 {o}
               </button>
             ))}
-
-            {more > 0 && (
-              <p className="px-3 py-2 text-[11px] text-text-muted border-t border-border/60 mt-1">
-                +{more} more — refine your search
-              </p>
-            )}
           </div>
         </div>
       )}
@@ -690,7 +686,7 @@ function RowActions({ phone, wa }: { phone?: string | null; wa?: string | null }
 
 // ─ Table primitive ──────────────────────────────────────────────
 
-const REPORT_PAGE_SIZE = 10
+const REPORT_PAGE_SIZE = 20
 const REPORT_DEFAULT_COL_WIDTH = 140
 const REPORT_STORAGE_PREFIX = 'report-table'
 
