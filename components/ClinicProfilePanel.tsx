@@ -1,10 +1,13 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import { format, formatDistanceToNow } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
-import type { Clinic } from '@/lib/types'
+import type { Clinic, LicenseKeyEntry } from '@/lib/types'
 import { useToast } from '@/components/ui/Toast'
 import { RENEWAL_COLORS, toProperCase } from '@/lib/constants'
+import Button from '@/components/ui/Button'
+import { ModalDialog } from '@/components/Modal'
 
 // WHY: Shared CRM panel — the clinic's "profile card."
 // Opens from any page via clinicCode prop. Inline-editable fields.
@@ -15,6 +18,94 @@ interface ClinicProfilePanelProps {
   clinicCode: string
   onClose: () => void
   onClinicUpdated?: () => void
+  onClinicDeleted?: () => void
+  isAdmin?: boolean
+}
+
+// Friendly labels for the change history diff output.
+// Any field not listed falls back to the raw column name.
+const FIELD_LABELS: Record<string, string> = {
+  clinic_name: 'Clinic Name', clinic_phone: 'Phone', customer_status: 'Customer Status',
+  email_main: 'Email (Main)', email_secondary: 'Email (Secondary)', product_type: 'Product Type',
+  registered_contact: 'Registered Contact', support_name: 'Support Name',
+  city: 'City', state: 'State', mtn_start: 'MTN Start', mtn_expiry: 'MTN Expiry',
+  renewal_status: 'Renewal Status', company_name: 'Company Name', company_reg: 'Company Reg',
+  clinic_group: 'Group', clinic_type: 'Clinic Type', product: 'Product',
+  signed_up: 'Signed-up', customer_cert_no: 'Customer Cert No', account_manager: 'Account Manager',
+  address1: 'Address 1', address3: 'Address 3', address4: 'Address 4',
+  billing_address: 'Billing Address', contact_tel: 'Contact Tel', race: 'Race',
+  cloud_start: 'Cloud Start', cloud_end: 'Cloud End', cms_install_date: 'CMS Install Date',
+  cms_running_no: 'CMS Running No', invoice_no: 'Invoice No', m1g_dealer_case: 'M1G / Dealer Case',
+  pass_to_dealer: 'Pass to Dealer', remark_additional_pc: 'Remark (Add. PC)',
+  status_renewal: 'Status Renewal', einv_no_reason: 'E-INV No Reason',
+  remarks_followup: 'Remarks / Follow Up', info: 'Info',
+  workstation_count: 'Workstation Count', main_pc_name: 'Server Name',
+  device_id: 'Device ID', current_program_version: 'Program Version',
+  current_db_version: 'DB Version', db_size: 'DB Size', ram: 'RAM', processor: 'Processor',
+  ultraviewer_id: 'UltraViewer ID', ultraviewer_pw: 'UltraViewer PW',
+  anydesk_id: 'AnyDesk ID', anydesk_pw: 'AnyDesk PW',
+  has_e_invoice: 'e-Invoice', has_sst: 'SST', has_whatsapp: 'WhatsApp',
+  has_backup: 'Auto Backup', has_ext_hdd: 'External HDD',
+  wa_account_no: 'WS Account No', wa_api_key: 'WS API Key',
+  sst_registration_no: 'SST Registration', sst_start_date: 'SST Start Date',
+  sst_submission: 'SST Submission', sst_frequency: 'SST Frequency',
+  clinic_notes: 'Notes',
+  lkey_line1: 'LK Address 1', lkey_line2: 'LK Address 2', lkey_line3: 'LK Address 3',
+  lkey_line4: 'LK Address 4', lkey_line5: 'LK Address 5',
+}
+
+// System fields excluded from the diff — these change on every save and would drown out the real edits.
+const SYSTEM_FIELDS = new Set([
+  'updated_at', 'last_updated_by', 'last_updated_by_name', 'id', 'clinic_code', 'custom_data',
+])
+
+interface AuditEntry {
+  id: string
+  action: 'INSERT' | 'UPDATE' | 'DELETE'
+  changed_by: string
+  old_data: Record<string, unknown> | null
+  new_data: Record<string, unknown> | null
+  created_at: string
+}
+
+interface FieldChange {
+  field: string
+  label: string
+  oldValue: string
+  newValue: string
+}
+
+function formatValue(v: unknown): string {
+  if (v === null || v === undefined || v === '') return '—'
+  if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+  return String(v)
+}
+
+function diffAuditEntry(entry: AuditEntry): FieldChange[] {
+  if (entry.action !== 'UPDATE') return []
+  const oldData = entry.old_data || {}
+  const newData = entry.new_data || {}
+  const changes: FieldChange[] = []
+  const seen = new Set<string>()
+  const allKeys = [...Object.keys(oldData), ...Object.keys(newData)]
+  for (const key of allKeys) {
+    if (seen.has(key)) continue
+    seen.add(key)
+    if (SYSTEM_FIELDS.has(key)) continue
+    const oldV = oldData[key]
+    const newV = newData[key]
+    // Treat null/undefined/empty as equal
+    const oldNorm = oldV === null || oldV === undefined || oldV === '' ? null : oldV
+    const newNorm = newV === null || newV === undefined || newV === '' ? null : newV
+    if (JSON.stringify(oldNorm) === JSON.stringify(newNorm)) continue
+    changes.push({
+      field: key,
+      label: FIELD_LABELS[key] || key.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      oldValue: formatValue(oldV),
+      newValue: formatValue(newV),
+    })
+  }
+  return changes
 }
 
 // Inline-editable text field
@@ -93,6 +184,109 @@ function EditableField({ label, value, onSave, mono, masked }: {
   )
 }
 
+// License Key row — displays key + value with inline edit and copy
+function LicenseKeyRow({ entry, onUpdate, onDelete, onCopy }: {
+  entry: LicenseKeyEntry
+  onUpdate: (patch: Partial<Pick<LicenseKeyEntry, 'field_key' | 'field_value'>>) => void
+  onDelete: () => void
+  onCopy: (value: string) => void
+}) {
+  const [editingKey, setEditingKey] = useState(false)
+  const [editingValue, setEditingValue] = useState(false)
+  const [keyDraft, setKeyDraft] = useState(entry.field_key)
+  const [valueDraft, setValueDraft] = useState(entry.field_value || '')
+
+  useEffect(() => { setKeyDraft(entry.field_key) }, [entry.field_key])
+  useEffect(() => { setValueDraft(entry.field_value || '') }, [entry.field_value])
+
+  const commitKey = () => {
+    setEditingKey(false)
+    const trimmed = keyDraft.trim()
+    if (trimmed && trimmed !== entry.field_key) onUpdate({ field_key: trimmed })
+    else setKeyDraft(entry.field_key)
+  }
+
+  const commitValue = () => {
+    setEditingValue(false)
+    const trimmed = valueDraft.trim()
+    if (trimmed !== (entry.field_value || '')) onUpdate({ field_value: trimmed || null })
+  }
+
+  return (
+    <div className="group/lk flex items-center gap-2 py-1.5 px-2 rounded hover:bg-surface-raised/50 transition-colors">
+      {/* Key */}
+      <div className="w-1/3 min-w-0">
+        {editingKey ? (
+          <input
+            autoFocus
+            value={keyDraft}
+            onChange={e => setKeyDraft(e.target.value)}
+            onBlur={commitKey}
+            onKeyDown={e => { if (e.key === 'Enter') commitKey(); if (e.key === 'Escape') { setKeyDraft(entry.field_key); setEditingKey(false) } }}
+            className="w-full px-1.5 py-0.5 bg-surface-inset border border-accent/40 rounded text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+        ) : (
+          <button
+            onClick={() => setEditingKey(true)}
+            className="text-[12px] text-text-tertiary hover:text-text-primary text-left truncate block w-full cursor-pointer"
+            title="Click to rename"
+          >
+            {entry.field_key}
+          </button>
+        )}
+      </div>
+
+      {/* Value */}
+      <div className="flex-1 min-w-0">
+        {editingValue ? (
+          <input
+            autoFocus
+            value={valueDraft}
+            onChange={e => setValueDraft(e.target.value)}
+            onBlur={commitValue}
+            onKeyDown={e => { if (e.key === 'Enter') commitValue(); if (e.key === 'Escape') { setValueDraft(entry.field_value || ''); setEditingValue(false) } }}
+            className="w-full px-1.5 py-0.5 bg-surface-inset border border-accent/40 rounded text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+          />
+        ) : (
+          <button
+            onClick={() => setEditingValue(true)}
+            className={`w-full text-left text-[12px] font-mono truncate px-1.5 py-0.5 rounded hover:bg-surface-inset transition-colors cursor-pointer ${entry.field_value ? 'text-text-primary' : 'text-text-muted italic'}`}
+            title="Click to edit"
+          >
+            {entry.field_value || '—'}
+          </button>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover/lk:opacity-100 transition-opacity">
+        {entry.field_value && (
+          <button
+            onClick={() => onCopy(entry.field_value || '')}
+            className="p-1 text-text-muted hover:text-accent transition-colors"
+            aria-label="Copy value"
+            title="Copy value"
+          >
+            <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+            </svg>
+          </button>
+        )}
+        <button
+          onClick={() => { if (confirm(`Delete "${entry.field_key}"?`)) onDelete() }}
+          className="p-1 text-text-muted hover:text-red-400 transition-colors"
+          aria-label="Delete"
+          title="Delete"
+        >
+          <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // Toggle switch for boolean flags
 function ToggleFlag({ label, value, onToggle }: { label: string; value: boolean; onToggle: (v: boolean) => void }) {
   return (
@@ -111,7 +305,7 @@ function ToggleFlag({ label, value, onToggle }: { label: string; value: boolean;
   )
 }
 
-export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdated }: ClinicProfilePanelProps) {
+export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdated, onClinicDeleted, isAdmin = false }: ClinicProfilePanelProps) {
   const supabase = createClient()
   const { toast } = useToast()
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -124,6 +318,26 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
   // Notes
   const [notes, setNotes] = useState('')
   const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Change history (Phase 2.1)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyEntries, setHistoryEntries] = useState<AuditEntry[]>([])
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const [historyCount, setHistoryCount] = useState<number | null>(null)
+
+  // Delete confirmation (Phase 1.2)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [dependencies, setDependencies] = useState<{ openTickets: number; activeSchedules: number; draftJobSheets: number } | null>(null)
+
+  // License Keys (MEDEXCRM parity)
+  const [lkOpen, setLkOpen] = useState(false)
+  const [lkLoaded, setLkLoaded] = useState(false)
+  const [lkEntries, setLkEntries] = useState<LicenseKeyEntry[]>([])
+  const [lkAddingKey, setLkAddingKey] = useState(false)
+  const [lkNewKey, setLkNewKey] = useState('')
+  const [lkNewValue, setLkNewValue] = useState('')
 
   // Escape key + body overflow
   useEffect(() => {
@@ -197,6 +411,185 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
   useEffect(() => {
     return () => { if (notesTimerRef.current) clearTimeout(notesTimerRef.current) }
   }, [])
+
+  // Phase 2.1 — prefetch history count (cheap HEAD query) when clinic loads,
+  // so the "Change History · N" header can show the count without loading rows.
+  useEffect(() => {
+    if (!clinic) return
+    let cancelled = false
+    const loadCount = async () => {
+      const { count } = await supabase
+        .from('audit_log')
+        .select('id', { count: 'exact', head: true })
+        .eq('table_name', 'clinics')
+        .eq('record_id', clinic.id)
+      if (!cancelled) setHistoryCount(count ?? 0)
+    }
+    loadCount()
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clinic?.id])
+
+  // Phase 2.1 — lazy-load full history on first expand
+  const loadHistory = useCallback(async () => {
+    if (!clinic || historyLoaded) return
+    setHistoryLoading(true)
+    const { data } = await supabase
+      .from('audit_log')
+      .select('id, action, changed_by, old_data, new_data, created_at')
+      .eq('table_name', 'clinics')
+      .eq('record_id', clinic.id)
+      .order('created_at', { ascending: false })
+      .limit(50)
+    setHistoryEntries((data || []) as AuditEntry[])
+    setHistoryLoaded(true)
+    setHistoryLoading(false)
+  }, [clinic, historyLoaded, supabase])
+
+  const toggleHistory = () => {
+    const next = !historyOpen
+    setHistoryOpen(next)
+    if (next && !historyLoaded) loadHistory()
+  }
+
+  // Phase 1.2 — load dependency counts when delete modal opens
+  const openDeleteModal = useCallback(async () => {
+    if (!clinic) return
+    setDeleteModalOpen(true)
+    setDependencies(null)
+    const [ticketsRes, schedulesRes, jobSheetsRes] = await Promise.all([
+      supabase.from('tickets').select('id', { count: 'exact', head: true })
+        .eq('clinic_code', clinic.clinic_code).neq('status', 'Resolved'),
+      supabase.from('schedules').select('id', { count: 'exact', head: true })
+        .eq('clinic_code', clinic.clinic_code).in('status', ['scheduled', 'in_progress']),
+      supabase.from('job_sheets').select('id', { count: 'exact', head: true })
+        .eq('clinic_code', clinic.clinic_code).eq('status', 'draft'),
+    ])
+    setDependencies({
+      openTickets: ticketsRes.count || 0,
+      activeSchedules: schedulesRes.count || 0,
+      draftJobSheets: jobSheetsRes.count || 0,
+    })
+  }, [clinic, supabase])
+
+  // ── License Keys ─────────────────────────────────────────────────
+  const loadLicenseKeys = useCallback(async () => {
+    if (!clinic || lkLoaded) return
+    const { data } = await supabase
+      .from('license_key_data')
+      .select('*')
+      .eq('clinic_id', clinic.id)
+      .order('display_order', { ascending: true })
+      .order('created_at', { ascending: true })
+    setLkEntries((data || []) as LicenseKeyEntry[])
+    setLkLoaded(true)
+  }, [clinic, lkLoaded, supabase])
+
+  const toggleLicenseKeys = () => {
+    const next = !lkOpen
+    setLkOpen(next)
+    if (next && !lkLoaded) loadLicenseKeys()
+  }
+
+  const addLicenseKey = async () => {
+    if (!clinic) return
+    const key = lkNewKey.trim()
+    const value = lkNewValue.trim()
+    if (!key) return
+    const { data, error } = await supabase
+      .from('license_key_data')
+      .insert({
+        clinic_id: clinic.id,
+        clinic_code: clinic.clinic_code,
+        field_key: key,
+        field_value: value || null,
+        display_order: lkEntries.length,
+        updated_by: userId || null,
+        updated_by_name: userName || null,
+      })
+      .select()
+      .single()
+    if (error) {
+      if (error.code === '23505') toast(`Key "${key}" already exists`, 'error')
+      else toast(`Failed to add: ${error.message}`, 'error')
+      return
+    }
+    setLkEntries(prev => [...prev, data as LicenseKeyEntry])
+    setLkNewKey('')
+    setLkNewValue('')
+    setLkAddingKey(false)
+  }
+
+  const updateLicenseKey = async (id: string, patch: Partial<Pick<LicenseKeyEntry, 'field_key' | 'field_value'>>) => {
+    const { error } = await supabase
+      .from('license_key_data')
+      .update({
+        ...patch,
+        updated_by: userId || null,
+        updated_by_name: userName || null,
+      })
+      .eq('id', id)
+    if (error) {
+      toast('Failed to save', 'error')
+      return
+    }
+    setLkEntries(prev => prev.map(e => e.id === id ? { ...e, ...patch } : e))
+  }
+
+  const deleteLicenseKey = async (id: string) => {
+    const { error } = await supabase.from('license_key_data').delete().eq('id', id)
+    if (error) {
+      toast('Failed to delete', 'error')
+      return
+    }
+    setLkEntries(prev => prev.filter(e => e.id !== id))
+  }
+
+  const copyToClipboard = async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast(`${label} copied`, 'success')
+    } catch {
+      toast('Copy failed', 'error')
+    }
+  }
+
+  const copyAllLicenseKeys = () => {
+    if (!clinic) return
+    const lines = [
+      `${clinic.clinic_code} — ${clinic.clinic_name}`,
+      ...lkEntries.map(e => `${e.field_key}: ${e.field_value || ''}`),
+    ]
+    copyToClipboard(lines.join('\n'), 'All license keys')
+  }
+
+  const handleDelete = async () => {
+    if (!clinic) return
+    setDeleting(true)
+
+    // Manual audit write (trigger is UPDATE-only — see migration 042 comment)
+    await supabase.from('audit_log').insert({
+      table_name: 'clinics',
+      record_id: clinic.id,
+      action: 'DELETE',
+      changed_by: userName || 'system',
+      old_data: clinic,
+      new_data: null,
+    })
+
+    const { error } = await supabase.from('clinics').delete().eq('id', clinic.id)
+
+    if (error) {
+      toast(`Failed to delete: ${error.message}`, 'error')
+      setDeleting(false)
+      return
+    }
+
+    toast(`Clinic ${clinic.clinic_code} deleted`, 'success')
+    setDeleting(false)
+    setDeleteModalOpen(false)
+    onClinicDeleted?.()
+  }
 
   const renewalColor = clinic?.renewal_status ? RENEWAL_COLORS[clinic.renewal_status] : null
 
@@ -426,7 +819,7 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
           </div>
 
           {/* Section C: Notes & Audit */}
-          <div className="px-4 py-3">
+          <div className="px-4 py-3 border-b border-border">
             <h4 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">Notes</h4>
             <textarea
               value={notes}
@@ -444,8 +837,249 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
               </p>
             )}
           </div>
+
+          {/* License Keys (MEDEXCRM parity) */}
+          <div className="px-4 py-3 border-b border-border">
+            <button
+              type="button"
+              onClick={toggleLicenseKeys}
+              className="w-full flex items-center justify-between text-left hover:bg-surface-raised/50 -mx-1 px-1 py-1 rounded transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <h4 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">License Keys</h4>
+                {lkLoaded && <span className="text-[11px] text-text-tertiary">· {lkEntries.length}</span>}
+              </div>
+              <svg
+                className={`size-4 text-text-muted transition-transform duration-200 ${lkOpen ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {lkOpen && (
+              <div className="mt-3 space-y-2">
+                {!lkLoaded && <p className="text-[12px] text-text-muted">Loading…</p>}
+
+                {lkLoaded && lkEntries.length === 0 && !lkAddingKey && (
+                  <p className="text-[12px] text-text-muted">No license keys recorded.</p>
+                )}
+
+                {lkLoaded && lkEntries.map(entry => (
+                  <LicenseKeyRow
+                    key={entry.id}
+                    entry={entry}
+                    onUpdate={(patch) => updateLicenseKey(entry.id, patch)}
+                    onDelete={() => deleteLicenseKey(entry.id)}
+                    onCopy={(v) => copyToClipboard(v, entry.field_key)}
+                  />
+                ))}
+
+                {lkAddingKey && (
+                  <div className="flex items-center gap-2 p-2 bg-surface-inset rounded-lg border border-accent/30">
+                    <input
+                      value={lkNewKey}
+                      onChange={e => setLkNewKey(e.target.value)}
+                      placeholder="Key (e.g. Install Key)"
+                      className="w-1/3 px-2 py-1 bg-surface border border-border rounded text-[12px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                      autoFocus
+                    />
+                    <input
+                      value={lkNewValue}
+                      onChange={e => setLkNewValue(e.target.value)}
+                      placeholder="Value"
+                      className="flex-1 px-2 py-1 bg-surface border border-border rounded text-[12px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+                      onKeyDown={e => { if (e.key === 'Enter' && lkNewKey.trim()) addLicenseKey() }}
+                    />
+                    <button
+                      onClick={addLicenseKey}
+                      disabled={!lkNewKey.trim()}
+                      className="px-2.5 py-1 bg-accent text-white rounded text-[12px] font-medium disabled:opacity-40 hover:bg-accent/90 transition-colors"
+                    >
+                      Add
+                    </button>
+                    <button
+                      onClick={() => { setLkAddingKey(false); setLkNewKey(''); setLkNewValue('') }}
+                      className="text-text-muted hover:text-text-primary p-1"
+                      aria-label="Cancel"
+                    >
+                      <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+
+                {/* Footer actions */}
+                <div className="flex items-center gap-2 pt-1">
+                  {!lkAddingKey && (
+                    <button
+                      onClick={() => setLkAddingKey(true)}
+                      className="text-[12px] text-accent hover:underline flex items-center gap-1"
+                    >
+                      <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      Add key
+                    </button>
+                  )}
+                  {lkEntries.length > 0 && (
+                    <>
+                      <span className="text-text-muted">·</span>
+                      <button
+                        onClick={copyAllLicenseKeys}
+                        className="text-[12px] text-text-tertiary hover:text-text-primary flex items-center gap-1 transition-colors"
+                      >
+                        <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                        </svg>
+                        Copy all
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Phase 2.1 — Change History */}
+          <div className="px-4 py-3 border-b border-border">
+            <button
+              type="button"
+              onClick={toggleHistory}
+              className="w-full flex items-center justify-between text-left hover:bg-surface-raised/50 -mx-1 px-1 py-1 rounded transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <h4 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider">Change History</h4>
+                {historyCount !== null && (
+                  <span className="text-[11px] text-text-tertiary">· {historyCount} {historyCount === 1 ? 'change' : 'changes'}</span>
+                )}
+              </div>
+              <svg
+                className={`size-4 text-text-muted transition-transform duration-200 ${historyOpen ? 'rotate-180' : ''}`}
+                fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {historyOpen && (
+              <div className="mt-3 space-y-3 max-h-72 overflow-y-auto">
+                {historyLoading && <p className="text-[12px] text-text-muted">Loading history…</p>}
+                {!historyLoading && historyEntries.length === 0 && (
+                  <p className="text-[12px] text-text-muted">No changes recorded yet.</p>
+                )}
+                {historyEntries.map(entry => {
+                  const changes = diffAuditEntry(entry)
+                  const isInsert = entry.action === 'INSERT'
+                  const isDelete = entry.action === 'DELETE'
+                  const dotColor = isInsert ? 'bg-emerald-400/70' : isDelete ? 'bg-red-400/70' : 'bg-blue-400/70'
+                  const actionLabel = isInsert ? 'Created' : isDelete ? 'Deleted' : null
+                  return (
+                    <div key={entry.id} className="flex items-start gap-2 text-[12px]">
+                      <div className={`size-1.5 rounded-full flex-shrink-0 mt-1.5 ${dotColor}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-text-tertiary">
+                          <span title={format(new Date(entry.created_at), 'dd MMM yyyy HH:mm')}>
+                            {formatDistanceToNow(new Date(entry.created_at), { addSuffix: true })}
+                          </span>
+                          {' · '}
+                          <span className="text-text-secondary">{toProperCase(entry.changed_by)}</span>
+                        </div>
+                        {actionLabel && <p className="text-text-muted mt-0.5">{actionLabel}</p>}
+                        {changes.length > 0 && (
+                          <ul className="mt-1 space-y-0.5">
+                            {changes.map(c => (
+                              <li key={c.field} className="text-text-muted">
+                                <span className="text-text-secondary">{c.label}:</span>{' '}
+                                <span className="line-through opacity-60" title={c.oldValue}>{c.oldValue.length > 40 ? c.oldValue.slice(0, 40) + '…' : c.oldValue}</span>
+                                {' → '}
+                                <span className="text-text-primary" title={c.newValue}>{c.newValue.length > 40 ? c.newValue.slice(0, 40) + '…' : c.newValue}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {!actionLabel && changes.length === 0 && (
+                          <p className="text-text-muted italic mt-0.5">No visible changes</p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+                {historyCount !== null && historyCount > 50 && historyLoaded && (
+                  <p className="text-[11px] text-text-muted text-center pt-2 border-t border-border/50">
+                    Showing most recent 50 of {historyCount} changes
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Phase 1.2 — Danger Zone (admin only) */}
+          {isAdmin && (
+            <div className="px-4 py-3">
+              <h4 className="text-[11px] font-semibold text-red-400/80 uppercase tracking-wider mb-2">Danger Zone</h4>
+              <div className="rounded-lg border border-red-500/20 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-text-primary font-medium">Delete this clinic</p>
+                    <p className="text-[12px] text-text-muted mt-0.5">
+                      Existing tickets and job sheets keep their snapshot. Cannot be undone.
+                    </p>
+                  </div>
+                  <Button variant="danger" size="sm" onClick={openDeleteModal}>
+                    Delete Clinic
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Delete confirmation */}
+      <ModalDialog
+        open={deleteModalOpen}
+        onClose={() => { if (!deleting) setDeleteModalOpen(false) }}
+        title="Delete clinic?"
+        size="md"
+      >
+        <div className="p-4 space-y-3">
+          <p className="text-[13px] text-text-primary">
+            This will permanently remove{' '}
+            <span className="font-semibold">{clinic.clinic_name}</span>{' '}
+            <span className="font-mono text-text-tertiary">({clinic.clinic_code})</span>{' '}
+            from the CRM.
+          </p>
+          <p className="text-[12px] text-text-tertiary">
+            Existing tickets, schedules, and job sheets will keep their snapshot of this clinic — they will not be affected.
+          </p>
+
+          {dependencies === null && (
+            <p className="text-[12px] text-text-muted">Checking dependencies…</p>
+          )}
+
+          {dependencies && (dependencies.openTickets > 0 || dependencies.activeSchedules > 0 || dependencies.draftJobSheets > 0) && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[12px] text-amber-300">
+              <p className="font-semibold mb-1">⚠ This clinic has active references:</p>
+              <ul className="space-y-0.5 text-amber-200/90">
+                {dependencies.openTickets > 0 && <li>· {dependencies.openTickets} open ticket{dependencies.openTickets !== 1 ? 's' : ''}</li>}
+                {dependencies.activeSchedules > 0 && <li>· {dependencies.activeSchedules} active schedule{dependencies.activeSchedules !== 1 ? 's' : ''}</li>}
+                {dependencies.draftJobSheets > 0 && <li>· {dependencies.draftJobSheets} draft job sheet{dependencies.draftJobSheets !== 1 ? 's' : ''}</li>}
+              </ul>
+              <p className="mt-2 text-amber-200/80">Consider resolving these first.</p>
+            </div>
+          )}
+
+          <p className="text-[12px] text-red-400 font-medium">This action cannot be undone.</p>
+        </div>
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border bg-surface-inset/30">
+          <Button variant="ghost" onClick={() => setDeleteModalOpen(false)} disabled={deleting}>Cancel</Button>
+          <Button variant="danger" onClick={handleDelete} loading={deleting}>
+            Delete permanently
+          </Button>
+        </div>
+      </ModalDialog>
     </div>
   )
 }

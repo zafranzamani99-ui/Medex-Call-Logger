@@ -18,6 +18,12 @@ import {
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic, CustomColumn } from '@/lib/types'
 import { buildColumns, DEFAULT_COLUMN_VISIBILITY, COLUMN_GROUPS } from './columns'
+import { ModalDialog } from '@/components/Modal'
+import Button from '@/components/ui/Button'
+import { useToast } from '@/components/ui/Toast'
+
+const CHECKBOX_COL_WIDTH = 40
+const BULK_DELETE_MAX = 100
 
 // WHY: Interactive CRM data table — Airtable-like spreadsheet for browsing/editing
 // all ~3,800 clinics. Uses @tanstack/react-table for sorting, filtering, pagination,
@@ -25,6 +31,8 @@ import { buildColumns, DEFAULT_COLUMN_VISIBILITY, COLUMN_GROUPS } from './column
 
 interface CrmDataTableProps {
   onClinicSelect: (clinicCode: string) => void
+  refreshKey?: number
+  isAdmin?: boolean
 }
 
 // Session storage — volatile (search, filters, sort, page)
@@ -107,12 +115,19 @@ function RenameableHeader({ header, renames, onRename }: {
 
 // ── Main Component ────────────────────────────────────────────────────
 
-export default function CrmDataTable({ onClinicSelect }: CrmDataTableProps) {
+export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin = false }: CrmDataTableProps) {
   const supabase = createClient()
+  const { toast } = useToast()
   const [clinics, setClinics] = useState<Clinic[]>([])
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState<string | null>(null)
   const [userName, setUserName] = useState('')
+
+  // Phase 1.3 — bulk selection (ids of selected clinics)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const lastSelectedIdxRef = useRef<number | null>(null)
 
   // Custom columns from DB (team-shared)
   const [customColumns, setCustomColumns] = useState<CustomColumn[]>([])
@@ -132,8 +147,9 @@ export default function CrmDataTable({ onClinicSelect }: CrmDataTableProps) {
   const [columnRenames, setColumnRenames] = useState<Record<string, string>>(() => loadPersistent('colRenames', {}))
   const [columnOrder, setColumnOrder] = useState<ColumnOrderState>(() => loadPersistent('colOrder', []))
 
-  // Freeze panes — columns frozen from left, rows frozen from top (like Excel)
-  const [frozenCount, setFrozenCount] = useState<number>(() => loadPersistent('frozenCols', 1))
+  // Freeze panes — columns frozen from left, rows frozen from top (like Excel).
+  // Default 2 = ACCT NO + CLINIC NAME stay visible during horizontal scroll (MEDEXCRM parity).
+  const [frozenCount, setFrozenCount] = useState<number>(() => loadPersistent('frozenCols', 2))
   const [frozenRowCount, setFrozenRowCount] = useState<number>(() => loadPersistent('frozenRows', 0))
 
   // Edit menu (includes freeze, undo, find, export, reset)
@@ -233,7 +249,7 @@ export default function CrmDataTable({ onClinicSelect }: CrmDataTableProps) {
       setLoading(false)
     }
     init()
-  }, [supabase])
+  }, [supabase, refreshKey])
 
   // Close popover on outside click
   useEffect(() => {
@@ -437,19 +453,62 @@ export default function CrmDataTable({ onClinicSelect }: CrmDataTableProps) {
     return () => document.removeEventListener('keydown', handler)
   }, [handleUndo, handleRedo])
 
+  // ── Phase 1.3 — Selection & bulk delete ─────────────────────────────
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+    lastSelectedIdxRef.current = null
+  }, [])
+
+  const selectedClinics = useMemo(
+    () => clinics.filter(c => selectedIds.has(c.id)),
+    [clinics, selectedIds]
+  )
+
+  const handleBulkDelete = async () => {
+    if (selectedClinics.length === 0) return
+    setBulkDeleting(true)
+
+    // Write audit entries in one batched insert (trigger is UPDATE-only)
+    const auditRows = selectedClinics.map(c => ({
+      table_name: 'clinics',
+      record_id: c.id,
+      action: 'DELETE',
+      changed_by: userName || 'system',
+      old_data: c as unknown as Record<string, unknown>,
+      new_data: null,
+    }))
+    await supabase.from('audit_log').insert(auditRows)
+
+    const ids = selectedClinics.map(c => c.id)
+    const { error } = await supabase.from('clinics').delete().in('id', ids)
+
+    if (error) {
+      toast(`Failed to delete: ${error.message}`, 'error')
+      setBulkDeleting(false)
+      return
+    }
+
+    // Optimistic local update
+    setClinics(prev => prev.filter(c => !selectedIds.has(c.id)))
+    toast(`${ids.length} clinic${ids.length !== 1 ? 's' : ''} deleted`, 'success')
+    clearSelection()
+    setBulkDeleteOpen(false)
+    setBulkDeleting(false)
+  }
+
   // ── Reset Table Layout ──────────────────────────────────────────────
   const resetLayout = () => {
     setColumnSizing({})
     setColumnOrder([])
     setColumnRenames({})
     setColumnVisibility(DEFAULT_COLUMN_VISIBILITY)
-    setFrozenCount(1)
+    setFrozenCount(2)
     setFrozenRowCount(0)
     savePersistent('colSizes', {})
     savePersistent('colOrder', [])
     savePersistent('colRenames', {})
     savePersistent('vis', DEFAULT_COLUMN_VISIBILITY)
-    savePersistent('frozenCols', 1)
+    savePersistent('frozenCols', 2)
     savePersistent('frozenRows', 0)
   }
 
@@ -1018,16 +1077,47 @@ export default function CrmDataTable({ onClinicSelect }: CrmDataTableProps) {
             <table className="w-full text-left" style={{ minWidth: '1200px' }}>
               <thead>
                 {table.getHeaderGroups().map(headerGroup => {
-                  // Compute cumulative left offsets for frozen columns
+                  // Compute cumulative left offsets for frozen columns.
+                  // When the checkbox column is present, everything shifts right by its width.
                   const leftOffsets: number[] = []
-                  let cumLeft = 0
+                  let cumLeft = isAdmin ? CHECKBOX_COL_WIDTH : 0
                   headerGroup.headers.forEach((h, idx) => {
                     leftOffsets[idx] = cumLeft
                     if (idx < frozenCount) cumLeft += h.getSize()
                   })
 
+                  // Current visible page rows — for select-all
+                  const visibleRows = table.getRowModel().rows
+                  const visibleIds = visibleRows.map(r => r.original.id)
+                  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
+                  const someVisibleSelected = visibleIds.some(id => selectedIds.has(id))
+
                   return (
                     <tr key={headerGroup.id}>
+                      {isAdmin && (
+                        <th
+                          className="sticky top-0 bg-surface-raised px-3 py-2.5 border-b border-border z-30"
+                          style={{ width: CHECKBOX_COL_WIDTH, position: 'sticky', left: 0 }}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label="Select all visible"
+                            checked={allVisibleSelected}
+                            ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected }}
+                            onChange={e => {
+                              e.stopPropagation()
+                              setSelectedIds(prev => {
+                                const next = new Set(prev)
+                                if (e.target.checked) visibleIds.forEach(id => next.add(id))
+                                else visibleIds.forEach(id => next.delete(id))
+                                return next
+                              })
+                            }}
+                            className="size-3.5 rounded border-border cursor-pointer accent-indigo-500"
+                            onClick={e => e.stopPropagation()}
+                          />
+                        </th>
+                      )}
                       {headerGroup.headers.map((header, i) => {
                         const isFrozen = i < frozenCount
                         const isLastFrozen = i === frozenCount - 1
@@ -1116,19 +1206,62 @@ export default function CrmDataTable({ onClinicSelect }: CrmDataTableProps) {
                   // Compute left offsets for frozen body cells
                   const cells = row.getVisibleCells()
                   const bodyLeftOffsets: number[] = []
-                  let cumBodyLeft = 0
+                  let cumBodyLeft = isAdmin ? CHECKBOX_COL_WIDTH : 0
                   cells.forEach((c, idx) => {
                     bodyLeftOffsets[idx] = cumBodyLeft
                     if (idx < frozenCount) cumBodyLeft += c.column.getSize()
                   })
 
+                  const rowId = row.original.id
+                  const rowSelected = selectedIds.has(rowId)
+
                   return (
                     <tr
                       key={row.id}
                       onClick={() => onClinicSelect(row.original.clinic_code)}
-                      className={`group/row cursor-pointer transition-colors ${isRowFrozen ? 'bg-surface-raised hover:bg-surface-raised' : 'hover:bg-surface-raised'} ${isLastFrozenRow ? 'shadow-[0_2px_4px_-1px_rgba(0,0,0,0.15)]' : ''}`}
+                      className={`group/row cursor-pointer transition-colors ${isRowFrozen ? 'bg-surface-raised hover:bg-surface-raised' : 'hover:bg-surface-raised'} ${isLastFrozenRow ? 'shadow-[0_2px_4px_-1px_rgba(0,0,0,0.15)]' : ''} ${rowSelected ? 'bg-indigo-500/5' : ''}`}
                       style={isRowFrozen ? { position: 'sticky', top: stickyTop, zIndex: 4 } : undefined}
                     >
+                      {isAdmin && (
+                        <td
+                          className={`px-3 py-2 sticky bg-surface group-hover/row:bg-surface-raised ${rowSelected ? 'bg-indigo-500/5' : ''} ${isRowFrozen ? 'z-[6]' : 'z-[5]'}`}
+                          style={{ width: CHECKBOX_COL_WIDTH, left: 0 }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${row.original.clinic_name}`}
+                            checked={rowSelected}
+                            onChange={e => {
+                              const thisIdx = rowIdx
+                              const shift = (e.nativeEvent as MouseEvent).shiftKey
+                              setSelectedIds(prev => {
+                                const next = new Set(prev)
+                                // Shift-click: select range from last to current
+                                if (shift && lastSelectedIdxRef.current !== null) {
+                                  const [lo, hi] = [
+                                    Math.min(lastSelectedIdxRef.current, thisIdx),
+                                    Math.max(lastSelectedIdxRef.current, thisIdx),
+                                  ]
+                                  const rangeRows = table.getRowModel().rows.slice(lo, hi + 1)
+                                  const shouldSelect = e.target.checked
+                                  rangeRows.forEach(r => {
+                                    if (shouldSelect) next.add(r.original.id)
+                                    else next.delete(r.original.id)
+                                  })
+                                } else {
+                                  if (e.target.checked) next.add(rowId)
+                                  else next.delete(rowId)
+                                }
+                                return next
+                              })
+                              lastSelectedIdxRef.current = thisIdx
+                            }}
+                            className="size-3.5 rounded border-border cursor-pointer accent-indigo-500"
+                            onClick={e => e.stopPropagation()}
+                          />
+                        </td>
+                      )}
                       {cells.map((cell, i) => {
                         const isFrozen = i < frozenCount
                         const isLastFrozen = i === frozenCount - 1
@@ -1152,7 +1285,7 @@ export default function CrmDataTable({ onClinicSelect }: CrmDataTableProps) {
                 })}
                 {table.getRowModel().rows.length === 0 && (
                   <tr>
-                    <td colSpan={table.getVisibleFlatColumns().length} className="px-4 py-12 text-center">
+                    <td colSpan={table.getVisibleFlatColumns().length + (isAdmin ? 1 : 0)} className="px-4 py-12 text-center">
                       <p className="text-sm text-text-muted">No clinics found</p>
                       {globalFilter && <p className="text-xs text-text-muted mt-1">Try a different search term</p>}
                     </td>
@@ -1190,6 +1323,69 @@ export default function CrmDataTable({ onClinicSelect }: CrmDataTableProps) {
         </div>
       )}
 
+      {/* Phase 1.3 — Bulk action toolbar (sticky bottom) */}
+      {isAdmin && selectedIds.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-surface border border-border rounded-full shadow-theme-lg px-4 py-2 flex items-center gap-3">
+          <span className="text-[13px] text-text-primary">
+            <span className="font-semibold">{selectedIds.size}</span> selected
+          </span>
+          <button
+            onClick={clearSelection}
+            className="text-[12px] text-text-tertiary hover:text-text-primary transition-colors"
+          >
+            Clear
+          </button>
+          <div className="w-px h-5 bg-border" />
+          <Button
+            variant="danger"
+            size="sm"
+            onClick={() => setBulkDeleteOpen(true)}
+            disabled={selectedIds.size > BULK_DELETE_MAX}
+            title={selectedIds.size > BULK_DELETE_MAX ? `Max ${BULK_DELETE_MAX} at a time — use CSV upload for larger deletions` : undefined}
+          >
+            Delete selected ({selectedIds.size})
+          </Button>
+        </div>
+      )}
+
+      {/* Phase 1.3 — Bulk delete confirmation */}
+      <ModalDialog
+        open={bulkDeleteOpen}
+        onClose={() => { if (!bulkDeleting) setBulkDeleteOpen(false) }}
+        title={`Delete ${selectedIds.size} ${selectedIds.size === 1 ? 'clinic' : 'clinics'}?`}
+        size="md"
+      >
+        <div className="p-4 space-y-3">
+          <p className="text-[13px] text-text-primary">
+            This will permanently remove the following {selectedIds.size === 1 ? 'clinic' : `${selectedIds.size} clinics`} from the CRM.
+          </p>
+
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-border bg-surface-inset/30 p-2">
+            <ul className="text-[12px] space-y-0.5">
+              {selectedClinics.slice(0, 10).map(c => (
+                <li key={c.id} className="flex gap-2">
+                  <span className="font-mono text-text-tertiary flex-shrink-0">{c.clinic_code}</span>
+                  <span className="text-text-secondary truncate">{c.clinic_name}</span>
+                </li>
+              ))}
+              {selectedClinics.length > 10 && (
+                <li className="text-text-muted italic pt-1">…and {selectedClinics.length - 10} more</li>
+              )}
+            </ul>
+          </div>
+
+          <p className="text-[12px] text-text-tertiary">
+            Existing tickets, schedules, and job sheets referencing these clinics will keep their snapshot — they will not be affected.
+          </p>
+          <p className="text-[12px] text-red-400 font-medium">This action cannot be undone.</p>
+        </div>
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border bg-surface-inset/30">
+          <Button variant="ghost" onClick={() => setBulkDeleteOpen(false)} disabled={bulkDeleting}>Cancel</Button>
+          <Button variant="danger" onClick={handleBulkDelete} loading={bulkDeleting}>
+            Delete {selectedIds.size} permanently
+          </Button>
+        </div>
+      </ModalDialog>
     </div>
   )
 }

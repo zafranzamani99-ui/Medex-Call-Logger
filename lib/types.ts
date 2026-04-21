@@ -446,6 +446,20 @@ export interface CustomColumn {
   created_at: string
 }
 
+// License key data — key/value pairs per clinic (master license DB)
+export interface LicenseKeyEntry {
+  id: string
+  clinic_id: string
+  clinic_code: string
+  field_key: string
+  field_value: string | null
+  display_order: number
+  updated_by: string | null
+  updated_by_name: string | null
+  created_at: string
+  updated_at: string
+}
+
 // Resource Hub
 export type ResourceCategory =
   | 'System Versions'
