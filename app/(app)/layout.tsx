@@ -45,7 +45,7 @@ export default async function AppLayout({
     withTimeout(
       supabase
         .from('profiles')
-        .select('display_name')
+        .select('display_name, is_active')
         .eq('id', user.id)
         .single(),
       2000
@@ -76,6 +76,16 @@ export default async function AppLayout({
       2000
     ),
   ])
+
+  // WHY: If the profile query succeeded AND is_active is explicitly false,
+  // kick the user out. An admin has deactivated their account — they should
+  // not retain any access, even from a still-valid session cookie.
+  // Profile fetch timeout/failure does NOT lock anyone out (fail-open) —
+  // otherwise a Supabase hiccup would log everyone out.
+  if (profileResult?.data && profileResult.data.is_active === false) {
+    await supabase.auth.signOut()
+    redirect('/login?inactive=1')
+  }
 
   const displayName = profileResult?.data?.display_name || user.email || 'Agent'
   const todayCalls = todayCallsResult?.count ?? 0

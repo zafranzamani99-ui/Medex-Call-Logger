@@ -1,19 +1,36 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 
 // WHY: Login page — spec Section 14. Email + password via Supabase Auth.
 // Redirects to dashboard on success. Shows error on failure.
 // Middleware handles redirecting already-authenticated users away from this page.
 export default function LoginPage() {
+  // useSearchParams requires a Suspense boundary during static prerender.
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
+  )
+}
+
+function LoginPageInner() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+
+  // Show a banner when the app layout kicked us back here because is_active=false
+  useEffect(() => {
+    if (searchParams.get('inactive') === '1') {
+      setError('Your account has been deactivated. Contact your admin for access.')
+    }
+  }, [searchParams])
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -23,15 +40,31 @@ export default function LoginPage() {
     // WHY: Clear any stale session before login attempt.
     await supabase.auth.signOut()
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password,
     })
 
-    if (error) {
-      setError(error.message)
+    if (signInError) {
+      setError(signInError.message)
       setLoading(false)
       return
+    }
+
+    // WHY: Block deactivated accounts immediately — before any app page loads.
+    // This prevents even a flash of authenticated UI for inactive users.
+    if (data.user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('is_active')
+        .eq('id', data.user.id)
+        .single()
+      if (profile && profile.is_active === false) {
+        await supabase.auth.signOut()
+        setError('Your account has been deactivated. Contact your admin for access.')
+        setLoading(false)
+        return
+      }
     }
 
     router.push('/')

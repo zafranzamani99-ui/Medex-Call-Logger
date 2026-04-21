@@ -18,6 +18,7 @@ interface TeamMember {
   display_name: string
   email: string
   role: UserRole
+  is_active: boolean
   created_at: string
 }
 
@@ -30,6 +31,7 @@ export default function SettingsPage() {
   const [savingName, setSavingName] = useState(false)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
   const [updatingRole, setUpdatingRole] = useState<string | null>(null)
+  const [updatingActive, setUpdatingActive] = useState<string | null>(null)
   const { toast } = useToast()
 
   // CRM upload state
@@ -61,7 +63,7 @@ export default function SettingsPage() {
       supabase.from('profiles').select('display_name, role').eq('id', session.user.id).single(),
       supabase.from('clinics').select('*', { count: 'exact', head: true }),
       supabase.from('clinics').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-      supabase.from('profiles').select('id, display_name, email, role, created_at').order('created_at'),
+      supabase.from('profiles').select('id, display_name, email, role, is_active, created_at').order('created_at'),
     ])
 
     if (profileRes.data) {
@@ -93,6 +95,34 @@ export default function SettingsPage() {
       toast('Failed to update role', 'error')
     }
     setUpdatingRole(null)
+  }
+
+  // Toggle active/inactive (admin only, can't toggle self)
+  // WHY: Inactive users get kicked out on their next page load by the (app)/layout.tsx guard.
+  // All their historical records (tickets, audit entries, etc.) stay intact.
+  const handleActiveToggle = async (member: TeamMember) => {
+    if (member.id === userId) {
+      toast("You can't deactivate your own account", 'error')
+      return
+    }
+    const nextActive = !member.is_active
+    const label = member.display_name
+    if (!nextActive && !confirm(`Deactivate ${label}? They'll be signed out on their next page load and won't be able to log back in until reactivated. Their existing records stay intact.`)) {
+      return
+    }
+    setUpdatingActive(member.id)
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_active: nextActive })
+      .eq('id', member.id)
+
+    if (!error) {
+      setTeamMembers(prev => prev.map(m => m.id === member.id ? { ...m, is_active: nextActive } : m))
+      toast(nextActive ? `${label} reactivated` : `${label} deactivated`)
+    } else {
+      toast('Failed to update status', 'error')
+    }
+    setUpdatingActive(null)
   }
 
   // Save display name (UC-22)
@@ -282,35 +312,54 @@ export default function SettingsPage() {
           {teamMembers.map(member => (
             <div
               key={member.id}
-              className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border ${
+              className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg border transition-opacity ${
                 member.id === userId
                   ? 'border-accent/30 bg-accent/5'
                   : 'border-border bg-surface-inset'
-              }`}
+              } ${!member.is_active ? 'opacity-60' : ''}`}
             >
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[13px] font-medium text-text-primary truncate">
                     {toProperCase(member.display_name)}
                   </span>
                   {member.id === userId && (
                     <span className="text-[10px] text-text-muted">(you)</span>
                   )}
+                  {!member.is_active && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-500/15 text-red-400">
+                      Inactive
+                    </span>
+                  )}
                 </div>
                 <p className="text-[11px] text-text-tertiary truncate">{member.email}</p>
               </div>
-              <div className="shrink-0">
+              <div className="shrink-0 flex items-center gap-2">
                 {userRole === 'admin' && member.id !== userId ? (
-                  <select
-                    value={member.role}
-                    onChange={(e) => handleRoleChange(member.id, e.target.value as UserRole)}
-                    disabled={updatingRole === member.id}
-                    className="text-[12px] px-2 py-1 rounded-md border border-border bg-surface-inset text-text-primary
-                               focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer disabled:opacity-50"
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="support">Support</option>
-                  </select>
+                  <>
+                    <select
+                      value={member.role}
+                      onChange={(e) => handleRoleChange(member.id, e.target.value as UserRole)}
+                      disabled={updatingRole === member.id || !member.is_active}
+                      className="text-[12px] px-2 py-1 rounded-md border border-border bg-surface-inset text-text-primary
+                                 focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer disabled:opacity-50"
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="support">Support</option>
+                    </select>
+                    <button
+                      onClick={() => handleActiveToggle(member)}
+                      disabled={updatingActive === member.id}
+                      className={`text-[11px] px-2 py-1 rounded-md border transition-colors disabled:opacity-50 ${
+                        member.is_active
+                          ? 'border-border bg-surface text-text-tertiary hover:border-red-500/30 hover:text-red-400'
+                          : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'
+                      }`}
+                      title={member.is_active ? 'Deactivate — blocks login, preserves records' : 'Reactivate — restores login access'}
+                    >
+                      {member.is_active ? 'Deactivate' : 'Reactivate'}
+                    </button>
+                  </>
                 ) : (
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
                     member.role === 'admin'
