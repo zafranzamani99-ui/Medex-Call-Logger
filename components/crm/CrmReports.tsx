@@ -87,9 +87,11 @@ function StatCard({ label, value, tone = 'default' }: {
 
 // ─ Table primitives ─────────────────────────────────────────────
 
-function ReportTable({ headers, rows, emptyMessage = 'No records' }: {
+function ReportTable({ headers, rows, onRowClick, rowKeys, emptyMessage = 'No records' }: {
   headers: string[]
   rows: React.ReactNode[][]
+  onRowClick?: (index: number) => void
+  rowKeys?: string[]
   emptyMessage?: string
 }) {
   return (
@@ -114,7 +116,11 @@ function ReportTable({ headers, rows, emptyMessage = 'No records' }: {
               </tr>
             )}
             {rows.map((row, i) => (
-              <tr key={i} className="hover:bg-surface-raised/50">
+              <tr
+                key={rowKeys?.[i] ?? i}
+                className={`hover:bg-surface-raised/50 transition-colors ${onRowClick ? 'cursor-pointer' : ''}`}
+                onClick={onRowClick ? () => onRowClick(i) : undefined}
+              >
                 {row.map((cell, j) => (
                   <td key={j} className="px-3 py-2">{cell}</td>
                 ))}
@@ -129,7 +135,7 @@ function ReportTable({ headers, rows, emptyMessage = 'No records' }: {
 
 // ─ Maintenance Report ───────────────────────────────────────────
 
-function MaintenanceReport({ clinics }: { clinics: Clinic[] }) {
+function MaintenanceReport({ clinics, onClinicClick }: { clinics: Clinic[]; onClinicClick?: (code: string) => void }) {
   const { toast } = useToast()
 
   const rows = useMemo(() => {
@@ -194,6 +200,8 @@ function MaintenanceReport({ clinics }: { clinics: Clinic[] }) {
       <div id="maintenance-report-table">
         <ReportTable
           headers={['Acct No', 'Clinic', 'State', 'MTN Start', 'MTN Expiry', 'Days', 'Status']}
+          rowKeys={rows.map(r => r.id)}
+          onRowClick={onClinicClick ? (i) => onClinicClick(rows[i].clinic_code) : undefined}
           rows={rows.map(r => {
             const status = r._days === null
               ? { label: '—', tone: 'text-text-muted' }
@@ -221,7 +229,7 @@ function MaintenanceReport({ clinics }: { clinics: Clinic[] }) {
 
 // ─ Cloud Backup Report ──────────────────────────────────────────
 
-function CloudBackupReport({ clinics }: { clinics: Clinic[] }) {
+function CloudBackupReport({ clinics, onClinicClick }: { clinics: Clinic[]; onClinicClick?: (code: string) => void }) {
   const { toast } = useToast()
 
   const rows = useMemo(() => {
@@ -290,6 +298,8 @@ function CloudBackupReport({ clinics }: { clinics: Clinic[] }) {
       <div id="cloud-report-table">
         <ReportTable
           headers={['Acct No', 'Clinic', 'State', 'Cloud Start', 'Cloud End', 'Days', 'Auto Backup', 'Ext HDD']}
+          rowKeys={rows.map(r => r.id)}
+          onRowClick={onClinicClick ? (i) => onClinicClick(rows[i].clinic_code) : undefined}
           rows={rows.map(r => [
             <span key="c" className="font-mono text-text-tertiary">{r.clinic_code}</span>,
             r.clinic_name,
@@ -311,7 +321,7 @@ function CloudBackupReport({ clinics }: { clinics: Clinic[] }) {
 
 type EinvStatus = 'registered' | 'not_registered' | 'exempt'
 
-function EInvoiceReport({ clinics }: { clinics: Clinic[] }) {
+function EInvoiceReport({ clinics, onClinicClick }: { clinics: Clinic[]; onClinicClick?: (code: string) => void }) {
   const { toast } = useToast()
   const [filter, setFilter] = useState<EinvStatus | 'all'>('all')
 
@@ -399,6 +409,8 @@ function EInvoiceReport({ clinics }: { clinics: Clinic[] }) {
       <div id="einv-report-table">
         <ReportTable
           headers={['Acct No', 'Clinic', 'State', 'Status', 'Reason']}
+          rowKeys={rows.map(r => r.id)}
+          onRowClick={onClinicClick ? (i) => onClinicClick(rows[i].clinic_code) : undefined}
           rows={rows.map(r => [
             <span key="c" className="font-mono text-text-tertiary">{r.clinic_code}</span>,
             r.clinic_name,
@@ -415,11 +427,23 @@ function EInvoiceReport({ clinics }: { clinics: Clinic[] }) {
 
 // ─ Main Component ───────────────────────────────────────────────
 
-export default function CrmReports() {
+export default function CrmReports({ onClinicClick }: { onClinicClick?: (code: string) => void } = {}) {
   const supabase = createClient()
   const [clinics, setClinics] = useState<Clinic[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<ReportTab>('maintenance')
+  const [stateFilter, setStateFilter] = useState<string>('all')
+
+  const stateOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const c of clinics) if (c.state) set.add(c.state)
+    return Array.from(set).sort()
+  }, [clinics])
+
+  const filteredClinics = useMemo(
+    () => stateFilter === 'all' ? clinics : clinics.filter(c => c.state === stateFilter),
+    [clinics, stateFilter]
+  )
 
   useEffect(() => {
     const load = async () => {
@@ -457,26 +481,46 @@ export default function CrmReports() {
 
   return (
     <div>
-      {/* Sub-tabs */}
-      <div className="flex items-center gap-1 mb-4 border-b border-border">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setActiveTab(t.id)}
-            className={`px-3 py-2 text-[13px] font-medium transition-colors border-b-2 -mb-px ${
-              activeTab === t.id
-                ? 'text-text-primary border-accent'
-                : 'text-text-tertiary border-transparent hover:text-text-secondary'
-            }`}
+      {/* Sub-tabs + state filter */}
+      <div className="flex items-center justify-between gap-3 mb-4 border-b border-border flex-wrap">
+        <div className="flex items-center gap-1">
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              className={`px-3 py-2 text-[13px] font-medium transition-colors border-b-2 -mb-px ${
+                activeTab === t.id
+                  ? 'text-text-primary border-accent'
+                  : 'text-text-tertiary border-transparent hover:text-text-secondary'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 pb-2">
+          <span className="text-[12px] text-text-tertiary">State:</span>
+          <select
+            value={stateFilter}
+            onChange={e => setStateFilter(e.target.value)}
+            className="px-2 py-1 text-[12px] bg-surface border border-border rounded text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
           >
-            {t.label}
-          </button>
-        ))}
+            <option value="all">All ({clinics.length})</option>
+            {stateOptions.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+          {stateFilter !== 'all' && (
+            <span className="text-[11px] text-text-muted tabular-nums">
+              {filteredClinics.length} {filteredClinics.length === 1 ? 'clinic' : 'clinics'}
+            </span>
+          )}
+        </div>
       </div>
 
-      {activeTab === 'maintenance' && <MaintenanceReport clinics={clinics} />}
-      {activeTab === 'cloud' && <CloudBackupReport clinics={clinics} />}
-      {activeTab === 'einvoice' && <EInvoiceReport clinics={clinics} />}
+      {activeTab === 'maintenance' && <MaintenanceReport clinics={filteredClinics} onClinicClick={onClinicClick} />}
+      {activeTab === 'cloud' && <CloudBackupReport clinics={filteredClinics} onClinicClick={onClinicClick} />}
+      {activeTab === 'einvoice' && <EInvoiceReport clinics={filteredClinics} onClinicClick={onClinicClick} />}
     </div>
   )
 }

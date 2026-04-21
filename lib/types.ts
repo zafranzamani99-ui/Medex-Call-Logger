@@ -9,6 +9,9 @@ export interface Profile {
   email: string
   role: UserRole
   is_active: boolean
+  deactivated_at: string | null
+  deactivated_by: string | null
+  deactivated_by_name: string | null
   created_at: string
 }
 
@@ -455,6 +458,7 @@ export interface LicenseKeyEntry {
   field_key: string
   field_value: string | null
   display_order: number
+  is_sensitive: boolean
   updated_by: string | null
   updated_by_name: string | null
   created_at: string

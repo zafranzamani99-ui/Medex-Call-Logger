@@ -59,6 +59,11 @@ const SYSTEM_FIELDS = new Set([
   'updated_at', 'last_updated_by', 'last_updated_by_name', 'id', 'clinic_code', 'custom_data',
 ])
 
+// Key fields shown for INSERT/DELETE entries — everything else hidden behind "Show all".
+const KEY_SNAPSHOT_FIELDS = [
+  'clinic_name', 'clinic_phone', 'state', 'product_type', 'mtn_expiry', 'renewal_status',
+]
+
 interface AuditEntry {
   id: string
   action: 'INSERT' | 'UPDATE' | 'DELETE'
@@ -79,6 +84,38 @@ function formatValue(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—'
   if (typeof v === 'boolean') return v ? 'Yes' : 'No'
   return String(v)
+}
+
+// Extract displayable fields from a snapshot — used for INSERT (new_data) or DELETE (old_data).
+// Returns key fields first, then all other non-system fields with a value.
+function snapshotFields(data: Record<string, unknown> | null): { key: FieldChange[]; extra: FieldChange[] } {
+  if (!data) return { key: [], extra: [] }
+  const key: FieldChange[] = []
+  const extra: FieldChange[] = []
+  for (const k of KEY_SNAPSHOT_FIELDS) {
+    const v = data[k]
+    if (v === null || v === undefined || v === '') continue
+    key.push({
+      field: k,
+      label: FIELD_LABELS[k] || k,
+      oldValue: '',
+      newValue: formatValue(v),
+    })
+  }
+  const keySet = new Set(KEY_SNAPSHOT_FIELDS)
+  for (const k of Object.keys(data)) {
+    if (SYSTEM_FIELDS.has(k) || keySet.has(k)) continue
+    const v = data[k]
+    if (v === null || v === undefined || v === '') continue
+    if (typeof v === 'boolean' && !v) continue // skip "No" flags to reduce noise
+    extra.push({
+      field: k,
+      label: FIELD_LABELS[k] || k.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+      oldValue: '',
+      newValue: formatValue(v),
+    })
+  }
+  return { key, extra }
 }
 
 function diffAuditEntry(entry: AuditEntry): FieldChange[] {
@@ -116,10 +153,22 @@ function EditableField({ label, value, onSave, mono, masked }: {
   mono?: boolean
   masked?: boolean
 }) {
+  const { toast } = useToast()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value || '')
   const [revealed, setRevealed] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!value) return
+    try {
+      await navigator.clipboard.writeText(value)
+      toast(`${label} copied`, 'success')
+    } catch {
+      toast('Copy failed', 'error')
+    }
+  }
 
   useEffect(() => { setDraft(value || '') }, [value])
   useEffect(() => { if (editing) inputRef.current?.focus() }, [editing])
@@ -176,18 +225,35 @@ function EditableField({ label, value, onSave, mono, masked }: {
             </svg>
           </button>
         )}
-        <svg className="size-3 text-text-muted opacity-0 group-hover:opacity-100 transition-opacity ml-auto flex-shrink-0" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
-        </svg>
+        <div className="ml-auto flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {value && (
+            <button
+              onClick={handleCopy}
+              className="text-text-muted hover:text-accent transition-colors p-0.5"
+              aria-label={`Copy ${label}`}
+              title={`Copy ${label}`}
+            >
+              <svg className="size-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+              </svg>
+            </button>
+          )}
+          <svg className="size-3 text-text-muted" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z" />
+          </svg>
+        </div>
       </div>
     </div>
   )
 }
 
+// Regex heuristic for auto-marking new keys as sensitive.
+const SENSITIVE_KEY_RE = /password|pwd|^pw$|secret|token|api[_ -]?key/i
+
 // License Key row — displays key + value with inline edit and copy
 function LicenseKeyRow({ entry, onUpdate, onDelete, onCopy }: {
   entry: LicenseKeyEntry
-  onUpdate: (patch: Partial<Pick<LicenseKeyEntry, 'field_key' | 'field_value'>>) => void
+  onUpdate: (patch: Partial<Pick<LicenseKeyEntry, 'field_key' | 'field_value' | 'is_sensitive'>>) => void
   onDelete: () => void
   onCopy: (value: string) => void
 }) {
@@ -195,6 +261,7 @@ function LicenseKeyRow({ entry, onUpdate, onDelete, onCopy }: {
   const [editingValue, setEditingValue] = useState(false)
   const [keyDraft, setKeyDraft] = useState(entry.field_key)
   const [valueDraft, setValueDraft] = useState(entry.field_value || '')
+  const [revealed, setRevealed] = useState(false)
 
   useEffect(() => { setKeyDraft(entry.field_key) }, [entry.field_key])
   useEffect(() => { setValueDraft(entry.field_value || '') }, [entry.field_value])
@@ -237,7 +304,7 @@ function LicenseKeyRow({ entry, onUpdate, onDelete, onCopy }: {
       </div>
 
       {/* Value */}
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0 flex items-center gap-1">
         {editingValue ? (
           <input
             autoFocus
@@ -250,16 +317,49 @@ function LicenseKeyRow({ entry, onUpdate, onDelete, onCopy }: {
         ) : (
           <button
             onClick={() => setEditingValue(true)}
-            className={`w-full text-left text-[12px] font-mono truncate px-1.5 py-0.5 rounded hover:bg-surface-inset transition-colors cursor-pointer ${entry.field_value ? 'text-text-primary' : 'text-text-muted italic'}`}
+            className={`flex-1 text-left text-[12px] font-mono truncate px-1.5 py-0.5 rounded hover:bg-surface-inset transition-colors cursor-pointer ${entry.field_value ? 'text-text-primary' : 'text-text-muted italic'}`}
             title="Click to edit"
           >
-            {entry.field_value || '—'}
+            {!entry.field_value
+              ? '—'
+              : entry.is_sensitive && !revealed
+                ? '••••••••'
+                : entry.field_value}
+          </button>
+        )}
+        {entry.field_value && entry.is_sensitive && !editingValue && (
+          <button
+            onClick={() => setRevealed(v => !v)}
+            className="p-0.5 text-text-muted hover:text-accent transition-colors flex-shrink-0"
+            aria-label={revealed ? 'Hide' : 'Reveal'}
+            title={revealed ? 'Hide' : 'Reveal'}
+          >
+            <svg className="size-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              {revealed ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" />
+              ) : (
+                <>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </>
+              )}
+            </svg>
           </button>
         )}
       </div>
 
       {/* Actions */}
       <div className="flex items-center gap-0.5 flex-shrink-0 opacity-0 group-hover/lk:opacity-100 transition-opacity">
+        <button
+          onClick={() => onUpdate({ is_sensitive: !entry.is_sensitive })}
+          className={`p-1 transition-colors ${entry.is_sensitive ? 'text-amber-400 hover:text-amber-300' : 'text-text-muted hover:text-amber-400'}`}
+          aria-label={entry.is_sensitive ? 'Mark not sensitive' : 'Mark sensitive'}
+          title={entry.is_sensitive ? 'Sensitive — click to unmark' : 'Mark as sensitive'}
+        >
+          <svg className="size-3.5" fill={entry.is_sensitive ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 15v2m0 0v2m0-2h2m-2 0H10m8-7V7a6 6 0 10-12 0v3m11 11H6a2 2 0 01-2-2v-8a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2z" />
+          </svg>
+        </button>
         {entry.field_value && (
           <button
             onClick={() => onCopy(entry.field_value || '')}
@@ -325,6 +425,8 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
   const [historyEntries, setHistoryEntries] = useState<AuditEntry[]>([])
   const [historyLoaded, setHistoryLoaded] = useState(false)
   const [historyCount, setHistoryCount] = useState<number | null>(null)
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false)
+  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
 
   // Delete confirmation (Phase 1.2)
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
@@ -446,10 +548,37 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
     setHistoryLoading(false)
   }, [clinic, historyLoaded, supabase])
 
+  // Phase A.1 — append the next 50 entries
+  const loadMoreHistory = useCallback(async () => {
+    if (!clinic || historyLoadingMore) return
+    setHistoryLoadingMore(true)
+    const offset = historyEntries.length
+    const { data } = await supabase
+      .from('audit_log')
+      .select('id, action, changed_by, old_data, new_data, created_at')
+      .eq('table_name', 'clinics')
+      .eq('record_id', clinic.id)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + 49)
+    if (data && data.length > 0) {
+      setHistoryEntries(prev => [...prev, ...(data as AuditEntry[])])
+    }
+    setHistoryLoadingMore(false)
+  }, [clinic, historyEntries.length, historyLoadingMore, supabase])
+
   const toggleHistory = () => {
     const next = !historyOpen
     setHistoryOpen(next)
     if (next && !historyLoaded) loadHistory()
+  }
+
+  const toggleEntryExpanded = (id: string) => {
+    setExpandedEntries(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   // Phase 1.2 — load dependency counts when delete modal opens
@@ -496,6 +625,8 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
     const key = lkNewKey.trim()
     const value = lkNewValue.trim()
     if (!key) return
+    // Auto-flag keys that look like credentials.
+    const isSensitive = SENSITIVE_KEY_RE.test(key)
     const { data, error } = await supabase
       .from('license_key_data')
       .insert({
@@ -504,6 +635,7 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
         field_key: key,
         field_value: value || null,
         display_order: lkEntries.length,
+        is_sensitive: isSensitive,
         updated_by: userId || null,
         updated_by_name: userName || null,
       })
@@ -520,7 +652,7 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
     setLkAddingKey(false)
   }
 
-  const updateLicenseKey = async (id: string, patch: Partial<Pick<LicenseKeyEntry, 'field_key' | 'field_value'>>) => {
+  const updateLicenseKey = async (id: string, patch: Partial<Pick<LicenseKeyEntry, 'field_key' | 'field_value' | 'is_sensitive'>>) => {
     const { error } = await supabase
       .from('license_key_data')
       .update({
@@ -561,6 +693,30 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
       ...lkEntries.map(e => `${e.field_key}: ${e.field_value || ''}`),
     ]
     copyToClipboard(lines.join('\n'), 'All license keys')
+  }
+
+  // Phase C.8 — Export LK entries to Excel
+  const exportLicenseKeys = async () => {
+    if (!clinic || lkEntries.length === 0) return
+    const XLSX = await import('xlsx')
+    const headers = ['Key', 'Value', 'Sensitive', 'Updated By', 'Updated At']
+    const rows = lkEntries.map(e => [
+      e.field_key,
+      e.field_value || '',
+      e.is_sensitive ? 'Yes' : 'No',
+      e.updated_by_name || '',
+      e.updated_at ? format(new Date(e.updated_at), 'yyyy-MM-dd HH:mm') : '',
+    ])
+    const ws = XLSX.utils.aoa_to_sheet([
+      [`License Keys — ${clinic.clinic_code} ${clinic.clinic_name}`],
+      [],
+      headers,
+      ...rows,
+    ])
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'License Keys')
+    XLSX.writeFile(wb, `lk-${clinic.clinic_code}-${new Date().toISOString().slice(0, 10)}.xlsx`)
+    toast('License keys exported', 'success')
   }
 
   const handleDelete = async () => {
@@ -935,6 +1091,16 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
                         </svg>
                         Copy all
                       </button>
+                      <span className="text-text-muted">·</span>
+                      <button
+                        onClick={exportLicenseKeys}
+                        className="text-[12px] text-text-tertiary hover:text-text-primary flex items-center gap-1 transition-colors"
+                      >
+                        <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                        </svg>
+                        Export Excel
+                      </button>
                     </>
                   )}
                 </div>
@@ -970,11 +1136,20 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
                   <p className="text-[12px] text-text-muted">No changes recorded yet.</p>
                 )}
                 {historyEntries.map(entry => {
-                  const changes = diffAuditEntry(entry)
                   const isInsert = entry.action === 'INSERT'
                   const isDelete = entry.action === 'DELETE'
                   const dotColor = isInsert ? 'bg-emerald-400/70' : isDelete ? 'bg-red-400/70' : 'bg-blue-400/70'
                   const actionLabel = isInsert ? 'Created' : isDelete ? 'Deleted' : null
+                  const isExpanded = expandedEntries.has(entry.id)
+
+                  // UPDATE: diff old→new. INSERT/DELETE: snapshot fields from new_data/old_data.
+                  const changes = diffAuditEntry(entry)
+                  const snapshot = isInsert
+                    ? snapshotFields(entry.new_data)
+                    : isDelete
+                      ? snapshotFields(entry.old_data)
+                      : { key: [], extra: [] }
+
                   return (
                     <div key={entry.id} className="flex items-start gap-2 text-[12px]">
                       <div className={`size-1.5 rounded-full flex-shrink-0 mt-1.5 ${dotColor}`} />
@@ -987,6 +1162,8 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
                           <span className="text-text-secondary">{toProperCase(entry.changed_by)}</span>
                         </div>
                         {actionLabel && <p className="text-text-muted mt-0.5">{actionLabel}</p>}
+
+                        {/* UPDATE: field-level diff */}
                         {changes.length > 0 && (
                           <ul className="mt-1 space-y-0.5">
                             {changes.map(c => (
@@ -999,6 +1176,39 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
                             ))}
                           </ul>
                         )}
+
+                        {/* INSERT/DELETE: snapshot fields */}
+                        {(isInsert || isDelete) && (snapshot.key.length > 0 || snapshot.extra.length > 0) && (
+                          <div className="mt-1">
+                            <ul className="space-y-0.5">
+                              {snapshot.key.map(c => (
+                                <li key={c.field} className="text-text-muted">
+                                  <span className="text-text-secondary">{c.label}:</span>{' '}
+                                  <span className="text-text-primary" title={c.newValue}>
+                                    {c.newValue.length > 40 ? c.newValue.slice(0, 40) + '…' : c.newValue}
+                                  </span>
+                                </li>
+                              ))}
+                              {isExpanded && snapshot.extra.map(c => (
+                                <li key={c.field} className="text-text-muted">
+                                  <span className="text-text-secondary">{c.label}:</span>{' '}
+                                  <span className="text-text-primary" title={c.newValue}>
+                                    {c.newValue.length > 40 ? c.newValue.slice(0, 40) + '…' : c.newValue}
+                                  </span>
+                                </li>
+                              ))}
+                            </ul>
+                            {snapshot.extra.length > 0 && (
+                              <button
+                                onClick={() => toggleEntryExpanded(entry.id)}
+                                className="text-[11px] text-accent hover:underline mt-1"
+                              >
+                                {isExpanded ? 'Show less' : `Show all fields (+${snapshot.extra.length})`}
+                              </button>
+                            )}
+                          </div>
+                        )}
+
                         {!actionLabel && changes.length === 0 && (
                           <p className="text-text-muted italic mt-0.5">No visible changes</p>
                         )}
@@ -1006,9 +1216,32 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
                     </div>
                   )
                 })}
-                {historyCount !== null && historyCount > 50 && historyLoaded && (
+
+                {/* Phase A.1 — Load 50 more */}
+                {historyLoaded && historyCount !== null && historyEntries.length < historyCount && (
+                  <div className="pt-2 border-t border-border/50 flex items-center justify-center">
+                    <button
+                      onClick={loadMoreHistory}
+                      disabled={historyLoadingMore}
+                      className="text-[12px] text-accent hover:underline disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {historyLoadingMore ? (
+                        <>
+                          <svg className="size-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" className="opacity-25" />
+                            <path fill="currentColor" className="opacity-75" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                          </svg>
+                          Loading…
+                        </>
+                      ) : (
+                        <>Load {Math.min(50, historyCount - historyEntries.length)} more</>
+                      )}
+                    </button>
+                  </div>
+                )}
+                {historyLoaded && historyCount !== null && historyEntries.length >= historyCount && historyCount > 50 && (
                   <p className="text-[11px] text-text-muted text-center pt-2 border-t border-border/50">
-                    Showing most recent 50 of {historyCount} changes
+                    Showing all {historyCount} changes
                   </p>
                 )}
               </div>

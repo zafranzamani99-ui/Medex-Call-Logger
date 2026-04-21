@@ -19,6 +19,8 @@ interface TeamMember {
   email: string
   role: UserRole
   is_active: boolean
+  deactivated_at: string | null
+  deactivated_by_name: string | null
   created_at: string
 }
 
@@ -63,7 +65,7 @@ export default function SettingsPage() {
       supabase.from('profiles').select('display_name, role').eq('id', session.user.id).single(),
       supabase.from('clinics').select('*', { count: 'exact', head: true }),
       supabase.from('clinics').select('updated_at').order('updated_at', { ascending: false }).limit(1),
-      supabase.from('profiles').select('id, display_name, email, role, is_active, created_at').order('created_at'),
+      supabase.from('profiles').select('id, display_name, email, role, is_active, deactivated_at, deactivated_by_name, created_at').order('created_at'),
     ])
 
     if (profileRes.data) {
@@ -111,13 +113,17 @@ export default function SettingsPage() {
       return
     }
     setUpdatingActive(member.id)
+    // Capture when/who — cleared on reactivate so the field reflects current state only.
+    const patch = nextActive
+      ? { is_active: true, deactivated_at: null, deactivated_by: null, deactivated_by_name: null }
+      : { is_active: false, deactivated_at: new Date().toISOString(), deactivated_by: userId, deactivated_by_name: originalName || null }
     const { error } = await supabase
       .from('profiles')
-      .update({ is_active: nextActive })
+      .update(patch)
       .eq('id', member.id)
 
     if (!error) {
-      setTeamMembers(prev => prev.map(m => m.id === member.id ? { ...m, is_active: nextActive } : m))
+      setTeamMembers(prev => prev.map(m => m.id === member.id ? { ...m, ...patch } : m))
       toast(nextActive ? `${label} reactivated` : `${label} deactivated`)
     } else {
       toast('Failed to update status', 'error')
@@ -333,6 +339,12 @@ export default function SettingsPage() {
                   )}
                 </div>
                 <p className="text-[11px] text-text-tertiary truncate">{member.email}</p>
+                {!member.is_active && member.deactivated_at && (
+                  <p className="text-[10px] text-text-muted mt-0.5">
+                    Deactivated {new Date(member.deactivated_at).toLocaleDateString()}
+                    {member.deactivated_by_name ? ` by ${toProperCase(member.deactivated_by_name)}` : ''}
+                  </p>
+                )}
               </div>
               <div className="shrink-0 flex items-center gap-2">
                 {userRole === 'admin' && member.id !== userId ? (

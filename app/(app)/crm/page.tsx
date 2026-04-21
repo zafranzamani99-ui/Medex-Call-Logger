@@ -126,7 +126,7 @@ export default function CrmPage() {
         </>
       )}
 
-      {activeTab === 'reports' && <CrmReports />}
+      {activeTab === 'reports' && <CrmReports onClinicClick={setSelectedCode} />}
 
       {/* CRM Profile Panel */}
       {selectedCode && (

@@ -127,6 +127,7 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [bulkDeleting, setBulkDeleting] = useState(false)
+  const [bulkDependencies, setBulkDependencies] = useState<{ openTickets: number; activeSchedules: number; draftJobSheets: number } | null>(null)
   const lastSelectedIdxRef = useRef<number | null>(null)
 
   // Custom columns from DB (team-shared)
@@ -250,6 +251,33 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
     }
     init()
   }, [supabase, refreshKey])
+
+  // Phase C.6 — realtime subscription on clinics table.
+  // Keeps the table fresh when other admins create/update/delete while this tab is open.
+  // Own edits are optimistic; realtime is belt-and-braces for multi-admin concurrency.
+  useEffect(() => {
+    const channel = supabase
+      .channel('crm-clinics')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clinics' },
+        (payload: { eventType: 'INSERT' | 'UPDATE' | 'DELETE'; new: Record<string, unknown>; old: Record<string, unknown> }) => {
+          if (payload.eventType === 'INSERT') {
+            const row = payload.new as unknown as Clinic
+            setClinics(prev => prev.some(c => c.id === row.id) ? prev : [...prev, row])
+          } else if (payload.eventType === 'UPDATE') {
+            const row = payload.new as unknown as Clinic
+            setClinics(prev => prev.map(c => c.id === row.id ? row : c))
+          } else if (payload.eventType === 'DELETE') {
+            const oldRow = payload.old as Partial<Clinic>
+            if (!oldRow.id) return
+            setClinics(prev => prev.filter(c => c.id !== oldRow.id))
+          }
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [supabase])
 
   // Close popover on outside click
   useEffect(() => {
@@ -463,6 +491,27 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
     () => clinics.filter(c => selectedIds.has(c.id)),
     [clinics, selectedIds]
   )
+
+  // Phase A.3 — aggregate dependency counts across selected clinics
+  const openBulkDeleteModal = useCallback(async () => {
+    if (selectedClinics.length === 0) return
+    setBulkDeleteOpen(true)
+    setBulkDependencies(null)
+    const codes = selectedClinics.map(c => c.clinic_code)
+    const [ticketsRes, schedulesRes, jobSheetsRes] = await Promise.all([
+      supabase.from('tickets').select('id', { count: 'exact', head: true })
+        .in('clinic_code', codes).neq('status', 'Resolved'),
+      supabase.from('schedules').select('id', { count: 'exact', head: true })
+        .in('clinic_code', codes).in('status', ['scheduled', 'in_progress']),
+      supabase.from('job_sheets').select('id', { count: 'exact', head: true })
+        .in('clinic_code', codes).eq('status', 'draft'),
+    ])
+    setBulkDependencies({
+      openTickets: ticketsRes.count || 0,
+      activeSchedules: schedulesRes.count || 0,
+      draftJobSheets: jobSheetsRes.count || 0,
+    })
+  }, [selectedClinics, supabase])
 
   const handleBulkDelete = async () => {
     if (selectedClinics.length === 0) return
@@ -1066,6 +1115,40 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
         </div>
       )}
 
+      {/* Phase B.2 — Select-all-matching banner */}
+      {isAdmin && (() => {
+        const visibleRows = table.getRowModel().rows
+        const filteredRows = table.getFilteredRowModel().rows
+        const visibleIds = visibleRows.map(r => r.original.id)
+        const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
+        const hasMoreMatching = filteredRows.length > visibleRows.length
+        const allMatchingSelected = filteredRows.length > 0 && filteredRows.every(r => selectedIds.has(r.original.id))
+        if (!allVisibleSelected || !hasMoreMatching || allMatchingSelected) return null
+        const exceedsCap = filteredRows.length > BULK_DELETE_MAX
+        return (
+          <div className="mb-2 px-3 py-2 rounded-lg bg-accent/5 border border-accent/20 text-[12px] text-text-secondary flex items-center gap-2 flex-wrap">
+            <svg className="size-3.5 text-accent flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            <span>All {visibleRows.length} on this page selected.</span>
+            <button
+              onClick={() => {
+                if (exceedsCap) return
+                setSelectedIds(new Set(filteredRows.map(r => r.original.id)))
+              }}
+              disabled={exceedsCap}
+              title={exceedsCap ? `Cap is ${BULK_DELETE_MAX} — narrow your filter first` : undefined}
+              className={`font-medium ${exceedsCap ? 'text-text-muted cursor-not-allowed' : 'text-accent hover:underline'}`}
+            >
+              Select all {filteredRows.length} matching?
+            </button>
+            {exceedsCap && (
+              <span className="text-[11px] text-text-muted">(max {BULK_DELETE_MAX})</span>
+            )}
+          </div>
+        )
+      })()}
+
       {/* ─ Table ─ */}
       {loading ? (
         <div className="space-y-1">
@@ -1339,7 +1422,7 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
           <Button
             variant="danger"
             size="sm"
-            onClick={() => setBulkDeleteOpen(true)}
+            onClick={openBulkDeleteModal}
             disabled={selectedIds.size > BULK_DELETE_MAX}
             title={selectedIds.size > BULK_DELETE_MAX ? `Max ${BULK_DELETE_MAX} at a time — use CSV upload for larger deletions` : undefined}
           >
@@ -1373,6 +1456,22 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
               )}
             </ul>
           </div>
+
+          {bulkDependencies === null && (
+            <p className="text-[12px] text-text-muted">Checking dependencies…</p>
+          )}
+
+          {bulkDependencies && (bulkDependencies.openTickets > 0 || bulkDependencies.activeSchedules > 0 || bulkDependencies.draftJobSheets > 0) && (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-[12px] text-amber-300">
+              <p className="font-semibold mb-1">⚠ These clinics have active references:</p>
+              <ul className="space-y-0.5 text-amber-200/90">
+                {bulkDependencies.openTickets > 0 && <li>· {bulkDependencies.openTickets} open ticket{bulkDependencies.openTickets !== 1 ? 's' : ''}</li>}
+                {bulkDependencies.activeSchedules > 0 && <li>· {bulkDependencies.activeSchedules} active schedule{bulkDependencies.activeSchedules !== 1 ? 's' : ''}</li>}
+                {bulkDependencies.draftJobSheets > 0 && <li>· {bulkDependencies.draftJobSheets} draft job sheet{bulkDependencies.draftJobSheets !== 1 ? 's' : ''}</li>}
+              </ul>
+              <p className="mt-2 text-amber-200/80">Consider resolving these first.</p>
+            </div>
+          )}
 
           <p className="text-[12px] text-text-tertiary">
             Existing tickets, schedules, and job sheets referencing these clinics will keep their snapshot — they will not be affected.
