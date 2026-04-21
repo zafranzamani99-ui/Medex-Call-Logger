@@ -425,4 +425,21 @@ input[type="date"]:hover, input[type="date"]:focus, input[type="date"]:active {
   .pb-20, .pb-24 {
     padding-bottom: 0 !important;
   }
+
+  /* Report print preview — when active, hide everything except the print root. */
+  body.printing-report > *:not(.print-portal) {
+    display: none !important;
+  }
+  .print-portal {
+    position: static !important;
+    background: #fff !important;
+    color: #000 !important;
+    padding: 16mm !important;
+    box-shadow: none !important;
+  }
+  .print-portal .no-print { display: none !important; }
+  .print-portal table { font-size: 10pt !important; width: 100% !important; }
+  .print-portal thead { display: table-header-group !important; }
+  .print-portal tr { page-break-inside: avoid !important; }
+  .print-portal .report-overflow { max-height: none !important; overflow: visible !important; }
 }

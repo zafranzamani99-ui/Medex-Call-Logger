@@ -140,6 +140,7 @@ export interface Ticket {
 
   // Caller info (NOT from CRM)
   caller_tel: string | null
+  clinic_wa: string | null
   pic: string | null
 
   // Issue
@@ -264,6 +265,7 @@ export interface NewTicketInput {
   state: string | null
   registered_contact: string | null
   caller_tel: string | null
+  clinic_wa: string | null
   pic: string | null
   issue_category: string | null
   issue_type: IssueType
@@ -318,7 +320,7 @@ export interface NewTimelineInput {
 }
 
 // Schedule types — appointment management
-export type ScheduleType = 'MTN' | 'Server Migration' | 'E-INV + SST' | 'WhatsApp' | 'Training' | 'Others'
+export type ScheduleType = 'ISP' | 'MTN' | 'Server Migration' | 'E-INV + SST' | 'WhatsApp' | 'Training' | 'Others'
 export type ScheduleStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'rescheduled' | 'no_answer'
 export type ScheduleMode = 'Remote' | 'Onsite'
 

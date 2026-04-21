@@ -1,18 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import CrmDataTable from '@/components/crm/CrmDataTable'
 import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import NewClinicModal from '@/components/crm/NewClinicModal'
-import CrmReports from '@/components/crm/CrmReports'
+import ReportsView from '@/components/reports/ReportsView'
 import Button from '@/components/ui/Button'
 
 type MainTab = 'clinics' | 'reports'
 
-// WHY: Dedicated CRM page — interactive spreadsheet for browsing/editing all clinic data.
-// Uses @tanstack/react-table for an Airtable-like experience with inline editing,
-// sorting, filtering, column visibility, and pagination.
+// WHY: Dedicated CRM page — interactive spreadsheet for browsing/editing all clinic data,
+// plus a Reports tab for MEDEXCRM-style maintenance / cloud / e-invoice tracking.
 
 export default function CrmPage() {
   const supabase = createClient()
@@ -126,7 +125,11 @@ export default function CrmPage() {
         </>
       )}
 
-      {activeTab === 'reports' && <CrmReports onClinicClick={setSelectedCode} />}
+      {activeTab === 'reports' && (
+        <Suspense fallback={<div className="h-96 skeleton rounded" />}>
+          <ReportsView onClinicClick={setSelectedCode} />
+        </Suspense>
+      )}
 
       {/* CRM Profile Panel */}
       {selectedCode && (

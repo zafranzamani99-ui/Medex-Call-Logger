@@ -198,6 +198,7 @@ export function formatWorkDurationLive(totalSeconds: number): string {
 
 // Schedule type options with duration estimates
 export const SCHEDULE_TYPES: { value: string; label: string; duration: string }[] = [
+  { value: 'ISP', label: 'ISP (First-time Installation)', duration: 'Varies' },
   { value: 'MTN', label: 'MTN (Maintenance)', duration: '~1 hour' },
   { value: 'Server Migration', label: 'Server Migration', duration: '~1.5 to 2 hours' },
   { value: 'E-INV + SST', label: 'E-INV + SST', duration: '~1 hour' },
@@ -207,6 +208,7 @@ export const SCHEDULE_TYPES: { value: string; label: string; duration: string }[
 ]
 
 export const SCHEDULE_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
+  'ISP':              { bg: 'bg-indigo-500/20', text: 'text-indigo-400' },
   'MTN':              { bg: 'bg-cyan-500/20', text: 'text-cyan-400' },
   'Server Migration': { bg: 'bg-violet-500/20', text: 'text-violet-400' },
   'E-INV + SST':      { bg: 'bg-rose-500/20', text: 'text-rose-400' },

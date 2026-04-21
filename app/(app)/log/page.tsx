@@ -424,7 +424,6 @@ export default function LogCallPage() {
     if (!myResponse.trim()) errors.myResponse = true
     if (!callDuration) errors.duration = true
     if (!status) errors.status = true
-    if (status === 'Escalated' && !jiraLink.trim()) errors.jiraLink = true
     if (status === 'Escalated to Admin' && !adminMessage.trim()) errors.adminMessage = true
 
     if (Object.keys(errors).length > 0) {
@@ -437,7 +436,6 @@ export default function LogCallPage() {
       if (errors.myResponse) missing.push('my response')
       if (errors.duration) missing.push('duration')
       if (errors.status) missing.push('status')
-      if (errors.jiraLink) missing.push('Jira link')
       if (errors.adminMessage) missing.push('admin message')
       setError(`Required: ${missing.join(', ')}`)
 
@@ -483,6 +481,7 @@ export default function LogCallPage() {
       state: selectedClinic?.state || null,
       registered_contact: selectedClinic?.registered_contact || null,
       caller_tel: callerTel || null,
+      clinic_wa: clinicWa.trim() || null,
       pic: pic || null,
       call_duration: callDuration,
       issue_category: issueCategory,
@@ -496,7 +495,7 @@ export default function LogCallPage() {
       internal_timeline: internalTimeline.trim() || null,
       status,
       need_team_check: needTeamCheck,
-      jira_link: status === 'Escalated' ? jiraLink.trim() : null,
+      jira_link: status === 'Escalated' ? (jiraLink.trim() || null) : null,
       admin_message: status === 'Escalated to Admin' ? adminMessage.trim() : null,
       attachment_urls: attachments.length > 0 ? attachments : [],
       created_at: createdAt,
@@ -1292,10 +1291,10 @@ export default function LogCallPage() {
               />
             </div>
 
-            {/* Jira Link */}
+            {/* Jira Link — optional */}
             {status === 'Escalated' && (
               <div ref={jiraLinkRef}>
-                <Label required>Jira Link</Label>
+                <Label>Jira Link</Label>
                 <Input
                   type="url"
                   value={jiraLink}
