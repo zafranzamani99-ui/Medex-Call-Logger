@@ -6,6 +6,15 @@ import { createClient } from '@/lib/supabase/client'
 import type { Clinic } from '@/lib/types'
 import Button from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
+import {
+  HorizontalDndProvider,
+  SortableHeader,
+  PlainResizeProvider,
+  PlainResizeHandle,
+  PlainResizeIndicator,
+  measureAutoFitWidth,
+  arrayMove,
+} from '@/components/table/spreadsheet-kit'
 
 // WHY: Reports tab — full MEDEXCRM parity PLUS our additions:
 //   MEDEXCRM features replicated:
@@ -682,23 +691,92 @@ function RowActions({ phone, wa }: { phone?: string | null; wa?: string | null }
 // ─ Table primitive ──────────────────────────────────────────────
 
 const REPORT_PAGE_SIZE = 10
+const REPORT_DEFAULT_COL_WIDTH = 140
+const REPORT_STORAGE_PREFIX = 'report-table'
 
-function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMessage = 'No records' }: {
+function loadReportPref<T>(storageKey: string, suffix: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback
+  try {
+    const raw = localStorage.getItem(`${REPORT_STORAGE_PREFIX}:${storageKey}:${suffix}`)
+    return raw ? JSON.parse(raw) as T : fallback
+  } catch { return fallback }
+}
+function saveReportPref(storageKey: string, suffix: string, value: unknown) {
+  if (typeof window === 'undefined') return
+  try { localStorage.setItem(`${REPORT_STORAGE_PREFIX}:${storageKey}:${suffix}`, JSON.stringify(value)) } catch { /* noop */ }
+}
+
+function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMessage = 'No records', storageKey, rawValues }: {
   headers: string[]
   rows: React.ReactNode[][]
   rowKeys?: string[]
   rowColours?: string[] // bg-red-500/10 etc — matches MEDEXCRM row-expiry/expired coloring
   onRowClick?: (index: number) => void
   emptyMessage?: string
+  storageKey: string // unique per sub-report — persists column widths + order
+  rawValues?: string[][] // parallel to rows — used by double-click auto-fit (canvas measureText)
 }) {
+  // Stable column IDs for dnd-kit + width-map keys. `${storageKey}:${index}`
+  // so different reports don't share state.
+  const columnIds = useMemo(
+    () => headers.map((_, i) => `${storageKey}:${i}`),
+    [headers, storageKey]
+  )
+
+  const [widths, setWidths] = useState<Record<string, number>>(() =>
+    loadReportPref<Record<string, number>>(storageKey, 'widths', {})
+  )
+  const [order, setOrder] = useState<string[]>(() => {
+    const saved = loadReportPref<string[]>(storageKey, 'order', [])
+    return saved.length === headers.length ? saved : columnIds
+  })
+
+  // If the caller changes the headers length, reset order to defaults.
+  useEffect(() => {
+    if (order.length !== columnIds.length || !order.every(id => columnIds.includes(id))) {
+      setOrder(columnIds)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [columnIds.join('|')])
+
+  useEffect(() => { saveReportPref(storageKey, 'widths', widths) }, [widths, storageKey])
+  useEffect(() => { saveReportPref(storageKey, 'order', order) }, [order, storageKey])
+
+  const getWidth = useCallback((id: string) => widths[id] ?? REPORT_DEFAULT_COL_WIDTH, [widths])
+  const setWidth = useCallback((id: string, w: number) => {
+    setWidths(prev => ({ ...prev, [id]: w }))
+  }, [])
+
+  const handleReorder = useCallback((fromId: string, toId: string) => {
+    setOrder(prev => {
+      const from = prev.indexOf(fromId)
+      const to = prev.indexOf(toId)
+      if (from < 0 || to < 0) return prev
+      return arrayMove(prev, from, to)
+    })
+  }, [])
+
+  // Auto-fit a column to content using canvas measureText (double-click edge).
+  const autoFit = useCallback((id: string) => {
+    const origIdx = columnIds.indexOf(id)
+    if (origIdx < 0) return
+    const values: string[] = []
+    if (rawValues) {
+      for (const row of rawValues) values.push(row[origIdx] || '')
+    }
+    const width = measureAutoFitWidth(values, {
+      headerText: headers[origIdx],
+      minWidth: 80,
+      maxWidth: 500,
+    })
+    setWidth(id, width)
+  }, [columnIds, headers, rawValues, setWidth])
+
+  // Pagination
   const [page, setPage] = useState(0)
   const total = rows.length
   const pageCount = Math.max(1, Math.ceil(total / REPORT_PAGE_SIZE))
-
-  // Clamp page if rows shrink (filter applied while on a later page).
-  useEffect(() => {
-    if (page > pageCount - 1) setPage(0)
-  }, [pageCount, page])
+  useEffect(() => { if (page > pageCount - 1) setPage(0) }, [pageCount, page])
 
   const startIdx = page * REPORT_PAGE_SIZE
   const endIdx = Math.min(startIdx + REPORT_PAGE_SIZE, total)
@@ -706,45 +784,84 @@ function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMess
   const visibleColours = rowColours?.slice(startIdx, endIdx)
   const visibleKeys = rowKeys?.slice(startIdx, endIdx)
 
+  // Map order → original index (reordering just permutes original indices).
+  const orderedIndices = useMemo(
+    () => order.map(id => columnIds.indexOf(id)).filter(i => i >= 0),
+    [order, columnIds]
+  )
+
+  // Total computed table width (header widths summed)
+  const tableWidth = orderedIndices.reduce((sum, i) => sum + getWidth(columnIds[i]), 0)
+
+  const scrollRef = useRef<HTMLDivElement>(null)
+
   return (
     <div className="border border-border rounded-lg overflow-hidden">
-      <div className="overflow-x-auto report-overflow">
-        <table className="w-full text-left text-[13px]">
-          <thead>
-            <tr className="bg-surface-raised">
-              {headers.map(h => (
-                <th key={h} className="bg-surface-raised px-3 py-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider border-b border-border whitespace-nowrap">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {total === 0 && (
-              <tr>
-                <td colSpan={headers.length} className="px-4 py-12 text-center text-text-muted">
-                  {emptyMessage}
-                </td>
-              </tr>
-            )}
-            {visibleRows.map((row, i) => {
-              const bg = visibleColours?.[i] || ''
-              const absoluteIndex = startIdx + i
-              return (
-                <tr
-                  key={visibleKeys?.[i] ?? absoluteIndex}
-                  className={`hover:bg-surface-raised/50 transition-colors ${bg} ${onRowClick ? 'cursor-pointer' : ''}`}
-                  onClick={onRowClick ? () => onRowClick(absoluteIndex) : undefined}
-                >
-                  {row.map((cell, j) => (
-                    <td key={j} className="px-3 py-2">{cell}</td>
-                  ))}
+      <PlainResizeProvider widths={widths} onChangeWidth={setWidth}>
+        <div ref={scrollRef} className="overflow-x-auto relative report-overflow">
+          <HorizontalDndProvider columnIds={order} onReorder={handleReorder}>
+            <table className="text-left text-[13px]" style={{ width: tableWidth, minWidth: '100%', tableLayout: 'fixed' }}>
+              <thead>
+                <tr className="bg-surface-raised">
+                  {orderedIndices.map(origIdx => {
+                    const id = columnIds[origIdx]
+                    const width = getWidth(id)
+                    return (
+                      <SortableHeader
+                        key={id}
+                        id={id}
+                        data-col-id={id}
+                        className="relative bg-surface-raised px-3 py-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider border-b border-border whitespace-nowrap cursor-grab active:cursor-grabbing select-none"
+                        style={{ width, minWidth: width, maxWidth: width }}
+                      >
+                        <span className="inline-block truncate pr-2" style={{ maxWidth: width - 16 }}>
+                          {headers[origIdx]}
+                        </span>
+                        <PlainResizeHandle columnId={id} currentWidth={width} onAutoFit={rawValues ? () => autoFit(id) : undefined} />
+                      </SortableHeader>
+                    )
+                  })}
                 </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {total === 0 && (
+                  <tr>
+                    <td colSpan={headers.length} className="px-4 py-12 text-center text-text-muted">
+                      {emptyMessage}
+                    </td>
+                  </tr>
+                )}
+                {visibleRows.map((row, i) => {
+                  const bg = visibleColours?.[i] || ''
+                  const absoluteIndex = startIdx + i
+                  return (
+                    <tr
+                      key={visibleKeys?.[i] ?? absoluteIndex}
+                      className={`hover:bg-surface-raised/50 transition-colors ${bg} ${onRowClick ? 'cursor-pointer' : ''}`}
+                      onClick={onRowClick ? () => onRowClick(absoluteIndex) : undefined}
+                    >
+                      {orderedIndices.map(origIdx => {
+                        const id = columnIds[origIdx]
+                        const width = getWidth(id)
+                        return (
+                          <td
+                            key={origIdx}
+                            className="px-3 py-2 overflow-hidden"
+                            style={{ width, minWidth: width, maxWidth: width }}
+                          >
+                            <div className="truncate">{row[origIdx]}</div>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </HorizontalDndProvider>
+          <PlainResizeIndicator containerRef={scrollRef} />
+        </div>
+      </PlainResizeProvider>
 
       {total > 0 && (
         <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-border bg-surface-raised/40 text-[12px]">
@@ -1044,10 +1161,23 @@ function MaintenanceReport({ clinics, generatedBy, onClinicClick, onCountChange,
       </div>
 
       <ReportTable
+        storageKey="maintenance"
         headers={['Acct No', 'Clinic', 'MTN Start', 'MTN End', 'Days', 'Product', 'Contact', 'Tel', 'Company', 'M1G/Dealer', 'State', '']}
         rowKeys={rows.map(r => r.id)}
         rowColours={rows.map(r => rowColourClass(r._days))}
         onRowClick={onClinicClick ? (i) => onClinicClick(rows[i].clinic_code) : undefined}
+        rawValues={rows.map(r => [
+          r.clinic_code, r.clinic_name,
+          safeDate(r.mtn_start), safeDate(r.mtn_expiry),
+          r._days === null ? '—' : String(r._days),
+          r.product || r.product_type || '—',
+          r.registered_contact || '—',
+          r.clinic_phone || r.contact_tel || '—',
+          r.company_name || '—',
+          r.m1g_dealer_case || '—',
+          r.state || '—',
+          '',
+        ])}
         rows={rows.map(r => {
           const tone = r._days === null ? 'text-text-muted'
             : r._days < 0 ? 'text-red-400'
@@ -1062,7 +1192,7 @@ function MaintenanceReport({ clinics, generatedBy, onClinicClick, onCountChange,
             <span key="p" className="text-[12px] text-text-tertiary">{r.product || r.product_type || '—'}</span>,
             <span key="ct" className="text-[12px]">{r.registered_contact || '—'}</span>,
             <span key="tl" className="font-mono text-[12px] text-text-tertiary">{r.clinic_phone || r.contact_tel || '—'}</span>,
-            <span key="co" className="text-[12px] text-text-tertiary truncate block max-w-[180px]" title={r.company_name || ''}>{r.company_name || '—'}</span>,
+            <span key="co" className="text-[12px] text-text-tertiary" title={r.company_name || ''}>{r.company_name || '—'}</span>,
             <span key="dl" className="text-[11px] text-text-muted">{r.m1g_dealer_case || '—'}</span>,
             r.state || '—',
             <RowActions key="a" phone={r.clinic_phone || r.contact_tel} wa={r.clinic_phone || r.contact_tel} />,
@@ -1286,10 +1416,24 @@ function CloudBackupReport({ clinics, generatedBy, onClinicClick, onCountChange,
       </div>
 
       <ReportTable
+        storageKey="cloud"
         headers={['Acct No', 'Clinic', 'Cloud Start', 'Cloud End', 'Days', 'Backup', 'Ext HDD', 'Contact', 'Tel', 'Company', 'M1G/Dealer', 'State', '']}
         rowKeys={rows.map(r => r.id)}
         rowColours={rows.map(r => rowColourClass(r._days))}
         onRowClick={onClinicClick ? (i) => onClinicClick(rows[i].clinic_code) : undefined}
+        rawValues={rows.map(r => [
+          r.clinic_code, r.clinic_name,
+          safeDate(r.cloud_start), safeDate(r.cloud_end),
+          r._days === null ? '—' : String(r._days),
+          r.has_backup ? 'Yes' : 'No',
+          r.has_ext_hdd ? 'Yes' : 'No',
+          r.registered_contact || '—',
+          r.clinic_phone || r.contact_tel || '—',
+          r.company_name || '—',
+          r.m1g_dealer_case || '—',
+          r.state || '—',
+          '',
+        ])}
         rows={rows.map(r => [
           <span key="c" className="font-mono text-text-tertiary">{r.clinic_code}</span>,
           r.clinic_name,
@@ -1300,7 +1444,7 @@ function CloudBackupReport({ clinics, generatedBy, onClinicClick, onCountChange,
           <span key="h" className={r.has_ext_hdd ? 'text-emerald-400' : 'text-text-muted'}>{r.has_ext_hdd ? 'Yes' : 'No'}</span>,
           <span key="ct" className="text-[12px]">{r.registered_contact || '—'}</span>,
           <span key="tl" className="font-mono text-[12px] text-text-tertiary">{r.clinic_phone || r.contact_tel || '—'}</span>,
-          <span key="co" className="text-[12px] text-text-tertiary truncate block max-w-[180px]" title={r.company_name || ''}>{r.company_name || '—'}</span>,
+          <span key="co" className="text-[12px] text-text-tertiary" title={r.company_name || ''}>{r.company_name || '—'}</span>,
           <span key="dl" className="text-[11px] text-text-muted">{r.m1g_dealer_case || '—'}</span>,
           r.state || '—',
           <RowActions key="a" phone={r.clinic_phone || r.contact_tel} wa={r.clinic_phone || r.contact_tel} />,
@@ -1510,19 +1654,32 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
       </div>
 
       <ReportTable
+        storageKey="einvoice"
         headers={['Acct No', 'Clinic', 'Status', 'SST', 'Reason', 'Contact', 'Tel', 'Email', 'Company', 'State', '']}
         rowKeys={rows.map(r => r.id)}
         onRowClick={onClinicClick ? (i) => onClinicClick(rows[i].clinic_code) : undefined}
+        rawValues={rows.map(r => [
+          r.clinic_code, r.clinic_name,
+          statusLabel(r._status),
+          r.has_sst ? 'Yes' : 'No',
+          r.einv_no_reason || '—',
+          r.registered_contact || '—',
+          r.clinic_phone || r.contact_tel || '—',
+          r.email_main || '—',
+          r.company_name || '—',
+          r.state || '—',
+          '',
+        ])}
         rows={rows.map(r => [
           <span key="c" className="font-mono text-text-tertiary">{r.clinic_code}</span>,
           r.clinic_name,
           <span key="s" className={`text-[11px] font-medium ${statusTone(r._status)}`}>{statusLabel(r._status)}</span>,
           <span key="t" className={r.has_sst ? 'text-emerald-400' : 'text-text-muted'}>{r.has_sst ? 'Yes' : 'No'}</span>,
-          <span key="rs" className="text-text-tertiary text-[12px] truncate block max-w-[220px]" title={r.einv_no_reason || ''}>{r.einv_no_reason || '—'}</span>,
+          <span key="rs" className="text-text-tertiary text-[12px]" title={r.einv_no_reason || ''}>{r.einv_no_reason || '—'}</span>,
           <span key="ct" className="text-[12px]">{r.registered_contact || '—'}</span>,
           <span key="tl" className="font-mono text-[12px] text-text-tertiary">{r.clinic_phone || r.contact_tel || '—'}</span>,
-          <span key="em" className="text-[12px] text-text-tertiary truncate block max-w-[180px]" title={r.email_main || ''}>{r.email_main || '—'}</span>,
-          <span key="co" className="text-[12px] text-text-tertiary truncate block max-w-[160px]" title={r.company_name || ''}>{r.company_name || '—'}</span>,
+          <span key="em" className="text-[12px] text-text-tertiary" title={r.email_main || ''}>{r.email_main || '—'}</span>,
+          <span key="co" className="text-[12px] text-text-tertiary" title={r.company_name || ''}>{r.company_name || '—'}</span>,
           r.state || '—',
           <RowActions key="a" phone={r.clinic_phone || r.contact_tel} wa={r.clinic_phone || r.contact_tel} />,
         ])}

@@ -21,6 +21,14 @@ import { buildColumns, DEFAULT_COLUMN_VISIBILITY, COLUMN_GROUPS } from './column
 import { ModalDialog } from '@/components/Modal'
 import Button from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
+import {
+  HorizontalDndProvider,
+  SortableHeader,
+  ResizeHandle,
+  ColumnResizeIndicator,
+  measureAutoFitWidth,
+  arrayMove,
+} from '@/components/table/spreadsheet-kit'
 
 const CHECKBOX_COL_WIDTH = 40
 const BULK_DELETE_MAX = 100
@@ -171,9 +179,8 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
   // Filter search input inside dropdowns
   const [filterSearch, setFilterSearch] = useState('')
 
-  // Drag-and-drop column reorder
-  const dragColRef = useRef<string | null>(null)
-  const dragOverColRef = useRef<string | null>(null)
+  // Scroll container ref — used to position the full-height resize indicator.
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
 
   // Column visibility popover
   const [showColMenu, setShowColMenu] = useState(false)
@@ -382,6 +389,43 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
     })
   }, [])
 
+  // Auto-fit a column to its widest visible cell value (double-click the
+  // resize handle). Uses canvas measureText under the hood for fast sizing.
+  const autoFitColumn = useCallback((colId: string) => {
+    const col = tableColumns.find(c => c.id === colId || (c as { accessorKey?: string }).accessorKey === colId)
+    const headerText = columnRenames[colId]
+      || (typeof col?.header === 'string' ? col.header : '')
+      || colId
+    const isCustom = colId.startsWith('custom_')
+    const customKey = isCustom ? colId.slice('custom_'.length) : null
+    const values = clinics.map(c => {
+      if (isCustom && customKey) {
+        return String((c.custom_data as Record<string, unknown>)?.[customKey] ?? '')
+      }
+      const v = (c as unknown as Record<string, unknown>)[colId]
+      if (v === null || v === undefined) return ''
+      if (typeof v === 'boolean') return v ? 'Yes' : 'No'
+      return String(v)
+    })
+    const width = measureAutoFitWidth(values, { headerText, minWidth: 80, maxWidth: 500 })
+    setColumnSizing(prev => ({ ...prev, [colId]: width }))
+  }, [clinics, columnRenames, tableColumns])
+
+  // Reorder columns — called by the dnd-kit drop handler. Preserves frozen
+  // columns at the start of the order (frozen headers are not draggable).
+  const handleReorder = useCallback((fromId: string, toId: string) => {
+    const current = columnOrder.length > 0
+      ? columnOrder
+      : tableColumns.map(c => (c as { id?: string; accessorKey?: string }).id
+          || (c as { accessorKey?: string }).accessorKey!)
+    const frozenIds = current.slice(0, frozenCount)
+    const sortable = current.slice(frozenCount)
+    const from = sortable.indexOf(fromId)
+    const to = sortable.indexOf(toId)
+    if (from < 0 || to < 0) return
+    setColumnOrder([...frozenIds, ...arrayMove(sortable, from, to)])
+  }, [columnOrder, tableColumns, frozenCount])
+
   // Add custom column (team-shared, DB)
   const addCustomColumn = async () => {
     const name = newColName.trim()
@@ -573,7 +617,7 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
     onColumnSizingChange: setColumnSizing,
     onColumnOrderChange: setColumnOrder,
     enableColumnResizing: true,
-    columnResizeMode: 'onChange',
+    columnResizeMode: 'onEnd',
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
@@ -1156,127 +1200,123 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
         </div>
       ) : (
         <div className="border border-border rounded-lg overflow-hidden relative">
-          <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-            <table className="w-full text-left" style={{ minWidth: '1200px' }}>
-              <thead>
-                {table.getHeaderGroups().map(headerGroup => {
-                  // Compute cumulative left offsets for frozen columns.
-                  // When the checkbox column is present, everything shifts right by its width.
-                  const leftOffsets: number[] = []
-                  let cumLeft = isAdmin ? CHECKBOX_COL_WIDTH : 0
-                  headerGroup.headers.forEach((h, idx) => {
-                    leftOffsets[idx] = cumLeft
-                    if (idx < frozenCount) cumLeft += h.getSize()
-                  })
+          <div ref={scrollContainerRef} className="overflow-auto relative" style={{ maxHeight: 'calc(100vh - 280px)' }}>
+            {(() => {
+              const headerGroup = table.getHeaderGroups()[0]
+              const sortableColumnIds = headerGroup
+                ? headerGroup.headers.slice(frozenCount).map(h => h.column.id)
+                : []
+              return (
+                <HorizontalDndProvider columnIds={sortableColumnIds} onReorder={handleReorder}>
+                  <table className="w-full text-left" style={{ minWidth: '1200px' }}>
+                    <thead>
+                      {table.getHeaderGroups().map(headerGroup => {
+                        // Compute cumulative left offsets for frozen columns.
+                        // When the checkbox column is present, everything shifts right by its width.
+                        const leftOffsets: number[] = []
+                        let cumLeft = isAdmin ? CHECKBOX_COL_WIDTH : 0
+                        headerGroup.headers.forEach((h, idx) => {
+                          leftOffsets[idx] = cumLeft
+                          if (idx < frozenCount) cumLeft += h.getSize()
+                        })
 
-                  // Current visible page rows — for select-all
-                  const visibleRows = table.getRowModel().rows
-                  const visibleIds = visibleRows.map(r => r.original.id)
-                  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
-                  const someVisibleSelected = visibleIds.some(id => selectedIds.has(id))
-
-                  return (
-                    <tr key={headerGroup.id}>
-                      {isAdmin && (
-                        <th
-                          className="sticky top-0 bg-surface-raised px-3 py-2.5 border-b border-border z-30"
-                          style={{ width: CHECKBOX_COL_WIDTH, position: 'sticky', left: 0 }}
-                        >
-                          <input
-                            type="checkbox"
-                            aria-label="Select all visible"
-                            checked={allVisibleSelected}
-                            ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected }}
-                            onChange={e => {
-                              e.stopPropagation()
-                              setSelectedIds(prev => {
-                                const next = new Set(prev)
-                                if (e.target.checked) visibleIds.forEach(id => next.add(id))
-                                else visibleIds.forEach(id => next.delete(id))
-                                return next
-                              })
-                            }}
-                            className="size-3.5 rounded border-border cursor-pointer accent-indigo-500"
-                            onClick={e => e.stopPropagation()}
-                          />
-                        </th>
-                      )}
-                      {headerGroup.headers.map((header, i) => {
-                        const isFrozen = i < frozenCount
-                        const isLastFrozen = i === frozenCount - 1
+                        // Current visible page rows — for select-all
+                        const visibleRows = table.getRowModel().rows
+                        const visibleIds = visibleRows.map(r => r.original.id)
+                        const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.has(id))
+                        const someVisibleSelected = visibleIds.some(id => selectedIds.has(id))
 
                         return (
-                          <th
-                            key={header.id}
-                            draggable={!isFrozen}
-                            onDragStart={(e) => {
-                              dragColRef.current = header.column.id
-                              e.dataTransfer.effectAllowed = 'move'
-                              ;(e.target as HTMLElement).style.opacity = '0.5'
-                            }}
-                            onDragEnd={(e) => {
-                              ;(e.target as HTMLElement).style.opacity = '1'
-                              dragColRef.current = null
-                              dragOverColRef.current = null
-                            }}
-                            onDragOver={(e) => {
-                              e.preventDefault()
-                              e.dataTransfer.dropEffect = 'move'
-                              dragOverColRef.current = header.column.id
-                            }}
-                            onDrop={(e) => {
-                              e.preventDefault()
-                              const from = dragColRef.current
-                              const to = header.column.id
-                              if (!from || from === to) return
-                              const currentOrder = table.getAllLeafColumns().map(c => c.id)
-                              const fromIdx = currentOrder.indexOf(from)
-                              const toIdx = currentOrder.indexOf(to)
-                              if (fromIdx < 0 || toIdx < 0) return
-                              const next = [...currentOrder]
-                              next.splice(fromIdx, 1)
-                              next.splice(toIdx, 0, from)
-                              setColumnOrder(next)
-                            }}
-                            onClick={header.column.getCanSort() ? header.column.getToggleSortingHandler() : undefined}
-                            className={`sticky top-0 bg-surface-raised text-[11px] font-semibold text-text-muted uppercase tracking-wider px-3 py-2.5 border-b border-border select-none whitespace-nowrap ${
-                              header.column.getCanSort() ? 'cursor-pointer hover:text-text-secondary' : ''
-                            } ${isFrozen ? 'z-30' : 'cursor-grab z-10'} ${isLastFrozen ? 'shadow-[2px_0_4px_-1px_rgba(0,0,0,0.15)]' : ''}`}
-                            style={{
-                              width: header.getSize(),
-                              position: 'sticky',
-                              left: isFrozen ? leftOffsets[i] : undefined,
-                            }}
-                          >
-                            <span className="inline-flex items-center gap-1">
-                              <RenameableHeader header={header} renames={columnRenames} onRename={handleRename} />
-                              {header.column.getIsSorted() === 'asc' && (
-                                <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                              )}
-                              {header.column.getIsSorted() === 'desc' && (
-                                <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                              )}
-                            </span>
-                            {/* Resize handle */}
-                            {header.column.getCanResize() && (
-                              <div
-                                onMouseDown={header.getResizeHandler()}
-                                onTouchStart={header.getResizeHandler()}
-                                onClick={(e) => e.stopPropagation()}
-                                onDoubleClick={(e) => { e.stopPropagation(); header.column.resetSize() }}
-                                className={`absolute top-0 right-0 w-[3px] h-full cursor-col-resize select-none touch-none transition-colors hover:bg-accent/50 ${
-                                  header.column.getIsResizing() ? 'bg-accent' : ''
-                                }`}
-                                title="Drag to resize, double-click to reset"
-                              />
+                          <tr key={headerGroup.id}>
+                            {isAdmin && (
+                              <th
+                                className="sticky top-0 bg-surface-raised px-3 py-2.5 border-b border-border z-30"
+                                style={{ width: CHECKBOX_COL_WIDTH, position: 'sticky', left: 0 }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  aria-label="Select all visible"
+                                  checked={allVisibleSelected}
+                                  ref={el => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected }}
+                                  onChange={e => {
+                                    e.stopPropagation()
+                                    setSelectedIds(prev => {
+                                      const next = new Set(prev)
+                                      if (e.target.checked) visibleIds.forEach(id => next.add(id))
+                                      else visibleIds.forEach(id => next.delete(id))
+                                      return next
+                                    })
+                                  }}
+                                  className="size-3.5 rounded border-border cursor-pointer accent-indigo-500"
+                                  onClick={e => e.stopPropagation()}
+                                />
+                              </th>
                             )}
-                          </th>
+                            {headerGroup.headers.map((header, i) => {
+                              const isFrozen = i < frozenCount
+                              const isLastFrozen = i === frozenCount - 1
+                              const canSort = header.column.getCanSort()
+
+                              const baseClasses = `bg-surface-raised text-[11px] font-semibold text-text-muted uppercase tracking-wider px-3 py-2.5 border-b border-border select-none whitespace-nowrap ${
+                                canSort ? 'hover:text-text-secondary' : ''
+                              } ${isFrozen ? 'z-30' : 'z-10'} ${isLastFrozen ? 'shadow-[2px_0_4px_-1px_rgba(0,0,0,0.15)]' : ''}`
+
+                              const baseStyle: React.CSSProperties = {
+                                width: header.getSize(),
+                                position: 'sticky',
+                                top: 0,
+                                left: isFrozen ? leftOffsets[i] : undefined,
+                              }
+
+                              const innerContent = (
+                                <>
+                                  <span
+                                    className={`inline-flex items-center gap-1 ${canSort ? 'cursor-pointer' : ''}`}
+                                    onClick={canSort ? (e) => { e.stopPropagation(); header.column.toggleSorting() } : undefined}
+                                    onPointerDown={(e) => e.stopPropagation()}
+                                  >
+                                    <RenameableHeader header={header} renames={columnRenames} onRename={handleRename} />
+                                    {header.column.getIsSorted() === 'asc' && (
+                                      <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                                    )}
+                                    {header.column.getIsSorted() === 'desc' && (
+                                      <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                                    )}
+                                  </span>
+                                  {header.column.getCanResize() && (
+                                    <ResizeHandle header={header} onDoubleClick={() => autoFitColumn(header.column.id)} />
+                                  )}
+                                </>
+                              )
+
+                              if (isFrozen) {
+                                return (
+                                  <th
+                                    key={header.id}
+                                    data-col-id={header.column.id}
+                                    className={`${baseClasses} relative`}
+                                    style={baseStyle}
+                                  >
+                                    {innerContent}
+                                  </th>
+                                )
+                              }
+
+                              return (
+                                <SortableHeader
+                                  key={header.id}
+                                  id={header.column.id}
+                                  className={`${baseClasses} cursor-grab active:cursor-grabbing`}
+                                  style={baseStyle}
+                                >
+                                  {innerContent}
+                                </SortableHeader>
+                              )
+                            })}
+                          </tr>
                         )
                       })}
-                    </tr>
-                  )
-                })}
-              </thead>
+                    </thead>
               <tbody className="divide-y divide-border">
                 {table.getRowModel().rows.map((row, rowIdx) => {
                   const isRowFrozen = rowIdx < frozenRowCount
@@ -1376,6 +1416,10 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
                 )}
               </tbody>
             </table>
+                </HorizontalDndProvider>
+              )
+            })()}
+            <ColumnResizeIndicator table={table} containerRef={scrollContainerRef} />
           </div>
 
           {/* ─ Pagination ─ */}
