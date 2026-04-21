@@ -180,12 +180,7 @@ export default function TicketDetailPage() {
   const handleSaveEdit = async () => {
     if (!ticket) return
 
-    // Require Jira link when escalating
-    if (editStatus === 'Escalated' && !editJiraLink.trim()) {
-      toast('Jira link is required when escalating a ticket', 'error')
-      return
-    }
-    // Require admin message when escalating to admin
+    // Require admin message when escalating to admin (Jira link is advisory only)
     if (editStatus === 'Escalated to Admin' && !editAdminMessage.trim()) {
       toast('Message is required when escalating to admin', 'error')
       return
@@ -259,13 +254,6 @@ export default function TicketDetailPage() {
 
   const handleStatusChange = async (newStatus: string) => {
     if (!ticket) return
-    // Block quick-escalate without Jira link — force edit mode
-    if (newStatus === 'Escalated' && !ticket.jira_link?.trim()) {
-      setEditing(true)
-      setEditStatus('Escalated')
-      toast('Please add a Jira link before escalating', 'error')
-      return
-    }
     // Block quick-escalate to admin — always force edit mode (message required)
     if (newStatus === 'Escalated to Admin') {
       setEditing(true)
@@ -323,13 +311,8 @@ export default function TicketDetailPage() {
     }
     // Optional: update status if agent changed it
     if (followUpStatus && followUpStatus !== ticket.status) {
-      // Require Jira link when escalating via Add Update
-      if (followUpStatus === 'Escalated' && !followUpJiraLink.trim()) {
-        toast('Jira link is required when escalating', 'error')
-        setSaving(false)
-        return
-      }
       // Require admin message when escalating to admin via Add Update
+      // (Jira link is advisory — save proceeds even if empty)
       if (followUpStatus === 'Escalated to Admin' && !followUpAdminMessage.trim()) {
         toast('Message is required when escalating to admin', 'error')
         setSaving(false)
@@ -670,8 +653,19 @@ export default function TicketDetailPage() {
                 <span className="text-text-tertiary text-xs">Caller Tel</span>
                 {editing ? (
                   <Input value={editCallerTel} onChange={(e) => setEditCallerTel(e.target.value)} className="mt-1" />
+                ) : ticket.caller_tel?.trim() ? (
+                  <a
+                    href={`tel:${ticket.caller_tel.trim()}`}
+                    className="mt-1 flex w-fit items-center gap-1.5 text-blue-400 hover:text-blue-300"
+                    title="Call"
+                  >
+                    <svg className="size-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+                    </svg>
+                    {ticket.caller_tel}
+                  </a>
                 ) : (
-                  <p className="text-text-primary mt-1">{ticket.caller_tel || '-'}</p>
+                  <p className="text-text-primary mt-1">-</p>
                 )}
               </div>
               <div>
@@ -693,7 +687,7 @@ export default function TicketDetailPage() {
                     href={`https://wa.me/${ticket.clinic_wa.trim().replace(/\D/g, '').replace(/^0/, '60')}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 mt-1"
+                    className="mt-1 flex w-fit items-center gap-1.5 text-emerald-400 hover:text-emerald-300"
                     title="Chat on WhatsApp"
                   >
                     <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
@@ -800,7 +794,9 @@ export default function TicketDetailPage() {
                 )}
               </div>
               <div className="sm:col-span-2">
-                <span className="text-text-tertiary text-xs">Jira Link</span>
+                <span className="text-text-tertiary text-xs">
+                  Jira Link {editing && editStatus === 'Escalated' && <span className="text-red-400">*</span>}
+                </span>
                 {editing ? (
                   <Input value={editJiraLink} onChange={(e) => setEditJiraLink(e.target.value)} className="mt-1" placeholder="https://medex.atlassian.net/browse/..." />
                 ) : ticket.jira_link ? (
@@ -885,7 +881,7 @@ export default function TicketDetailPage() {
                 <PillSelector label="Status" options={statusOptions} value={editStatus}
                   onChange={(v) => setEditStatus(v as TicketStatus)} />
                 {editStatus === 'Escalated' && !editJiraLink.trim() && (
-                  <p className="text-xs text-red-400">Jira link is required when escalating</p>
+                  <p className="text-xs text-amber-400">Jira link recommended when escalating</p>
                 )}
                 {editStatus === 'Escalated to Admin' && !editAdminMessage.trim() && (
                   <p className="text-xs text-purple-400">Admin message is required when escalating to admin</p>
@@ -948,9 +944,12 @@ export default function TicketDetailPage() {
                       )
                     })}
                   </div>
-                  {/* Jira link — required when Escalated */}
+                  {/* Jira link — advisory when Escalated (save still works when empty) */}
                   {followUpStatus === 'Escalated' && (
                     <div className="mt-2">
+                      <div className="text-[11px] text-text-tertiary mb-1">
+                        Jira Link <span className="text-red-400">*</span>
+                      </div>
                       <input
                         value={followUpJiraLink}
                         onChange={(e) => setFollowUpJiraLink(e.target.value)}
@@ -958,7 +957,7 @@ export default function TicketDetailPage() {
                         className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-red-500/50"
                       />
                       {!followUpJiraLink.trim() && (
-                        <p className="text-xs text-red-400 mt-1">Jira link is required when escalating</p>
+                        <p className="text-xs text-amber-400 mt-1">Jira link recommended when escalating</p>
                       )}
                     </div>
                   )}
@@ -1234,25 +1233,41 @@ export default function TicketDetailPage() {
                 Escalate to Ticket
               </Button>
             )}
-            <a
-              href={ticket.caller_tel?.trim()
-                ? `https://wa.me/${ticket.caller_tel.trim().replace(/\D/g, '').replace(/^0/, '60')}`
-                : undefined}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`w-full justify-center inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 border ${
-                ticket.caller_tel?.trim()
-                  ? 'bg-surface border-border text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 shadow-theme-sm active:translate-y-px cursor-pointer'
-                  : 'bg-surface border-border text-text-muted cursor-not-allowed opacity-50'
-              }`}
-              onClick={(e) => { if (!ticket.caller_tel?.trim()) e.preventDefault() }}
-            >
-              <svg className="size-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
-                <path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.29-1.243l-.307-.184-2.87.853.853-2.87-.184-.307A8 8 0 1112 20z"/>
-              </svg>
-              WhatsApp
-            </a>
+            {(() => {
+              const callerNum = ticket.caller_tel?.trim() || ''
+              const clinicNum = ticket.clinic_wa?.trim() || ''
+              const waIcon = (
+                <svg className="size-4 flex-shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                  <path d="M12 2C6.477 2 2 6.477 2 12c0 1.89.525 3.66 1.438 5.168L2 22l4.832-1.438A9.955 9.955 0 0012 22c5.523 0 10-4.477 10-10S17.523 2 12 2zm0 18a8 8 0 01-4.29-1.243l-.307-.184-2.87.853.853-2.87-.184-.307A8 8 0 1112 20z"/>
+                </svg>
+              )
+              const waButton = (label: string, num: string, key: string) => (
+                <a
+                  key={key}
+                  href={num ? `https://wa.me/${num.replace(/\D/g, '').replace(/^0/, '60')}` : undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`w-full justify-center inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-all duration-150 border ${
+                    num
+                      ? 'bg-surface border-border text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 shadow-theme-sm active:translate-y-px cursor-pointer'
+                      : 'bg-surface border-border text-text-muted cursor-not-allowed opacity-50'
+                  }`}
+                  onClick={(e) => { if (!num) e.preventDefault() }}
+                  title={num ? `WhatsApp ${num}` : 'No number saved'}
+                >
+                  {waIcon}
+                  <span>WhatsApp {label}</span>
+                  {num && <span className="font-mono text-[10px] text-text-tertiary">· {num}</span>}
+                </a>
+              )
+              // Always show Caller WA. Show Clinic WA only if distinct from caller.
+              const buttons = [waButton('Caller', callerNum, 'wa-caller')]
+              if (clinicNum && clinicNum !== callerNum) {
+                buttons.push(waButton('Clinic', clinicNum, 'wa-clinic'))
+              }
+              return buttons
+            })()}
             {ticket.issue && (
               <Button variant="secondary" size="sm" onClick={() => triggerKBGeneration(ticket)} className="w-full justify-start">
                 <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

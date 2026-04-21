@@ -1291,10 +1291,10 @@ export default function LogCallPage() {
               />
             </div>
 
-            {/* Jira Link — optional */}
+            {/* Jira Link — advisory (shows *, but save still works when empty) */}
             {status === 'Escalated' && (
               <div ref={jiraLinkRef}>
-                <Label>Jira Link</Label>
+                <Label required>Jira Link</Label>
                 <Input
                   type="url"
                   value={jiraLink}
@@ -1305,6 +1305,9 @@ export default function LogCallPage() {
                   placeholder="https://medex.atlassian.net/browse/..."
                   error={fieldErrors.jiraLink}
                 />
+                {!jiraLink.trim() && (
+                  <p className="text-xs text-amber-400 mt-1">Jira link recommended when escalating</p>
+                )}
               </div>
             )}
 
