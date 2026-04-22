@@ -93,6 +93,30 @@ export interface Clinic {
   sst_start_date: string | null
   sst_submission: string | null
   sst_frequency: string | null
+  sst_period_next: string | null
+  // E-Invoice (migration 066 — from EINV & WSPP (SST) xlsx sheet)
+  einv_v1_signed: boolean | null
+  einv_v2_signed: boolean | null
+  einv_setup_fee_status: string | null
+  einv_hosting_fee_status: string | null
+  einv_payment_date: string | null
+  einv_install_date: string | null
+  einv_portal_credentials: string | null
+  einv_install_status: string | null
+  // CRM-sheet columns added for 1:1 xlsx parity (migration 067)
+  hyb_live_date: string | null
+  einv_live_date: string | null
+  einv_po_rcvd_date: string | null
+  kiosk_po_date: string | null
+  kiosk_survey_form: boolean | null
+  pc_total: string | null
+  db_version: string | null
+  product_version: string | null
+  // Final 1:1 xlsx parity columns (migration 068)
+  wspp_live_date: string | null
+  mtn_important_note: string | null
+  mtn_important_note_2: string | null
+  mn_cld_einv_renewal_rate: string | null
   clinic_notes: string | null
   last_updated_by: string | null
   last_updated_by_name: string | null

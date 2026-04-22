@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { format, formatDistanceToNow } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic, LicenseKeyEntry } from '@/lib/types'
@@ -49,6 +49,21 @@ const FIELD_LABELS: Record<string, string> = {
   wa_account_no: 'WS Account No', wa_api_key: 'WS API Key',
   sst_registration_no: 'SST Registration', sst_start_date: 'SST Start Date',
   sst_submission: 'SST Submission', sst_frequency: 'SST Frequency',
+  sst_period_next: 'SST Next Period',
+  // E-Invoice detail (migration 066)
+  einv_v1_signed: 'E-INV V1 Signed', einv_v2_signed: 'E-INV V2 Signed',
+  einv_setup_fee_status: 'Setup Fee Status', einv_hosting_fee_status: 'Hosting Fee Status',
+  einv_payment_date: 'E-INV Payment Date', einv_install_date: 'E-INV Install Date',
+  einv_portal_credentials: 'E-INV Portal Credentials', einv_install_status: 'E-INV Install Status',
+  // CRM-sheet additions (migration 067)
+  hyb_live_date: 'HYB Live Date', einv_live_date: 'E-INV Live Date',
+  einv_po_rcvd_date: 'E-INV PO Received', kiosk_po_date: 'Kiosk PO Date',
+  kiosk_survey_form: 'Kiosk Survey Form', pc_total: 'PC Total',
+  db_version: 'DB Version (xlsx)', product_version: 'Product Version (xlsx)',
+  // Final 1:1 xlsx parity (migration 068)
+  wspp_live_date: 'WSPP Live Date', mtn_important_note: 'MTN Important Note',
+  mtn_important_note_2: 'MTN Important Note (2)',
+  mn_cld_einv_renewal_rate: 'MN/CLD/EINV Renewal Rate',
   clinic_notes: 'Notes',
   lkey_line1: 'LK Address 1', lkey_line2: 'LK Address 2', lkey_line3: 'LK Address 3',
   lkey_line4: 'LK Address 4', lkey_line5: 'LK Address 5',
@@ -388,21 +403,466 @@ function LicenseKeyRow({ entry, onUpdate, onDelete, onCopy }: {
 }
 
 // Toggle switch for boolean flags
-function ToggleFlag({ label, value, onToggle }: { label: string; value: boolean; onToggle: (v: boolean) => void }) {
+function ToggleFlag({ label, value, onToggle }: { label: string; value: boolean | null; onToggle: (v: boolean) => void }) {
+  const on = value === true
   return (
     <label className="flex items-center gap-2 cursor-pointer group rounded px-1 -mx-1 py-1 hover:bg-surface-raised transition-colors">
       <button
         type="button"
         role="switch"
-        aria-checked={value}
-        onClick={() => onToggle(!value)}
-        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${value ? 'bg-accent' : 'bg-zinc-600'}`}
+        aria-checked={on}
+        onClick={() => onToggle(!on)}
+        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${on ? 'bg-accent' : 'bg-zinc-600'}`}
       >
-        <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
+        <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${on ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
       </button>
       <span className="text-[12px] text-text-secondary">{label}</span>
     </label>
   )
+}
+
+// ── Record Renewal modal ───────────────────────────────────────
+// Atomic MTN renewal — instead of making the agent hunt through 4 different
+// fields (mtn_start, mtn_expiry, invoice_no, renewal_status) across 2
+// sections, this captures everything in one form and writes it in one update.
+
+function RenewalModal({ clinic, open, onClose, onSaved }: {
+  clinic: Clinic
+  open: boolean
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const supabase = createClient()
+  const { toast } = useToast()
+
+  // CONVENTION B (per user decision 2026-04-22):
+  //   Start = same day as current expiry (1-day overlap on the transition day)
+  //   End   = start + K months + 1 day (so 1 year = 366 days, 2 years = 731 days)
+  // Example: current 08/12/2026, renew 1yr → 08/12/2026 → 09/12/2027.
+  const defaultStart = useMemo(() => {
+    if (clinic.mtn_expiry) {
+      const e = new Date(clinic.mtn_expiry); e.setHours(0, 0, 0, 0)
+      const today = new Date(); today.setHours(0, 0, 0, 0)
+      if (!Number.isNaN(e.getTime()) && e.getTime() >= today.getTime()) {
+        // Continuous renewal — start on the current expiry date itself.
+        return e.toISOString().slice(0, 10)
+      }
+    }
+    // Lapsed or never-set: start today.
+    return new Date().toISOString().slice(0, 10)
+  }, [clinic.mtn_expiry])
+
+  const addMonths = (iso: string, m: number) => {
+    const d = new Date(iso); d.setMonth(d.getMonth() + m); d.setDate(d.getDate() + 1)
+    return d.toISOString().slice(0, 10)
+  }
+
+  const [start, setStart] = useState(defaultStart)
+  const [end, setEnd] = useState(() => addMonths(defaultStart, 12))
+  const [invoiceNo, setInvoiceNo] = useState('')
+  const [rate, setRate] = useState('')
+  const [setValidMN, setSetValidMN] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setStart(defaultStart)
+      setEnd(addMonths(defaultStart, 12))
+      setInvoiceNo('')
+      setRate('')
+      setSetValidMN(true)
+    }
+  }, [open, defaultStart])
+
+  const quickDuration = (months: number) => setEnd(addMonths(start, months))
+
+  const onStartChange = (v: string) => {
+    setStart(v)
+    // Roll expiry to preserve the old duration, default 12mth if nothing makes sense.
+    try {
+      const oldStart = new Date(start)
+      const oldEnd = new Date(end)
+      const days = Math.max(1, Math.round((oldEnd.getTime() - oldStart.getTime()) / 86400000))
+      const ne = new Date(v); ne.setDate(ne.getDate() + days)
+      setEnd(ne.toISOString().slice(0, 10))
+    } catch {
+      setEnd(addMonths(v, 12))
+    }
+  }
+
+  const handleSubmit = async () => {
+    if (!start || !end) { toast('Both dates required', 'error'); return }
+    if (new Date(end) <= new Date(start)) { toast('Expiry must be after start', 'error'); return }
+
+    setSaving(true)
+    const patch: Record<string, string> = {
+      mtn_start: start,
+      mtn_expiry: end,
+      updated_at: new Date().toISOString(),
+    }
+    if (invoiceNo.trim()) patch.invoice_no = invoiceNo.trim()
+    if (rate.trim()) patch.mn_cld_einv_renewal_rate = rate.trim()
+    if (setValidMN) {
+      patch.renewal_status = 'Valid MN'
+      patch.status_renewal = 'Renewed'
+    }
+    const { error } = await supabase.from('clinics').update(patch).eq('clinic_code', clinic.clinic_code)
+    setSaving(false)
+    if (error) { toast(`Save failed: ${error.message}`, 'error'); return }
+    toast('Renewal recorded', 'success')
+    onSaved()
+    onClose()
+  }
+
+  const durationDays = (() => {
+    try {
+      const d = Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1
+      return d > 0 ? d : null
+    } catch { return null }
+  })()
+
+  return (
+    <ModalDialog open={open} onClose={onClose} title={`Record Renewal · ${clinic.clinic_code}`} size="md">
+      <div className="p-4 space-y-4">
+        {/* Context: current period */}
+        <div className="text-[12px] bg-surface-inset/40 border border-border rounded-lg p-3 space-y-0.5">
+          <div className="flex items-center gap-2">
+            <span className="text-text-muted">Currently:</span>
+            <span className="font-mono text-text-primary">{formatDDMMYYYY(clinic.mtn_start)} → {formatDDMMYYYY(clinic.mtn_expiry)}</span>
+          </div>
+          {clinic.renewal_status && (
+            <div className="flex items-center gap-2">
+              <span className="text-text-muted">Status:</span>
+              <span className="text-text-secondary">{clinic.renewal_status}</span>
+            </div>
+          )}
+        </div>
+
+        {/* New period */}
+        <div>
+          <label className="text-[11px] uppercase tracking-wider text-text-muted block mb-1.5">New MTN period</label>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] text-text-tertiary block mb-1">Start</label>
+              <input
+                type="date"
+                value={start}
+                onChange={e => onStartChange(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-surface-inset border border-border rounded text-[13px] text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] text-text-tertiary block mb-1">Expiry</label>
+              <input
+                type="date"
+                value={end}
+                onChange={e => setEnd(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-surface-inset border border-border rounded text-[13px] text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 mt-2 text-[11px]">
+            <span className="text-text-muted">Quick:</span>
+            {[6, 12, 18, 24].map(m => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => quickDuration(m)}
+                className="px-2 py-0.5 rounded border border-border bg-surface text-text-secondary hover:border-accent/40 hover:text-text-primary transition-colors"
+              >
+                {m} mth
+              </button>
+            ))}
+            {durationDays && <span className="ml-auto text-text-tertiary tabular-nums">= {durationDays} days</span>}
+          </div>
+        </div>
+
+        {/* Invoice + rate */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] text-text-tertiary block mb-1">Invoice No.</label>
+            <input
+              type="text"
+              value={invoiceNo}
+              onChange={e => setInvoiceNo(e.target.value)}
+              placeholder="e.g. TX00910"
+              className="w-full px-2.5 py-1.5 bg-surface-inset border border-border rounded text-[13px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+            />
+          </div>
+          <div>
+            <label className="text-[11px] text-text-tertiary block mb-1">Rate / Amount</label>
+            <input
+              type="text"
+              value={rate}
+              onChange={e => setRate(e.target.value)}
+              placeholder="e.g. RM600"
+              className="w-full px-2.5 py-1.5 bg-surface-inset border border-border rounded text-[13px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+          </div>
+        </div>
+
+        {/* Auto-status checkbox */}
+        <label className="flex items-start gap-2 cursor-pointer group text-[12px] p-2.5 bg-surface-inset/30 border border-border rounded">
+          <input
+            type="checkbox"
+            checked={setValidMN}
+            onChange={e => setSetValidMN(e.target.checked)}
+            className="mt-0.5 size-4 accent-accent"
+          />
+          <span className="text-text-secondary">
+            Auto-set <span className="text-text-primary font-medium">Renewal Status = &quot;Valid MN&quot;</span> and <span className="text-text-primary font-medium">Status Renewal = &quot;Renewed&quot;</span>
+          </span>
+        </label>
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border">
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={saving}
+          className="px-3 py-1.5 text-[13px] rounded text-text-secondary hover:text-text-primary hover:bg-surface-inset transition-colors disabled:opacity-40"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={saving}
+          className="px-4 py-1.5 text-[13px] font-medium rounded bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-50"
+        >
+          {saving ? 'Saving…' : 'Record Renewal'}
+        </button>
+      </div>
+    </ModalDialog>
+  )
+}
+
+// ── At-a-glance summary card ──────────────────────────────────
+// Shows the minimum info needed to field a phone call: subscription chips,
+// MTN expiry countdown (color-coded), tap-to-call / email / WhatsApp buttons.
+// Below this card the detailed editable sections handle everything else.
+
+function formatDDMMYYYY(d: string | null): string {
+  if (!d) return '—'
+  const dt = new Date(d)
+  if (Number.isNaN(dt.getTime())) return d
+  const dd = String(dt.getDate()).padStart(2, '0')
+  const mm = String(dt.getMonth() + 1).padStart(2, '0')
+  return `${dd}/${mm}/${dt.getFullYear()}`
+}
+
+function daysBetween(d: string | null): number | null {
+  if (!d) return null
+  const dt = new Date(d); dt.setHours(0, 0, 0, 0)
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  if (Number.isNaN(dt.getTime())) return null
+  return Math.round((dt.getTime() - today.getTime()) / 86400000)
+}
+
+function SubChip({ label, on }: { label: string; on: boolean }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+      on
+        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+        : 'bg-surface-inset/60 border-border/60 text-text-muted'
+    }`}>
+      <span className={`size-1.5 rounded-full ${on ? 'bg-emerald-400' : 'bg-text-muted/40'}`} />
+      {label}
+    </span>
+  )
+}
+
+function ActionButton({ href, label, sub, tone, external, icon }: {
+  href: string
+  label: string
+  sub?: string
+  tone: 'blue' | 'emerald' | 'indigo'
+  external?: boolean
+  icon: React.ReactNode
+}) {
+  const toneMap = {
+    blue:    'border-blue-500/30 bg-blue-500/8 text-blue-400 hover:bg-blue-500/15 hover:border-blue-500/50',
+    emerald: 'border-emerald-500/30 bg-emerald-500/8 text-emerald-400 hover:bg-emerald-500/15 hover:border-emerald-500/50',
+    indigo:  'border-indigo-500/30 bg-indigo-500/8 text-indigo-400 hover:bg-indigo-500/15 hover:border-indigo-500/50',
+  }
+  return (
+    <a
+      href={href}
+      target={external ? '_blank' : undefined}
+      rel={external ? 'noopener noreferrer' : undefined}
+      className={`group flex-1 min-w-[110px] inline-flex items-center gap-2 px-3 py-2 rounded-lg border text-[12px] transition-all ${toneMap[tone]}`}
+    >
+      <span className="flex-shrink-0">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-medium leading-none">{label}</span>
+        {sub && <span className="block text-[10px] font-mono opacity-60 mt-0.5 truncate">{sub}</span>}
+      </span>
+    </a>
+  )
+}
+
+function ClinicSummaryCard({ clinic, onRenewalClick }: { clinic: Clinic; onRenewalClick: () => void }) {
+  const mtnDays = daysBetween(clinic.mtn_expiry)
+
+  const mtnState = mtnDays === null ? 'none' : mtnDays < 0 ? 'expired' : mtnDays <= 30 ? 'expiring' : 'active'
+  const mtnHeroStyle = {
+    none:     'from-zinc-500/5 to-zinc-500/10 border-border text-text-muted',
+    expired:  'from-red-500/5 to-red-500/10 border-red-500/30 text-red-400',
+    expiring: 'from-amber-500/5 to-amber-500/10 border-amber-500/30 text-amber-400',
+    active:   'from-emerald-500/5 to-emerald-500/10 border-emerald-500/30 text-emerald-400',
+  }[mtnState]
+  const mtnBig = mtnDays === null
+    ? 'Not set'
+    : mtnDays < 0
+    ? `${Math.abs(mtnDays).toLocaleString()}d`
+    : mtnDays === 0
+    ? 'TODAY'
+    : `${mtnDays.toLocaleString()}d`
+  const mtnCaption = mtnDays === null
+    ? 'no expiry recorded'
+    : mtnDays < 0
+    ? 'overdue'
+    : mtnDays === 0
+    ? 'expires today'
+    : 'until expiry'
+
+  const cloudActive = (() => {
+    if (!clinic.cloud_end) return false
+    const d = new Date(clinic.cloud_end); d.setHours(0, 0, 0, 0)
+    const t = new Date(); t.setHours(0, 0, 0, 0)
+    return !Number.isNaN(d.getTime()) && d.getTime() >= t.getTime()
+  })()
+  const mtnActive = mtnDays !== null && mtnDays >= 0
+
+  // Normalise phone for tel: / wa.me links. Strip non-digits, keep leading "6" for MY.
+  const rawPhone = clinic.clinic_phone || clinic.contact_tel || ''
+  const telHref = rawPhone ? `tel:${rawPhone.replace(/[^\d+]/g, '')}` : null
+  const waNumber = rawPhone ? rawPhone.replace(/[^\d]/g, '').replace(/^0/, '60') : ''
+  const waHref = waNumber ? `https://wa.me/${waNumber}` : null
+
+  const metaParts: string[] = []
+  if (clinic.state) metaParts.push(clinic.state)
+  if (clinic.product) metaParts.push(clinic.product)
+  if (clinic.customer_status) metaParts.push(clinic.customer_status)
+
+  const phoneIcon = <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+  const waIcon = <svg className="size-4" fill="currentColor" viewBox="0 0 24 24"><path d="M20.52 3.48A12 12 0 0012.07 0C5.42 0 .09 5.33.09 11.98c0 2.11.55 4.17 1.6 5.99L0 24l6.18-1.62a12 12 0 005.88 1.51h.01c6.64 0 12.03-5.33 12.03-11.98a11.9 11.9 0 00-3.58-8.43zM12.07 21.79h-.01a9.83 9.83 0 01-5-1.37l-.36-.21-3.71.97.99-3.62-.23-.37a9.83 9.83 0 01-1.52-5.21c0-5.46 4.44-9.9 9.9-9.9 2.64 0 5.12 1.03 6.99 2.9a9.82 9.82 0 012.89 6.99c0 5.46-4.44 9.89-9.94 9.89zm5.43-7.41c-.3-.15-1.76-.87-2.04-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.65.08-.3-.15-1.25-.46-2.38-1.47-.88-.78-1.47-1.75-1.64-2.05-.17-.3-.02-.46.13-.61.13-.13.3-.35.45-.52.15-.17.2-.3.3-.5.1-.2.05-.37-.02-.52-.07-.15-.67-1.62-.92-2.21-.24-.58-.49-.5-.67-.51l-.58-.01c-.2 0-.52.07-.79.37s-1.04 1.02-1.04 2.48 1.07 2.87 1.22 3.07c.15.2 2.11 3.22 5.11 4.52.72.31 1.28.5 1.71.64.72.23 1.38.2 1.89.12.58-.09 1.76-.72 2.01-1.41.25-.69.25-1.29.17-1.41-.07-.12-.27-.2-.57-.35z"/></svg>
+  const mailIcon = <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+
+  return (
+    <div className="px-5 py-4 border-b border-border bg-gradient-to-b from-surface-raised/20 to-transparent space-y-3.5">
+      {/* Meta line */}
+      {metaParts.length > 0 && (
+        <div className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+          {metaParts.map((p, i) => (
+            <span key={i} className="contents">
+              {i > 0 && <span className="text-text-muted/60">·</span>}
+              <span className={i === 1 ? 'text-text-secondary font-medium' : ''}>{p}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Hero stat: MTN countdown + record renewal CTA */}
+      <div className={`rounded-xl border bg-gradient-to-br p-3.5 ${mtnHeroStyle}`}>
+        <div className="flex items-end justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider opacity-75 mb-1">MTN Maintenance</p>
+            <p className="text-3xl font-bold tabular-nums leading-none">{mtnBig}</p>
+            <p className="text-[11px] mt-1 opacity-80">{mtnCaption}</p>
+          </div>
+          <div className="text-right flex-shrink-0">
+            <p className="text-[10px] uppercase tracking-wider opacity-75 mb-1">Expires</p>
+            <p className="text-[13px] font-mono tabular-nums font-medium">{formatDDMMYYYY(clinic.mtn_expiry)}</p>
+            {clinic.mtn_start && (
+              <p className="text-[10px] font-mono tabular-nums opacity-60 mt-0.5">since {formatDDMMYYYY(clinic.mtn_start)}</p>
+            )}
+          </div>
+        </div>
+        {/* Record Renewal — always available. Intensity matches MTN state: solid
+            button when expiring/expired, outline when still healthy. */}
+        <button
+          type="button"
+          onClick={onRenewalClick}
+          className={`mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-[12px] font-semibold transition-colors ${
+            mtnState === 'active' || mtnState === 'none'
+              ? 'bg-surface/60 border border-current/30 hover:bg-surface'
+              : 'bg-current/15 border border-current/40 hover:bg-current/25'
+          }`}
+        >
+          <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Record Renewal
+        </button>
+      </div>
+
+      {/* Subscriptions */}
+      <div>
+        <p className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">Subscriptions</p>
+        <div className="flex flex-wrap gap-1.5">
+          <SubChip label="MTN" on={mtnActive} />
+          <SubChip label="Cloud" on={cloudActive} />
+          <SubChip label="E-Invoice" on={!!clinic.has_e_invoice} />
+          <SubChip label="WhatsApp" on={!!clinic.has_whatsapp} />
+          <SubChip label="SST" on={!!clinic.has_sst} />
+        </div>
+      </div>
+
+      {/* Quick contact actions */}
+      {(telHref || clinic.email_main || waHref) && (
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-text-muted mb-1.5">Quick contact</p>
+          <div className="flex flex-wrap gap-2">
+            {telHref && <ActionButton href={telHref} label="Call" sub={rawPhone} tone="blue" icon={phoneIcon} />}
+            {waHref && <ActionButton href={waHref} label="WhatsApp" tone="emerald" external icon={waIcon} />}
+            {clinic.email_main && <ActionButton href={`mailto:${clinic.email_main}`} label="Email" sub={clinic.email_main} tone="indigo" icon={mailIcon} />}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// E-Invoice funnel stage helpers — mirrors classifyEinv in ReportsView so
+// "Advance Stage" sets the right field to today when user clicks the button.
+type EinvFunnelStage = 'live' | 'paid' | 'signed' | 'po_only' | 'exempt' | 'not_started'
+
+function classifyEinvStage(c: Clinic): EinvFunnelStage {
+  if (c.has_e_invoice) return 'live'
+  if (c.einv_no_reason && c.einv_no_reason.trim()) return 'exempt'
+  if (c.einv_payment_date) return 'paid'
+  if (c.einv_v1_signed || c.einv_v2_signed) return 'signed'
+  if (c.einv_po_rcvd_date) return 'po_only'
+  return 'not_started'
+}
+
+// Returns the set of field updates required to advance one stage, or null at terminal.
+function advancementFor(stage: EinvFunnelStage, isoToday: string): {
+  label: string
+  nextStageLabel: string
+  patch: Partial<Record<keyof Clinic, string | boolean>>
+} | null {
+  switch (stage) {
+    case 'not_started':
+      return { label: 'Mark PO Received', nextStageLabel: 'Signup Pending', patch: { einv_po_rcvd_date: isoToday } }
+    case 'po_only':
+      return { label: 'Mark V1 Signed', nextStageLabel: 'Payment Pending', patch: { einv_v1_signed: true, has_e_invoice: false } }
+    case 'signed':
+      return { label: 'Mark Payment Received', nextStageLabel: 'Install Pending', patch: { einv_payment_date: isoToday } }
+    case 'paid':
+      return { label: 'Mark as Live', nextStageLabel: 'Live', patch: { einv_install_date: isoToday, einv_live_date: isoToday, has_e_invoice: true } }
+    case 'live': return null
+    case 'exempt': return null
+  }
+}
+
+const STAGE_DISPLAY: Record<EinvFunnelStage, { label: string; tone: string }> = {
+  live:        { label: 'Live',            tone: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30' },
+  paid:        { label: 'Install Pending', tone: 'text-sky-400 bg-sky-500/15 border-sky-500/30' },
+  signed:      { label: 'Payment Pending', tone: 'text-violet-400 bg-violet-500/15 border-violet-500/30' },
+  po_only:     { label: 'Signup Pending',  tone: 'text-amber-400 bg-amber-500/15 border-amber-500/30' },
+  exempt:      { label: 'Exempt',          tone: 'text-zinc-400 bg-zinc-500/15 border-zinc-500/30' },
+  not_started: { label: 'Not Started',     tone: 'text-zinc-500 bg-zinc-500/10 border-zinc-600/30' },
 }
 
 export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdated, onClinicDeleted, isAdmin = false }: ClinicProfilePanelProps) {
@@ -474,23 +934,63 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clinicCode])
 
+  // Refetch after multi-field updates (renewal modal, etc.).
+  const refetchClinic = useCallback(async () => {
+    const { data } = await supabase.from('clinics').select('*').eq('clinic_code', clinicCode).single()
+    if (data) {
+      setClinic(data as Clinic)
+      setNotes(data.clinic_notes || '')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clinicCode])
+
+  // Renewal modal state
+  const [renewalOpen, setRenewalOpen] = useState(false)
+
   // Save a single field
   const saveField = useCallback(async (field: string, value: string | boolean) => {
     if (!clinic) return
+    const normalized = value === '' ? null : value
+    const patch: Record<string, unknown> = {
+      [field]: normalized,
+      last_updated_by: userId,
+      last_updated_by_name: userName,
+      updated_at: new Date().toISOString(),
+    }
+
+    // Auto-cascade derived flags so the dashboard status stays consistent with
+    // the signal fields — otherwise users have to manually toggle has_e_invoice
+    // after flipping V1/V2, and has_sst after entering an SST number.
+    // Rule matches the upload route's parseEinvRows derivation.
+    if (field === 'einv_v1_signed' || field === 'einv_v2_signed') {
+      const v1 = field === 'einv_v1_signed' ? !!normalized : !!clinic.einv_v1_signed
+      const v2 = field === 'einv_v2_signed' ? !!normalized : !!clinic.einv_v2_signed
+      patch.has_e_invoice = v1 || v2
+    }
+    if (field === 'has_e_invoice') {
+      // User flipping the top-level toggle: keep V1/V2 consistent with their intent.
+      if (normalized === true) {
+        // Turning ON while both V1/V2 are off — nudge V1 on so the status makes sense.
+        if (!clinic.einv_v1_signed && !clinic.einv_v2_signed) patch.einv_v1_signed = true
+      } else {
+        // Turning OFF — clear both signups so the state is unambiguous.
+        patch.einv_v1_signed = false
+        patch.einv_v2_signed = false
+      }
+    }
+    if (field === 'sst_registration_no') {
+      patch.has_sst = normalized != null && String(normalized).trim() !== ''
+    }
+
     const { error } = await supabase
       .from('clinics')
-      .update({
-        [field]: value === '' ? null : value,
-        last_updated_by: userId,
-        last_updated_by_name: userName,
-        updated_at: new Date().toISOString(),
-      })
+      .update(patch)
       .eq('clinic_code', clinicCode)
 
     if (error) {
       toast('Failed to save', 'error')
     } else {
-      setClinic(prev => prev ? { ...prev, [field]: value === '' ? null : value, last_updated_by: userId, last_updated_by_name: userName } : null)
+      setClinic(prev => prev ? { ...prev, ...patch, [field]: normalized, last_updated_by: userId, last_updated_by_name: userName } as Clinic : null)
       onClinicUpdated?.()
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -801,6 +1301,10 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto">
+          {/* Summary Card — at-a-glance snapshot for phone calls:
+              subscription chips, MTN countdown, quick contact. */}
+          <ClinicSummaryCard clinic={clinic} onRenewalClick={() => setRenewalOpen(true)} />
+
           {/* Section A: Identity (CRM-imported) */}
           <div className="px-4 py-3 border-b border-border">
             <h4 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">Identity</h4>
@@ -901,6 +1405,10 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
               <EditableField label="Pass to Dealer/M1G" value={clinic.pass_to_dealer} onSave={v => saveField('pass_to_dealer', v)} />
               <EditableField label="Remark (add. PC)" value={clinic.remark_additional_pc} onSave={v => saveField('remark_additional_pc', v)} />
             </div>
+            <div className="grid grid-cols-1 gap-y-1 mt-1">
+              <EditableField label="MTN Important Note" value={clinic.mtn_important_note} onSave={v => saveField('mtn_important_note', v)} />
+              <EditableField label="MTN Important Note (2)" value={clinic.mtn_important_note_2} onSave={v => saveField('mtn_important_note_2', v)} />
+            </div>
           </div>
 
           {/* Section: Renewal & Status */}
@@ -909,6 +1417,7 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
             <div className="grid grid-cols-3 gap-x-4 gap-y-1">
               <EditableField label="Status Renewal" value={clinic.status_renewal} onSave={v => saveField('status_renewal', v)} />
               <EditableField label="E-INV No Reason" value={clinic.einv_no_reason} onSave={v => saveField('einv_no_reason', v)} />
+              <EditableField label="MN/CLD/EINV Renewal Rate" value={clinic.mn_cld_einv_renewal_rate} onSave={v => saveField('mn_cld_einv_renewal_rate', v)} />
             </div>
             <div className="grid grid-cols-1 gap-y-1 mt-1">
               <EditableField label="Remarks / Follow Up" value={clinic.remarks_followup} onSave={v => saveField('remarks_followup', v)} />
@@ -920,14 +1429,27 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
           <div className="px-4 py-3 border-b border-border">
             <h4 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">System Info</h4>
             <div className="grid grid-cols-3 gap-x-4 gap-y-1">
+              <EditableField label="PC Total" value={clinic.pc_total} onSave={v => saveField('pc_total', v)} />
               <EditableField label="Workstation Count" value={clinic.workstation_count} onSave={v => saveField('workstation_count', v)} />
               <EditableField label="Server Name" value={clinic.main_pc_name} onSave={v => saveField('main_pc_name', v)} mono />
               <EditableField label="Device ID" value={clinic.device_id} onSave={v => saveField('device_id', v)} mono />
-              <EditableField label="Program Version" value={clinic.current_program_version} onSave={v => saveField('current_program_version', v)} mono />
-              <EditableField label="DB Version" value={clinic.current_db_version} onSave={v => saveField('current_db_version', v)} mono />
+              <EditableField label="Program Version (on-site)" value={clinic.current_program_version} onSave={v => saveField('current_program_version', v)} mono />
+              <EditableField label="Product Version (xlsx)" value={clinic.product_version} onSave={v => saveField('product_version', v)} mono />
+              <EditableField label="DB Version (on-site)" value={clinic.current_db_version} onSave={v => saveField('current_db_version', v)} mono />
+              <EditableField label="DB Version (xlsx)" value={clinic.db_version} onSave={v => saveField('db_version', v)} mono />
               <EditableField label="DB Size" value={clinic.db_size} onSave={v => saveField('db_size', v)} mono />
               <EditableField label="RAM" value={clinic.ram} onSave={v => saveField('ram', v)} />
               <EditableField label="Processor" value={clinic.processor} onSave={v => saveField('processor', v)} />
+            </div>
+
+            {/* Kiosk / Hybrid (sparse, niche) */}
+            <div className="mt-3">
+              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">Kiosk / Hybrid</span>
+              <div className="grid grid-cols-3 gap-x-4 gap-y-1 mt-1">
+                <ToggleFlag label="Kiosk Survey Form" value={clinic.kiosk_survey_form} onToggle={v => saveField('kiosk_survey_form', v)} />
+                <EditableField label="Kiosk PO Date" value={clinic.kiosk_po_date} onSave={v => saveField('kiosk_po_date', v)} />
+                <EditableField label="HYB Live Date" value={clinic.hyb_live_date} onSave={v => saveField('hyb_live_date', v)} />
+              </div>
             </div>
 
             {/* Remote Access */}
@@ -953,23 +1475,106 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
               </div>
             </div>
 
-            {/* WhatsApp Details */}
+          </div>
+
+          {/* Section: E-Invoice & WhatsApp (dedicated) */}
+          <div className="px-4 py-3 border-b border-border">
+            <h4 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">E-Invoice &amp; WhatsApp</h4>
+
+            {/* Funnel stage card: shows where this clinic is in the E-Invoice
+                adoption funnel + a one-click button to advance to the next stage.
+                Terminal stages (Live, Exempt) hide the button. */}
+            {(() => {
+              const stage = classifyEinvStage(clinic)
+              const display = STAGE_DISPLAY[stage]
+              const isoToday = new Date().toISOString().slice(0, 10)
+              const next = advancementFor(stage, isoToday)
+              return (
+                <div className="mb-4 rounded-xl border border-border bg-gradient-to-br from-surface-inset/40 to-transparent overflow-hidden">
+                  <div className="flex flex-wrap items-center gap-3 p-3.5">
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-text-muted mb-1">E-Invoice funnel stage</p>
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-semibold border ${display.tone}`}>
+                        <span className="size-1.5 rounded-full bg-current" />
+                        {display.label}
+                      </span>
+                    </div>
+                    {next ? (
+                      <button
+                        onClick={async () => {
+                          if (!confirm(`Advance this clinic from "${display.label}" to "${next.nextStageLabel}"?\n\nThis will set today's date on the matching field.`)) return
+                          for (const [field, value] of Object.entries(next.patch)) {
+                            await saveField(field, value as string | boolean)
+                          }
+                        }}
+                        className="ml-auto group inline-flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-medium bg-accent/15 border border-accent/40 text-accent hover:bg-accent hover:text-white hover:border-accent transition-all shadow-sm"
+                      >
+                        <span>{next.label}</span>
+                        <svg className="size-3.5 transition-transform group-hover:translate-x-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                      </button>
+                    ) : (
+                      <span className="ml-auto text-[11px] text-text-muted italic">Terminal stage — no action</span>
+                    )}
+                  </div>
+                  {next && (
+                    <div className="px-3.5 py-2 text-[11px] text-text-tertiary border-t border-border/60 bg-surface-inset/20">
+                      Click to advance → <span className="text-text-secondary font-medium">{next.nextStageLabel}</span> (sets today&apos;s date)
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+
+            {/* E-Invoice block */}
+            <div>
+              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">E-Invoice</span>
+              <div className="grid grid-cols-3 gap-x-4 mt-1">
+                <ToggleFlag label="e-Invoice" value={clinic.has_e_invoice} onToggle={v => saveField('has_e_invoice', v)} />
+                <ToggleFlag label="V1 Signed (RM699)" value={clinic.einv_v1_signed} onToggle={v => saveField('einv_v1_signed', v)} />
+                <ToggleFlag label="V2 Signed (RM500)" value={clinic.einv_v2_signed} onToggle={v => saveField('einv_v2_signed', v)} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1">
+                <EditableField label="PO Received" value={clinic.einv_po_rcvd_date} onSave={v => saveField('einv_po_rcvd_date', v)} />
+                <EditableField label="Live Date" value={clinic.einv_live_date} onSave={v => saveField('einv_live_date', v)} />
+                <EditableField label="Install Date" value={clinic.einv_install_date} onSave={v => saveField('einv_install_date', v)} />
+                <EditableField label="Payment Date (Hosting)" value={clinic.einv_payment_date} onSave={v => saveField('einv_payment_date', v)} />
+                <EditableField label="Setup Fee Status" value={clinic.einv_setup_fee_status} onSave={v => saveField('einv_setup_fee_status', v)} />
+                <EditableField label="Hosting Fee Status" value={clinic.einv_hosting_fee_status} onSave={v => saveField('einv_hosting_fee_status', v)} />
+                <EditableField label="Install Status" value={clinic.einv_install_status} onSave={v => saveField('einv_install_status', v)} />
+                <EditableField label="Reason (not using)" value={clinic.einv_no_reason} onSave={v => saveField('einv_no_reason', v)} />
+              </div>
+              {isAdmin && (
+                <div className="grid grid-cols-1 gap-x-4 mt-1">
+                  <EditableField label="Portal Credentials" value={clinic.einv_portal_credentials} onSave={v => saveField('einv_portal_credentials', v)} mono masked />
+                </div>
+              )}
+            </div>
+
+            {/* WhatsApp block */}
             <div className="mt-3">
-              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">WhatsApp Details</span>
-              <div className="grid grid-cols-2 gap-x-4 mt-1">
+              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">WhatsApp</span>
+              <div className="grid grid-cols-3 gap-x-4 mt-1">
+                <ToggleFlag label="WhatsApp" value={clinic.has_whatsapp} onToggle={v => saveField('has_whatsapp', v)} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1">
+                <EditableField label="WSPP Live Date" value={clinic.wspp_live_date} onSave={v => saveField('wspp_live_date', v)} />
                 <EditableField label="WS Account No" value={clinic.wa_account_no} onSave={v => saveField('wa_account_no', v)} mono />
-                <EditableField label="WS API Key" value={clinic.wa_api_key} onSave={v => saveField('wa_api_key', v)} mono />
+                <EditableField label="WS API Key" value={clinic.wa_api_key} onSave={v => saveField('wa_api_key', v)} mono masked />
               </div>
             </div>
 
-            {/* SST Details */}
+            {/* SST block */}
             <div className="mt-3">
-              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">SST Details</span>
-              <div className="grid grid-cols-2 gap-x-4 mt-1">
+              <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">SST</span>
+              <div className="grid grid-cols-3 gap-x-4 mt-1">
+                <ToggleFlag label="SST" value={clinic.has_sst} onToggle={v => saveField('has_sst', v)} />
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1">
                 <EditableField label="Registration No" value={clinic.sst_registration_no} onSave={v => saveField('sst_registration_no', v)} mono />
                 <EditableField label="Start Date" value={clinic.sst_start_date} onSave={v => saveField('sst_start_date', v)} />
+                <EditableField label="Current Period" value={clinic.sst_frequency} onSave={v => saveField('sst_frequency', v)} />
+                <EditableField label="Next Period" value={clinic.sst_period_next} onSave={v => saveField('sst_period_next', v)} />
                 <EditableField label="Submission" value={clinic.sst_submission} onSave={v => saveField('sst_submission', v)} />
-                <EditableField label="Frequency" value={clinic.sst_frequency} onSave={v => saveField('sst_frequency', v)} />
               </div>
             </div>
           </div>
@@ -1313,6 +1918,14 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
           </Button>
         </div>
       </ModalDialog>
+
+      {/* Record Renewal modal — atomic MTN update */}
+      <RenewalModal
+        clinic={clinic}
+        open={renewalOpen}
+        onClose={() => setRenewalOpen(false)}
+        onSaved={() => { refetchClinic(); onClinicUpdated?.() }}
+      />
     </div>
   )
 }

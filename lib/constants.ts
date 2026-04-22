@@ -44,6 +44,7 @@ export const ISSUE_CATEGORIES: string[] = [
   'System Issue',
   'Change Request',
   'Hardware',
+  'Label',
   'AR',
   'MTN',
 ]
@@ -59,6 +60,7 @@ export const ISSUE_CATEGORY_COLORS: Record<string, { bg: string; text: string }>
   'System Issue':          { bg: 'bg-red-500/20', text: 'text-red-400' },
   'Change Request':        { bg: 'bg-violet-500/20', text: 'text-violet-400' },
   'Hardware':              { bg: 'bg-zinc-600/20', text: 'text-zinc-300' },
+  'Label':                 { bg: 'bg-pink-500/20', text: 'text-pink-400' },
   'AR':                    { bg: 'bg-green-500/20', text: 'text-green-400' },
   'MTN':                   { bg: 'bg-sky-500/20', text: 'text-sky-400' },
 }

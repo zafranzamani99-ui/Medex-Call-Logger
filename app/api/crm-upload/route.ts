@@ -32,7 +32,7 @@ const COLUMN_MAP: Record<string, string> = {
   'Support Name': 'support_name',
   'CUSTOMER STATUS 2': 'customer_status',
   'EMAIL ID MAIN': 'email_main',
-  'EMAIL ID2': 'email_secondary',
+  'EMAIL ID 2': 'email_secondary',  // Bug fix: xlsx header has a space, old map had "EMAIL ID2"
   'LKEY Line 1': 'lkey_line1',
   'LKEY Line 2': 'lkey_line2',
   'LKEY Line 3': 'lkey_line3',
@@ -65,6 +65,23 @@ const COLUMN_MAP: Record<string, string> = {
   'Reason not using E-INV': 'einv_no_reason',
   'STATUS RENEWAL': 'status_renewal',
   'REMARKS - FOLLOW UP': 'remarks_followup',
+  // CRM-sheet columns added for 1:1 xlsx parity (migration 067)
+  'HYB LIVE DATE': 'hyb_live_date',
+  'E-INV LIVE DATE': 'einv_live_date',
+  'EINV PO RCVD DATE': 'einv_po_rcvd_date',
+  'KIOSK PO DATE': 'kiosk_po_date',
+  'KIOSK SURVEY FORM': 'kiosk_survey_form',
+  'PC TOTAL': 'pc_total',
+  'DB VERSION': 'db_version',
+  'PRODUCT VERSION': 'product_version',
+  // Final columns for 1:1 xlsx parity (migration 068)
+  'WSPP LIVE DATE': 'wspp_live_date',
+  'MTN Important Note': 'mtn_important_note',
+  // Duplicate-header handling: the CRM sheet has TWO "MTN Important Note" columns
+  // at positions 45 and 46 with different data. Our xlsx reader dedupes by
+  // appending "_2" to subsequent occurrences — see readSheetWithDedupedHeaders.
+  'MTN Important Note_2': 'mtn_important_note_2',
+  'MN/CLD/EINV RENEWAL RATE': 'mn_cld_einv_renewal_rate',
 }
 
 // WHY: Excel dates can be DD/MM/YYYY, serial numbers, or JS Date objects.
@@ -121,21 +138,175 @@ function normalizeHeaders(rows: Record<string, unknown>[]): Record<string, unkno
   })
 }
 
-const DATE_COLUMNS = new Set(['mtn_expiry', 'mtn_start', 'cloud_start', 'cloud_end', 'cms_install_date'])
+// WHY: The CRM sheet has duplicate header names (e.g. "MTN Important Note" at
+// columns 45 AND 46 with different data per row). xlsx.sheet_to_json drops one
+// on key collision. This helper reads the sheet by index, dedupes headers by
+// appending _2, _3... to subsequent occurrences, and rebuilds row objects so
+// every xlsx column survives.
+function readSheetWithDedupedHeaders(sheet: XLSX.WorkSheet, opts: { headerRow?: number } = {}): Record<string, unknown>[] {
+  const headerRow = opts.headerRow ?? 0
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', blankrows: false })
+  if (!matrix.length || headerRow >= matrix.length) return []
 
-function parseRows(rows: Record<string, unknown>[]): Record<string, string | null>[] {
+  const rawHeaders = matrix[headerRow]
+  const seen = new Map<string, number>()
+  const headers: (string | null)[] = rawHeaders.map((h) => {
+    if (h == null || h === '') return null
+    const norm = String(h).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!norm) return null
+    const count = seen.get(norm) ?? 0
+    seen.set(norm, count + 1)
+    return count === 0 ? norm : `${norm}_${count + 1}`
+  })
+
+  const rows: Record<string, unknown>[] = []
+  for (let i = headerRow + 1; i < matrix.length; i++) {
+    const row = matrix[i]
+    const obj: Record<string, unknown> = {}
+    for (let c = 0; c < headers.length; c++) {
+      const key = headers[c]
+      if (!key) continue
+      obj[key] = row[c]
+    }
+    rows.push(obj)
+  }
+  return rows
+}
+
+const DATE_COLUMNS = new Set([
+  'mtn_expiry', 'mtn_start', 'cloud_start', 'cloud_end', 'cms_install_date',
+  // migration 067
+  'hyb_live_date', 'einv_live_date', 'einv_po_rcvd_date', 'kiosk_po_date',
+  // migration 068
+  'wspp_live_date',
+])
+
+// CRM-sheet columns that are boolean checkboxes in Excel, not text
+const CRM_BOOL_COLUMNS = new Set(['kiosk_survey_form'])
+
+// ============================================================================
+// EINV & WSPP (SST) sheet — second ingestion source
+// ============================================================================
+// WHY: The xlsx has a second tab with E-Invoice V1/V2 signup, WhatsApp setup,
+// SST registration/period, fee/payment status, and portal credentials. These
+// have never been imported — this merge is additive.
+//
+// Data quirks handled:
+// - Sheet name has trailing space: 'EINV & WSPP (SST) ' — match via .trim()
+// - Headers are on row 2 (not row 1) — use { range: 1 } in sheet_to_json
+// - Headers have embedded \n (e.g. 'E-INV V1\n(RM699-setup)') which
+//   normalizeHeaders collapses to single spaces — mapping keys use that form
+// - Cells contain #REF!/#N/A errors — filtered to null
+
+const EINV_SHEET_NAME = 'EINV & WSPP (SST)' // compare with .trim()
+const EINV_JOIN_KEY = 'ACC NO' // differs from CRM sheet's 'ACCT NO'
+
+// xlsx normalized header → (db column, parser type)
+type EinvParser = 'str' | 'bool' | 'date'
+const EINV_COLUMN_MAP: Record<string, { dbCol: string; parser: EinvParser }> = {
+  'SST Registered no': { dbCol: 'sst_registration_no', parser: 'str' },
+  'Tarikh Kuatkuasa Pendaftaran': { dbCol: 'sst_start_date', parser: 'date' },
+  'Tempoh bercukai (1 or 2mnth)': { dbCol: 'sst_frequency', parser: 'str' },
+  'Tempoh Bercukai Beikutnya (1 or 2mnth)': { dbCol: 'sst_period_next', parser: 'str' },
+  'E-INV V1 (RM699-setup)': { dbCol: 'einv_v1_signed', parser: 'bool' },
+  'E-INV V2 (RM500-Yearly Hosting)': { dbCol: 'einv_v2_signed', parser: 'bool' },
+  'WHATSAPP SETUP (RM500-Yearly Hosting)': { dbCol: 'has_whatsapp', parser: 'bool' },
+  'STATUS INSTALLATION': { dbCol: 'einv_install_status', parser: 'str' },
+  'Username PSW: Medexone@603 / Medex@603': { dbCol: 'einv_portal_credentials', parser: 'str' },
+  'INSTALL DATE (E-INV V2)': { dbCol: 'einv_install_date', parser: 'date' },
+  'Set up fee RM699': { dbCol: 'einv_setup_fee_status', parser: 'str' },
+  'Hosting fee status RM500': { dbCol: 'einv_hosting_fee_status', parser: 'str' },
+  'Payment Date (only Hosting)': { dbCol: 'einv_payment_date', parser: 'date' },
+}
+
+function toBool(val: unknown): boolean | null {
+  if (val == null || val === '') return null
+  if (typeof val === 'boolean') return val
+  const s = String(val).trim().toLowerCase()
+  if (s === 'true' || s === '1' || s === 'yes' || s === 'y') return true
+  if (s === 'false' || s === '0' || s === 'no' || s === 'n') return false
+  return null
+}
+
+function cleanStr(val: unknown): string | null {
+  const s = toStr(val)
+  if (!s) return null
+  // Filter Excel error sentinels
+  if (['#REF!', '#N/A', '#VALUE!', '#NAME?', '#DIV/0!'].includes(s)) return null
+  return s
+}
+
+type EinvPayload = Record<string, string | boolean | null>
+
+function parseEinvRows(rows: Record<string, unknown>[]): Map<string, EinvPayload> {
+  const normalized = normalizeHeaders(rows)
+  const byCode = new Map<string, EinvPayload>()
+
+  for (const row of normalized) {
+    const code = cleanStr(row[EINV_JOIN_KEY])
+    if (!code) continue
+
+    const payload: EinvPayload = {}
+    for (const [xlsxHeader, { dbCol, parser }] of Object.entries(EINV_COLUMN_MAP)) {
+      const raw = row[xlsxHeader]
+      if (parser === 'bool') payload[dbCol] = toBool(raw)
+      else if (parser === 'date') payload[dbCol] = fixDate(raw)
+      else payload[dbCol] = cleanStr(raw)
+    }
+
+    // Derived flags. NULL semantics: only set when we have positive signal.
+    const v1 = payload.einv_v1_signed
+    const v2 = payload.einv_v2_signed
+    if (v1 === true || v2 === true) payload.has_e_invoice = true
+    else if (v1 === false && v2 === false) payload.has_e_invoice = false
+    // else leave undefined → not included in payload → Supabase won't touch it
+
+    payload.has_sst = payload.sst_registration_no != null
+
+    byCode.set(code, payload)
+  }
+
+  return byCode
+}
+
+function parseRows(
+  rows: Record<string, unknown>[],
+  einvData: Map<string, EinvPayload>,
+): Record<string, string | boolean | null>[] {
   const normalized = normalizeHeaders(rows)
   return normalized
     .filter((row) => toStr(row['ACCT NO']))
     .map((row) => {
-      const clinic: Record<string, string | null> = {}
+      const clinic: Record<string, string | boolean | null> = {}
       for (const [csvCol, dbCol] of Object.entries(COLUMN_MAP)) {
-        // Date columns need raw value (could be Excel serial number)
         if (DATE_COLUMNS.has(dbCol)) {
           clinic[dbCol] = fixDate(row[csvCol])
+        } else if (CRM_BOOL_COLUMNS.has(dbCol)) {
+          clinic[dbCol] = toBool(row[csvCol])
         } else {
           clinic[dbCol] = toStr(row[csvCol])
         }
+      }
+      // Merge EINV fields for clinics that appear in the EINV sheet.
+      // Skip undefined AND null — blank xlsx cells mean "no signal", preserve existing.
+      const code = clinic.clinic_code as string | null
+      if (code && einvData.has(code)) {
+        const einv = einvData.get(code)!
+        for (const [k, v] of Object.entries(einv)) {
+          if (v === undefined || v === null) continue
+          clinic[k] = v
+        }
+      }
+      // Homogenize NOT NULL boolean columns across every row in the batch.
+      // WHY: supabase-js bulk upsert builds a single INSERT from the UNION of
+      // all keys across the batch. Rows missing any column get NULL for that
+      // column — which fails NOT NULL constraints on has_e_invoice/has_sst/
+      // has_whatsapp (migration 041). Explicitly defaulting them to false
+      // on every row gives supabase-js a homogeneous schema and lets INSERTs
+      // for new clinics succeed. xlsx is the source of truth, so false when
+      // the EINV sheet has no data is the correct semantics.
+      for (const col of ['has_e_invoice', 'has_sst', 'has_whatsapp'] as const) {
+        if (clinic[col] === null || clinic[col] === undefined) clinic[col] = false
       }
       return clinic
     })
@@ -165,6 +336,8 @@ export async function POST(request: NextRequest) {
     const fileName = file.name.toLowerCase()
     const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls')
     let rows: Record<string, unknown>[] = []
+    let einvRows: Record<string, unknown>[] = []
+    let einvSheetFound = false
 
     if (isExcel) {
       // Parse Excel file
@@ -179,7 +352,20 @@ export async function POST(request: NextRequest) {
         : workbook.SheetNames[0]
 
       const sheet = workbook.Sheets[sheetName]
-      rows = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+      // WHY: readSheetWithDedupedHeaders handles the duplicate "MTN Important Note"
+      // headers at columns 45/46 by appending "_2" to the second one.
+      rows = readSheetWithDedupedHeaders(sheet, { headerRow: 0 })
+
+      // EINV & WSPP (SST) sheet — match trimmed (the real sheet name has a trailing space).
+      // Headers are on row 2 (not row 1) → use headerRow: 1 (0-indexed).
+      const einvSheetName = workbook.SheetNames.find(
+        (n) => n.trim() === EINV_SHEET_NAME,
+      )
+      if (einvSheetName) {
+        einvSheetFound = true
+        const einvSheet = workbook.Sheets[einvSheetName]
+        einvRows = readSheetWithDedupedHeaders(einvSheet, { headerRow: 1 })
+      }
     } else {
       // Parse CSV
       const csvText = await file.text()
@@ -215,8 +401,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Map rows to clinic records
-    const clinics = parseRows(rows)
+    // Build EINV merge map (empty if sheet not present — CSV path or older xlsx).
+    const einvData = parseEinvRows(einvRows)
+
+    // Map rows to clinic records (merges EINV fields inline for matched clinic_codes).
+    const clinics = parseRows(rows, einvData)
 
     if (clinics.length === 0) {
       return NextResponse.json(
@@ -224,6 +413,13 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       )
     }
+
+    // SAFETY: abort before stale cleanup if CRM sheet looks suspiciously small.
+    // WHY: the existing flow deletes every clinic with updated_at < uploadStart after upsert.
+    // A partial CSV/xlsx (e.g. test file with 10 rows) would nuke the other ~3,900 clinics.
+    // 1000 is a generous floor — the production file has ~3,900.
+    const MIN_CLINICS_FOR_STALE_CLEANUP = 1000
+    const willRunStaleCleanup = clinics.length >= MIN_CLINICS_FOR_STALE_CLEANUP
 
     // WHY: Upsert instead of delete+insert. The old approach (delete all → insert)
     // was risky: if insert failed mid-batch, the clinics table was left empty/partial.
@@ -236,6 +432,17 @@ export async function POST(request: NextRequest) {
     const uploadStart = new Date().toISOString()
     const BATCH_SIZE = 500
     let upsertedCount = 0
+
+    // WHY: clinics has no trigger to auto-update `updated_at` on UPDATE (unlike
+    // tickets — see migration 003). Without explicit assignment, UPSERT's UPDATE
+    // path leaves the column at its old value, and the stale-cleanup DELETE below
+    // wipes rows we just upserted in this same request if their prior updated_at
+    // happens to be older than uploadStart. Stamping every upsert payload with
+    // uploadStart gives stale-cleanup a clean "touched this run" marker (uploadStart
+    // == updated_at so "updated_at < uploadStart" is false for upserted rows).
+    for (const c of clinics) {
+      c.updated_at = uploadStart
+    }
 
     for (let i = 0; i < clinics.length; i += BATCH_SIZE) {
       const batch = clinics.slice(i, i + BATCH_SIZE)
@@ -261,13 +468,19 @@ export async function POST(request: NextRequest) {
     // operational data (UV/AD IDs, workstation count, etc.). This is by design —
     // if a clinic is no longer a customer, remove it. The audit_log preserves
     // the last known state for recovery if needed.
-    await supabase.from('clinics').delete().lt('updated_at', uploadStart)
+    // SAFETY: skipped for small files (see MIN_CLINICS_FOR_STALE_CLEANUP).
+    if (willRunStaleCleanup) {
+      await supabase.from('clinics').delete().lt('updated_at', uploadStart)
+    }
 
     const insertedCount = upsertedCount
 
     return NextResponse.json({
       success: true,
       count: insertedCount,
+      einvSheetFound,
+      einvRowsMerged: einvData.size,
+      staleCleanupRan: willRunStaleCleanup,
       timestamp: new Date().toISOString(),
     })
   } catch (err) {

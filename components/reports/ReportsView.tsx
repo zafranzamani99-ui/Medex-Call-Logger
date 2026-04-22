@@ -6,6 +6,7 @@ import { createClient } from '@/lib/supabase/client'
 import type { Clinic } from '@/lib/types'
 import Button from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
+import { ModalDialog } from '@/components/Modal'
 import {
   HorizontalDndProvider,
   SortableHeader,
@@ -35,11 +36,12 @@ import {
 //     · In-app PDF Preview Modal (save-as-PDF without leaving the app)
 //     · Row WhatsApp + copy-phone quick actions
 
-type ReportTab = 'maintenance' | 'cloud' | 'einvoice'
-const TABS: Array<{ id: ReportTab; label: string }> = [
-  { id: 'maintenance', label: 'Maintenance' },
-  { id: 'cloud', label: 'Cloud Backup' },
-  { id: 'einvoice', label: 'E-Invoice' },
+type ReportTab = 'subscriptions' | 'maintenance' | 'cloud' | 'einvoice'
+const TABS: Array<{ id: ReportTab; label: string; hint: string }> = [
+  { id: 'subscriptions', label: 'Subscriptions', hint: 'Product-combo overview — who has what, any combination filter' },
+  { id: 'maintenance',   label: 'MTN Renewal',   hint: 'CMS maintenance expiry queue — who to chase this week' },
+  { id: 'cloud',         label: 'Cloud Renewal', hint: 'Cloud backup expiry queue — same workflow as MTN but for cloud' },
+  { id: 'einvoice',      label: 'E-Invoice',     hint: 'E-Invoice adoption funnel — PO → Signed → Paid → Live' },
 ]
 
 // MEDEXCRM: cloud expiries before this date are treated as "Terminated".
@@ -423,7 +425,7 @@ function PrintPreviewModal({ data, onClose }: { data: PrintData | null; onClose:
 function StatCard({ label, value, tone = 'default', active, onClick, className }: {
   label: string
   value: number | string
-  tone?: 'default' | 'green' | 'amber' | 'red' | 'indigo' | 'purple'
+  tone?: 'default' | 'green' | 'amber' | 'red' | 'indigo' | 'purple' | 'blue' | 'gray'
   active?: boolean
   onClick?: () => void
   className?: string
@@ -435,6 +437,8 @@ function StatCard({ label, value, tone = 'default', active, onClick, className }
     red: 'text-red-400',
     indigo: 'text-indigo-400',
     purple: 'text-purple-400',
+    blue: 'text-sky-400',
+    gray: 'text-zinc-400',
   }[tone]
   const toneBorder = active ? {
     default: 'border-text-primary/40',
@@ -443,6 +447,8 @@ function StatCard({ label, value, tone = 'default', active, onClick, className }
     red: 'border-red-400/50',
     indigo: 'border-indigo-400/50',
     purple: 'border-purple-400/50',
+    blue: 'border-sky-400/50',
+    gray: 'border-zinc-400/50',
   }[tone] : 'border-border'
 
   return (
@@ -702,6 +708,116 @@ function saveReportPref(storageKey: string, suffix: string, value: unknown) {
   try { localStorage.setItem(`${REPORT_STORAGE_PREFIX}:${storageKey}:${suffix}`, JSON.stringify(value)) } catch { /* noop */ }
 }
 
+// Excel-style per-column filter: click icon in header → searchable checkbox list
+// of distinct values for that column. Multi-select + sticky per storageKey.
+function HeaderFilter({ headerText, values, selected, onChange, totalRows }: {
+  headerText: string
+  values: string[]
+  selected: Set<string>
+  onChange: (next: Set<string>) => void
+  totalRows: number
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false); setSearch('')
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  const displayed = search.trim()
+    ? values.filter(v => v.toLowerCase().includes(search.toLowerCase()))
+    : values
+
+  const toggleValue = (v: string) => {
+    const next = new Set(selected)
+    if (next.has(v)) next.delete(v); else next.add(v)
+    onChange(next)
+  }
+
+  const activeCount = selected.size
+  const hasFilter = activeCount > 0
+
+  return (
+    <span ref={ref} className="relative inline-block align-middle" onPointerDown={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen(o => !o); setSearch('') }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className={`ml-1 inline-flex items-center justify-center size-5 rounded border text-[10px] transition cursor-pointer ${
+          hasFilter
+            ? 'bg-accent/20 border-accent/50 text-accent'
+            : 'border-border text-text-muted hover:bg-surface hover:text-text-primary'
+        }`}
+        title={hasFilter ? `${activeCount} selected — click to edit` : `Filter ${headerText}`}
+      >
+        {hasFilter ? <span className="font-semibold leading-none">{activeCount}</span> : (
+          <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18M6 12h12m-8 8h4" />
+          </svg>
+        )}
+      </button>
+      {open && (
+        <div
+          className="absolute z-50 top-full mt-1 left-0 bg-surface border border-border rounded-lg shadow-theme-lg w-[260px] max-h-[340px] flex flex-col"
+          onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="px-2 pt-2 pb-1 flex-shrink-0 border-b border-border">
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={`Search ${values.length} values...`}
+              className="w-full px-2 py-1.5 bg-surface-inset border border-border rounded text-[13px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); setSearch('') } }}
+            />
+            <div className="flex items-center gap-2 mt-1.5 text-[11px]">
+              <button type="button" onClick={() => onChange(new Set(displayed))} className="text-accent hover:underline">
+                Select {search ? 'matches' : 'all'}
+              </button>
+              <span className="text-text-muted">·</span>
+              <button type="button" onClick={() => onChange(new Set())} className="text-accent hover:underline">Clear</button>
+              <span className="ml-auto text-text-muted tabular-nums">{activeCount}/{values.length} · {totalRows} rows</span>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto py-1">
+            {displayed.length === 0 && (
+              <p className="px-3 py-2 text-[12px] text-text-muted">No matches</p>
+            )}
+            {displayed.map(v => (
+              <button
+                key={v || '__blank__'}
+                type="button"
+                onClick={() => toggleValue(v)}
+                className="w-full flex items-center gap-2 px-3 py-1 text-[13px] text-text-secondary hover:bg-surface-raised transition-colors text-left"
+              >
+                <span className={`size-3.5 rounded border flex items-center justify-center flex-shrink-0 ${
+                  selected.has(v) ? 'bg-accent border-accent' : 'border-border'
+                }`}>
+                  {selected.has(v) && (
+                    <svg className="size-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </span>
+                <span className="truncate text-left">{v || <span className="text-text-muted italic">(blank)</span>}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </span>
+  )
+}
+
 function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMessage = 'No records', storageKey, rawValues }: {
   headers: string[]
   rows: React.ReactNode[][]
@@ -738,6 +854,62 @@ function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMess
   useEffect(() => { saveReportPref(storageKey, 'widths', widths) }, [widths, storageKey])
   useEffect(() => { saveReportPref(storageKey, 'order', order) }, [order, storageKey])
 
+  // Per-column filter state. Key = original column index (stringified),
+  // value = array of allowed raw values. Persisted per storageKey so filters
+  // survive tab switches. Empty object = no filters active.
+  const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>(() =>
+    loadReportPref<Record<string, string[]>>(storageKey, 'colFilters', {})
+  )
+  useEffect(() => { saveReportPref(storageKey, 'colFilters', columnFilters) }, [columnFilters, storageKey])
+
+  // Distinct non-blank values per column (from rawValues). Sorted alphabetically.
+  const distinctValues = useMemo(() => {
+    const m: Record<number, string[]> = {}
+    if (!rawValues || rawValues.length === 0) return m
+    for (let c = 0; c < headers.length; c++) {
+      const s = new Set<string>()
+      for (const row of rawValues) {
+        const v = String(row[c] ?? '').trim()
+        if (v) s.add(v)
+      }
+      m[c] = Array.from(s).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
+    }
+    return m
+  }, [rawValues, headers.length])
+
+  // Row indices that pass ALL active column filters. null = no filter active → show all.
+  const filteredRowIndices = useMemo(() => {
+    const activeKeys = Object.keys(columnFilters).filter(k => (columnFilters[k] || []).length > 0)
+    if (!rawValues || activeKeys.length === 0) return null
+    const filters = activeKeys.map(k => ({ idx: Number(k), allowed: new Set(columnFilters[k]) }))
+    const out: number[] = []
+    for (let i = 0; i < rawValues.length; i++) {
+      const row = rawValues[i]
+      let ok = true
+      for (const f of filters) {
+        const v = String(row[f.idx] ?? '').trim()
+        if (!f.allowed.has(v)) { ok = false; break }
+      }
+      if (ok) out.push(i)
+    }
+    return out
+  }, [rawValues, columnFilters])
+
+  const setFilterFor = useCallback((colIdx: number, next: Set<string>) => {
+    setColumnFilters(prev => {
+      const key = String(colIdx)
+      const arr = Array.from(next)
+      if (arr.length === 0) {
+        if (!(key in prev)) return prev
+        const copy = { ...prev }; delete copy[key]; return copy
+      }
+      return { ...prev, [key]: arr }
+    })
+  }, [])
+
+  const clearAllFilters = useCallback(() => setColumnFilters({}), [])
+  const activeFilterCount = Object.values(columnFilters).filter(v => v && v.length > 0).length
+
   const getWidth = useCallback((id: string) => widths[id] ?? REPORT_DEFAULT_COL_WIDTH, [widths])
   const setWidth = useCallback((id: string, w: number) => {
     setWidths(prev => ({ ...prev, [id]: w }))
@@ -768,17 +940,24 @@ function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMess
     setWidth(id, width)
   }, [columnIds, headers, rawValues, setWidth])
 
+  // Apply per-column filters BEFORE pagination so page 1 = page 1 of filtered set.
+  const workingRows = useMemo(() => filteredRowIndices ? filteredRowIndices.map(i => rows[i]) : rows, [rows, filteredRowIndices])
+  const workingKeys = useMemo(() => rowKeys && filteredRowIndices ? filteredRowIndices.map(i => rowKeys[i]) : rowKeys, [rowKeys, filteredRowIndices])
+  const workingColours = useMemo(() => rowColours && filteredRowIndices ? filteredRowIndices.map(i => rowColours[i]) : rowColours, [rowColours, filteredRowIndices])
+
   // Pagination
   const [page, setPage] = useState(0)
-  const total = rows.length
+  const total = workingRows.length
   const pageCount = Math.max(1, Math.ceil(total / REPORT_PAGE_SIZE))
   useEffect(() => { if (page > pageCount - 1) setPage(0) }, [pageCount, page])
+  // Reset to first page when filters change so user doesn't stare at an empty page 4.
+  useEffect(() => { setPage(0) }, [columnFilters])
 
   const startIdx = page * REPORT_PAGE_SIZE
   const endIdx = Math.min(startIdx + REPORT_PAGE_SIZE, total)
-  const visibleRows = rows.slice(startIdx, endIdx)
-  const visibleColours = rowColours?.slice(startIdx, endIdx)
-  const visibleKeys = rowKeys?.slice(startIdx, endIdx)
+  const visibleRows = workingRows.slice(startIdx, endIdx)
+  const visibleColours = workingColours?.slice(startIdx, endIdx)
+  const visibleKeys = workingKeys?.slice(startIdx, endIdx)
 
   // Map order → original index (reordering just permutes original indices).
   const orderedIndices = useMemo(
@@ -793,6 +972,17 @@ function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMess
 
   return (
     <div className="border border-border rounded-lg overflow-hidden">
+      {activeFilterCount > 0 && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border bg-surface-raised/30 text-[12px]">
+          <svg className="size-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h18M6 12h12m-8 8h4" />
+          </svg>
+          <span className="text-text-secondary">
+            {activeFilterCount} column{activeFilterCount > 1 ? 's' : ''} filtered · showing <span className="font-semibold tabular-nums">{total.toLocaleString()}</span> of <span className="tabular-nums">{rows.length.toLocaleString()}</span>
+          </span>
+          <button onClick={clearAllFilters} className="ml-auto text-accent hover:underline">Clear all filters</button>
+        </div>
+      )}
       <PlainResizeProvider widths={widths} onChangeWidth={setWidth}>
         <div ref={scrollRef} className="overflow-x-auto relative report-overflow">
           <HorizontalDndProvider columnIds={order} onReorder={handleReorder}>
@@ -802,6 +992,9 @@ function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMess
                   {orderedIndices.map(origIdx => {
                     const id = columnIds[origIdx]
                     const width = getWidth(id)
+                    const columnValues = distinctValues[origIdx] || []
+                    const hasValues = columnValues.length > 0
+                    const selected = new Set(columnFilters[String(origIdx)] || [])
                     return (
                       <SortableHeader
                         key={id}
@@ -810,8 +1003,19 @@ function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMess
                         className="relative bg-surface-raised px-3 py-2 text-[11px] font-semibold text-text-muted uppercase tracking-wider border-b border-border whitespace-nowrap cursor-grab active:cursor-grabbing select-none"
                         style={{ width, minWidth: width, maxWidth: width }}
                       >
-                        <span className="inline-block truncate pr-2" style={{ maxWidth: width - 16 }}>
-                          {headers[origIdx]}
+                        <span className="inline-flex items-center gap-1 pr-2 max-w-full">
+                          <span className="inline-block truncate" style={{ maxWidth: width - 40 }}>
+                            {headers[origIdx]}
+                          </span>
+                          {hasValues && (
+                            <HeaderFilter
+                              headerText={headers[origIdx]}
+                              values={columnValues}
+                              selected={selected}
+                              onChange={(next) => setFilterFor(origIdx, next)}
+                              totalRows={rawValues?.length ?? 0}
+                            />
+                          )}
                         </span>
                         <PlainResizeHandle columnId={id} currentWidth={width} onAutoFit={rawValues ? () => autoFit(id) : undefined} />
                       </SortableHeader>
@@ -905,6 +1109,243 @@ function ReportTable({ headers, rows, rowKeys, rowColours, onRowClick, emptyMess
   )
 }
 
+// ─ Today's Action Queue ────────────────────────────────────────
+// Urgent counts aggregated across every pipeline so the agent can triage
+// at a glance. Each card jumps to the relevant sub-tab when clicked.
+
+function ActionQueueStrip({ clinics, setActiveTab, visible }: {
+  clinics: Clinic[]
+  setActiveTab: (tab: ReportTab) => void
+  visible: boolean
+}) {
+  const counts = useMemo(() => {
+    const today = new Date(); today.setHours(0, 0, 0, 0)
+    let mtnExpired = 0
+    let mtnExpiring7 = 0
+    let einvInstallPending = 0
+    let einvPaymentPending = 0
+    for (const c of clinics) {
+      // MTN buckets
+      if (c.mtn_expiry) {
+        const d = new Date(c.mtn_expiry); d.setHours(0, 0, 0, 0)
+        if (!Number.isNaN(d.getTime())) {
+          const diff = Math.round((d.getTime() - today.getTime()) / 86400000)
+          if (diff < 0) mtnExpired++
+          else if (diff <= 7) mtnExpiring7++
+        }
+      }
+      // E-Invoice funnel stages (mirrors classifyEinv semantics)
+      if (!c.has_e_invoice && !(c.einv_no_reason && c.einv_no_reason.trim())) {
+        if (c.einv_payment_date) einvInstallPending++
+        else if (c.einv_v1_signed || c.einv_v2_signed) einvPaymentPending++
+      }
+    }
+    return { mtnExpired, mtnExpiring7, einvInstallPending, einvPaymentPending }
+  }, [clinics])
+
+  const totalAction = counts.mtnExpired + counts.mtnExpiring7 + counts.einvInstallPending + counts.einvPaymentPending
+
+  const cards: Array<{
+    label: string
+    value: number
+    tone: 'red' | 'amber' | 'sky' | 'violet'
+    onClick: () => void
+    sub: string
+  }> = [
+    { label: 'MTN Expired',       value: counts.mtnExpired,        tone: 'red',    sub: 'Chase or remove',   onClick: () => setActiveTab('maintenance') },
+    { label: 'MTN Expiring ≤7d',  value: counts.mtnExpiring7,      tone: 'amber',  sub: 'Call renewal now',  onClick: () => setActiveTab('maintenance') },
+    { label: 'E-Inv Install Pending', value: counts.einvInstallPending, tone: 'sky', sub: 'Paid, schedule install', onClick: () => setActiveTab('einvoice') },
+    { label: 'E-Inv Payment Pending', value: counts.einvPaymentPending, tone: 'violet', sub: 'Signed, collect payment', onClick: () => setActiveTab('einvoice') },
+  ]
+
+  const toneMap = {
+    red:    'border-red-500/40 hover:border-red-500/70 hover:bg-red-500/10',
+    amber:  'border-amber-500/40 hover:border-amber-500/70 hover:bg-amber-500/10',
+    sky:    'border-sky-500/40 hover:border-sky-500/70 hover:bg-sky-500/10',
+    violet: 'border-violet-500/40 hover:border-violet-500/70 hover:bg-violet-500/10',
+  }
+  const valueToneMap = {
+    red:    'text-red-400',
+    amber:  'text-amber-400',
+    sky:    'text-sky-400',
+    violet: 'text-violet-400',
+  }
+
+  if (!visible) return null
+
+  return (
+    <div className="mb-4 border border-border rounded-xl bg-gradient-to-br from-surface-raised/20 to-transparent p-3">
+      <div className="flex items-center gap-2 mb-2 px-1">
+        <svg className="size-3.5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+        <span className="text-[11px] uppercase tracking-wider text-text-muted font-semibold">Today&apos;s Action Queue</span>
+        <span className="text-[11px] text-text-tertiary">· {totalAction.toLocaleString()} item{totalAction === 1 ? '' : 's'} need attention · click any card to jump to that tab</span>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {cards.map(card => (
+          <button
+            key={card.label}
+            type="button"
+            onClick={card.onClick}
+            className={`text-left p-3 rounded-lg border bg-surface transition-colors cursor-pointer ${toneMap[card.tone]}`}
+          >
+            <p className="text-[10px] uppercase tracking-wider text-text-muted">{card.label}</p>
+            <p className={`text-2xl font-bold tabular-nums mt-0.5 ${valueToneMap[card.tone]}`}>
+              {card.value.toLocaleString()}
+            </p>
+            <p className="text-[10px] text-text-tertiary mt-0.5">{card.sub}</p>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─ Monthly Snapshot — end-of-month activity report ──────────────
+// Counts transitions that happened within the picked month and exports a
+// single Excel with totals + per-section detail rows.
+
+function MonthlySnapshotModal({ open, onClose, clinics }: {
+  open: boolean
+  onClose: () => void
+  clinics: Clinic[]
+}) {
+  const { toast } = useToast()
+  const now = new Date()
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  const [ym, setYm] = useState(defaultMonth)
+
+  const inMonth = (d: string | null): boolean => {
+    if (!d) return false
+    return d.startsWith(ym)
+  }
+
+  const stats = useMemo(() => {
+    let mtnRenewed = 0, einvPoRcvd = 0, einvPaid = 0, einvLive = 0
+    const lists = {
+      mtnRenewed: [] as Clinic[],
+      einvPoRcvd: [] as Clinic[],
+      einvPaid: [] as Clinic[],
+      einvLive: [] as Clinic[],
+    }
+    for (const c of clinics) {
+      if (inMonth(c.mtn_start)) { mtnRenewed++; lists.mtnRenewed.push(c) }
+      if (inMonth(c.einv_po_rcvd_date)) { einvPoRcvd++; lists.einvPoRcvd.push(c) }
+      if (inMonth(c.einv_payment_date)) { einvPaid++; lists.einvPaid.push(c) }
+      if (inMonth(c.einv_live_date)) { einvLive++; lists.einvLive.push(c) }
+    }
+    return { mtnRenewed, einvPoRcvd, einvPaid, einvLive, lists }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clinics, ym])
+
+  const monthLabel = (() => {
+    const [y, m] = ym.split('-').map(Number)
+    const d = new Date(y, (m || 1) - 1, 1)
+    return d.toLocaleString('en-GB', { month: 'long', year: 'numeric' })
+  })()
+
+  const handleDownload = async () => {
+    const XLSX = await import('xlsx')
+    const wb = XLSX.utils.book_new()
+
+    // Summary sheet
+    const summary: (string | number)[][] = [
+      [`Medex — Monthly Snapshot · ${monthLabel}`],
+      [],
+      ['Metric', 'Count'],
+      ['MTN Renewals (mtn_start this month)', stats.mtnRenewed],
+      ['E-Invoice POs Received', stats.einvPoRcvd],
+      ['E-Invoice Hosting Paid', stats.einvPaid],
+      ['E-Invoice Gone Live', stats.einvLive],
+    ]
+    const summaryWs = XLSX.utils.aoa_to_sheet(summary)
+    summaryWs['!cols'] = [{ wch: 42 }, { wch: 12 }]
+    XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary')
+
+    const addListSheet = (name: string, dateField: keyof Clinic, list: Clinic[]) => {
+      if (list.length === 0) return
+      const aoa: (string | number)[][] = [
+        ['Acct No', 'Clinic', 'State', 'Product', String(dateField), 'Contact', 'Phone', 'Email'],
+        ...list.map(c => [
+          c.clinic_code, c.clinic_name || '', c.state || '', c.product || '',
+          (c[dateField] as string) || '',
+          c.registered_contact || '', c.clinic_phone || '', c.email_main || '',
+        ]),
+      ]
+      const ws = XLSX.utils.aoa_to_sheet(aoa)
+      ws['!cols'] = [{ wch: 10 }, { wch: 40 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 22 }, { wch: 18 }, { wch: 26 }]
+      XLSX.utils.book_append_sheet(wb, ws, name)
+    }
+
+    addListSheet('MTN Renewals', 'mtn_start', stats.lists.mtnRenewed)
+    addListSheet('E-Inv POs', 'einv_po_rcvd_date', stats.lists.einvPoRcvd)
+    addListSheet('E-Inv Paid', 'einv_payment_date', stats.lists.einvPaid)
+    addListSheet('E-Inv Live', 'einv_live_date', stats.lists.einvLive)
+
+    XLSX.writeFile(wb, `monthly-snapshot-${ym}.xlsx`)
+    toast(`Downloaded snapshot for ${monthLabel}`, 'success')
+  }
+
+  const total = stats.mtnRenewed + stats.einvPoRcvd + stats.einvPaid + stats.einvLive
+
+  return (
+    <ModalDialog open={open} onClose={onClose} title="Monthly Snapshot" size="md">
+      <div className="p-4 space-y-4">
+        <div>
+          <label className="text-[11px] uppercase tracking-wider text-text-muted block mb-1">Month</label>
+          <input
+            type="month"
+            value={ym}
+            onChange={e => setYm(e.target.value)}
+            className="w-full px-3 py-2 bg-surface-inset border border-border rounded text-[13px] text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          <p className="text-[11px] text-text-tertiary mt-1">Counts any clinic whose relevant date lands in <span className="text-text-secondary font-medium">{monthLabel}</span>.</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { label: 'MTN Renewals',     value: stats.mtnRenewed,  tone: 'text-emerald-400' },
+            { label: 'E-Inv POs',        value: stats.einvPoRcvd,  tone: 'text-amber-400' },
+            { label: 'E-Inv Paid',       value: stats.einvPaid,    tone: 'text-sky-400' },
+            { label: 'E-Inv Live',       value: stats.einvLive,    tone: 'text-violet-400' },
+          ].map(s => (
+            <div key={s.label} className="p-2.5 rounded-lg border border-border bg-surface-inset/30">
+              <p className="text-[10px] uppercase tracking-wider text-text-muted">{s.label}</p>
+              <p className={`text-xl font-bold tabular-nums mt-0.5 ${s.tone}`}>{s.value.toLocaleString()}</p>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-[12px] text-text-tertiary">
+          Download includes one sheet per metric with the full clinic detail — acct no, name, state, product, relevant date, contact, phone, email.
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-border">
+        <span className="text-[12px] text-text-muted">
+          {total === 0 ? 'No activity in this month' : `${total.toLocaleString()} total items across all metrics`}
+        </span>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-1.5 text-[13px] rounded text-text-secondary hover:text-text-primary hover:bg-surface-inset transition-colors"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={total === 0}
+            className="px-4 py-1.5 text-[13px] font-medium rounded bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Download Excel
+          </button>
+        </div>
+      </div>
+    </ModalDialog>
+  )
+}
+
 // ─ Export button group (shared across sub-reports) ─────────────
 
 function ExportButtons({ onExcel, onPdfPreview, onPrint }: {
@@ -948,6 +1389,475 @@ function isChangeProvider(c: Clinic): boolean {
   const a = (c.renewal_status || '').toLowerCase()
   const b = (c.status_renewal || '').toLowerCase()
   return a.includes('change') || b.includes('change')
+}
+
+// ─ Subscriptions Overview ─────────────────────────────────────
+// Single-view combinatorial filter: every clinic × every product/service.
+// Answers "who has WhatsApp only?" or "GFLEX + CLAIMEX" or "MHIS without SST" in one click.
+//
+// Two categories of filters:
+//  - SOFTWARE_LIST: substring match on the `product` text field (CMS, GFLEX,
+//    MHIS, EM2, CLAIMEX, HARDWARE). A clinic can have bundled products like
+//    "CMS+GFLEX" or "MHIS+CLAIMEX" — substring match catches both.
+//  - SERVICE_LIST: boolean flags / date checks (MTN active, Cloud active,
+//    E-Invoice, WhatsApp, SST).
+
+type SubFilter = 'any' | 'yes' | 'no'
+type ProductId = 'mtn' | 'cloud' | 'einvoice' | 'whatsapp' | 'sst'
+type SoftwareId = 'cms' | 'gflex' | 'mhis' | 'em2' | 'claimex' | 'hardware'
+
+function isDateActive(d: string | null): boolean {
+  if (!d) return false
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const dt = new Date(d)
+  if (Number.isNaN(dt.getTime())) return false
+  return dt.getTime() >= today.getTime()
+}
+
+function hasProduct(c: Clinic, id: ProductId): boolean {
+  switch (id) {
+    case 'mtn': return isDateActive(c.mtn_expiry)
+    case 'cloud': return isDateActive(c.cloud_end)
+    case 'einvoice': return !!c.has_e_invoice
+    case 'whatsapp': return !!c.has_whatsapp
+    case 'sst': return !!c.has_sst
+  }
+}
+
+function hasSoftware(c: Clinic, id: SoftwareId): boolean {
+  const p = (c.product || '').toUpperCase()
+  if (!p) return false
+  switch (id) {
+    case 'cms': return p.includes('CMS')
+    case 'gflex': return p.includes('GFLEX')
+    case 'mhis': return p.includes('MHIS')
+    case 'em2': return p.includes('EM2')
+    case 'claimex': return p.includes('CLAIMEX')
+    case 'hardware': return p.includes('HARDWARE')
+  }
+}
+
+const SERVICE_LIST: Array<{ id: ProductId; label: string; tone: string }> = [
+  { id: 'mtn',       label: 'MTN Active', tone: 'emerald' },
+  { id: 'cloud',     label: 'Cloud Bkp',  tone: 'indigo'  },
+  { id: 'einvoice',  label: 'E-Invoice',  tone: 'blue'    },
+  { id: 'whatsapp',  label: 'WhatsApp',   tone: 'green'   },
+  { id: 'sst',       label: 'SST',        tone: 'amber'   },
+]
+
+const SOFTWARE_LIST: Array<{ id: SoftwareId; label: string; tone: string }> = [
+  { id: 'cms',      label: 'CMS',      tone: 'default' },
+  { id: 'gflex',    label: 'GFLEX',    tone: 'purple'  },
+  { id: 'mhis',     label: 'MHIS',     tone: 'indigo'  },
+  { id: 'em2',      label: 'EM2',      tone: 'red'     },
+  { id: 'claimex',  label: 'CLAIMEX',  tone: 'amber'   },
+  { id: 'hardware', label: 'Hardware', tone: 'gray'    },
+]
+
+function SubscriptionsReport({ clinics, generatedBy, onClinicClick, onCountChange, openPreview }: {
+  clinics: Clinic[]
+  generatedBy: string
+  onClinicClick?: (code: string) => void
+  onCountChange: (n: number) => void
+  openPreview: (data: PrintData) => void
+}) {
+  const { toast } = useToast()
+  const [serviceFilters, setServiceFilters] = useState<Record<ProductId, SubFilter>>({
+    mtn: 'any', cloud: 'any', einvoice: 'any', whatsapp: 'any', sst: 'any',
+  })
+  const [softwareFilters, setSoftwareFilters] = useState<Record<SoftwareId, SubFilter>>({
+    cms: 'any', gflex: 'any', mhis: 'any', em2: 'any', claimex: 'any', hardware: 'any',
+  })
+
+  // Bulk selection — Set of clinic_codes. Persists across filter changes so user
+  // can pile up picks from multiple filter passes, then act on the whole batch.
+  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set())
+  const toggleOne = useCallback((code: string) => {
+    setSelectedCodes(prev => {
+      const next = new Set(prev)
+      if (next.has(code)) next.delete(code); else next.add(code)
+      return next
+    })
+  }, [])
+  const clearSelection = useCallback(() => setSelectedCodes(new Set()), [])
+
+  // Matrix — each clinic annotated with every service + software flag.
+  const matrix = useMemo(() => clinics.map(c => ({
+    clinic: c,
+    mtn: hasProduct(c, 'mtn'),
+    cloud: hasProduct(c, 'cloud'),
+    einvoice: hasProduct(c, 'einvoice'),
+    whatsapp: hasProduct(c, 'whatsapp'),
+    sst: hasProduct(c, 'sst'),
+    cms: hasSoftware(c, 'cms'),
+    gflex: hasSoftware(c, 'gflex'),
+    mhis: hasSoftware(c, 'mhis'),
+    em2: hasSoftware(c, 'em2'),
+    claimex: hasSoftware(c, 'claimex'),
+    hardware: hasSoftware(c, 'hardware'),
+  })), [clinics])
+
+  // Apply combinatorial filter — AND across every active filter.
+  const filtered = useMemo(() => matrix.filter(row => {
+    for (const p of SERVICE_LIST) {
+      const f = serviceFilters[p.id]
+      if (f === 'any') continue
+      const has = row[p.id]
+      if (f === 'yes' && !has) return false
+      if (f === 'no' && has) return false
+    }
+    for (const s of SOFTWARE_LIST) {
+      const f = softwareFilters[s.id]
+      if (f === 'any') continue
+      const has = row[s.id]
+      if (f === 'yes' && !has) return false
+      if (f === 'no' && has) return false
+    }
+    return true
+  }), [matrix, serviceFilters, softwareFilters])
+
+  // Sort for the table (clinic_code stable ordering).
+  const rowsSorted = useMemo(
+    () => [...filtered].sort((a, b) => a.clinic.clinic_code.localeCompare(b.clinic.clinic_code)),
+    [filtered]
+  )
+
+  useEffect(() => { onCountChange(rowsSorted.length) }, [rowsSorted.length, onCountChange])
+
+  // Per-product totals within the filtered set.
+  const totals = useMemo(() => {
+    const t: Record<ProductId | SoftwareId, number> = {
+      mtn: 0, cloud: 0, einvoice: 0, whatsapp: 0, sst: 0,
+      cms: 0, gflex: 0, mhis: 0, em2: 0, claimex: 0, hardware: 0,
+    }
+    for (const r of rowsSorted) {
+      for (const p of SERVICE_LIST) if (r[p.id]) t[p.id]++
+      for (const s of SOFTWARE_LIST) if (r[s.id]) t[s.id]++
+    }
+    return t
+  }, [rowsSorted])
+
+  const cycleService = (id: ProductId) => setServiceFilters(prev => ({
+    ...prev, [id]: prev[id] === 'any' ? 'yes' : prev[id] === 'yes' ? 'no' : 'any',
+  }))
+  const cycleSoftware = (id: SoftwareId) => setSoftwareFilters(prev => ({
+    ...prev, [id]: prev[id] === 'any' ? 'yes' : prev[id] === 'yes' ? 'no' : 'any',
+  }))
+  const resetFilters = () => {
+    setServiceFilters({ mtn: 'any', cloud: 'any', einvoice: 'any', whatsapp: 'any', sst: 'any' })
+    setSoftwareFilters({ cms: 'any', gflex: 'any', mhis: 'any', em2: 'any', claimex: 'any', hardware: 'any' })
+  }
+
+  const anyActive =
+    SERVICE_LIST.some(p => serviceFilters[p.id] !== 'any') ||
+    SOFTWARE_LIST.some(s => softwareFilters[s.id] !== 'any')
+
+  // Build headers + rows. First column is a selection checkbox (persistent
+  // across filter changes so agents can pile up picks).
+  const headers = [
+    '', // selection checkbox — empty header; select-all lives in the toolbar above
+    'Acct No', 'Clinic', 'State', 'Product',
+    'MTN', 'Cloud', 'E-Inv', 'WhatsApp', 'SST',
+    'CMS', 'GFLEX', 'MHIS', 'EM2', 'CLAIMEX',
+  ]
+  const Chip = ({ on, label }: { on: boolean; label?: string }) => on
+    ? <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">{label ?? '✓'}</span>
+    : <span className="text-text-muted">—</span>
+
+  const rawValues = rowsSorted.map(r => [
+    '', // selection column has no raw value (not filterable)
+    r.clinic.clinic_code, r.clinic.clinic_name || '', r.clinic.state || '', r.clinic.product || '',
+    r.mtn ? 'Yes' : 'No', r.cloud ? 'Yes' : 'No', r.einvoice ? 'Yes' : 'No',
+    r.whatsapp ? 'Yes' : 'No', r.sst ? 'Yes' : 'No',
+    r.cms ? 'Yes' : 'No', r.gflex ? 'Yes' : 'No', r.mhis ? 'Yes' : 'No',
+    r.em2 ? 'Yes' : 'No', r.claimex ? 'Yes' : 'No',
+  ])
+  const rowsRendered: React.ReactNode[][] = rowsSorted.map(r => {
+    const code = r.clinic.clinic_code
+    const isSelected = selectedCodes.has(code)
+    return [
+      <button
+        key="sel"
+        type="button"
+        aria-label={isSelected ? `Deselect ${code}` : `Select ${code}`}
+        onClick={(e) => { e.stopPropagation(); toggleOne(code) }}
+        onPointerDown={(e) => e.stopPropagation()}
+        className={`size-4 rounded border flex items-center justify-center transition-colors ${
+          isSelected
+            ? 'bg-accent border-accent'
+            : 'border-border hover:border-accent/60 bg-surface'
+        }`}
+      >
+        {isSelected && (
+          <svg className="size-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+          </svg>
+        )}
+      </button>,
+      <span key="code" className="font-mono text-[12px] text-accent">{code}</span>,
+      <span key="name" className="text-text-primary">{r.clinic.clinic_name}</span>,
+      r.clinic.state || '—',
+      <span key="p" className="text-[11px] text-text-tertiary">{r.clinic.product || '—'}</span>,
+      <Chip key="mtn" on={r.mtn} />,
+      <Chip key="cloud" on={r.cloud} />,
+      <Chip key="einv" on={r.einvoice} />,
+      <Chip key="wa" on={r.whatsapp} />,
+      <Chip key="sst" on={r.sst} />,
+      <Chip key="cms" on={r.cms} />,
+      <Chip key="gflex" on={r.gflex} />,
+      <Chip key="mhis" on={r.mhis} />,
+      <Chip key="em2" on={r.em2} />,
+      <Chip key="claimex" on={r.claimex} />,
+    ]
+  })
+  const rowKeys = rowsSorted.map(r => r.clinic.clinic_code)
+
+  // ── Bulk action helpers ──────────────────────────────────────────
+  const selectAllVisible = () => {
+    setSelectedCodes(prev => {
+      const next = new Set(prev)
+      for (const r of rowsSorted) next.add(r.clinic.clinic_code)
+      return next
+    })
+  }
+
+  const selectedClinics = useMemo(
+    () => clinics.filter(c => selectedCodes.has(c.clinic_code)),
+    [clinics, selectedCodes]
+  )
+
+  const exportCallList = () => {
+    if (selectedClinics.length === 0) return
+    const header = ['Acct No', 'Clinic', 'State', 'Product', 'Customer Status', 'Contact', 'Phone', 'Contact Tel', 'Email', 'MTN Expiry', 'Cloud End', 'E-Invoice', 'WhatsApp', 'SST']
+    const rows = selectedClinics.map(c => [
+      c.clinic_code, c.clinic_name || '', c.state || '', c.product || '', c.customer_status || '',
+      c.registered_contact || '', c.clinic_phone || '', c.contact_tel || '', c.email_main || '',
+      c.mtn_expiry || '', c.cloud_end || '',
+      c.has_e_invoice ? 'Yes' : 'No', c.has_whatsapp ? 'Yes' : 'No', c.has_sst ? 'Yes' : 'No',
+    ])
+    const csv = [header, ...rows]
+      .map(r => r.map(v => `"${String(v || '').replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `call-list-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    toast(`Exported ${selectedClinics.length} clinics`, 'success')
+  }
+
+  const copyFieldToClipboard = async (label: string, extract: (c: Clinic) => string) => {
+    const values = selectedClinics.map(extract).filter(Boolean)
+    if (values.length === 0) { toast(`No ${label} in selection`, 'error'); return }
+    await navigator.clipboard.writeText(values.join('\n'))
+    toast(`Copied ${values.length} ${label}`, 'success')
+  }
+
+  // Export rows (strings only — no React elements).
+  const excelHeaders = [
+    'Acct No', 'Clinic', 'State', 'Product',
+    'MTN Active', 'Cloud Active', 'E-Inv V1', 'E-Inv V2', 'E-Inv Any',
+    'WhatsApp', 'SST',
+    'CMS', 'GFLEX', 'MHIS', 'EM2', 'CLAIMEX', 'Hardware',
+  ]
+  const buildExcelRow = (r: typeof rowsSorted[number]) => [
+    r.clinic.clinic_code, r.clinic.clinic_name || '', r.clinic.state || '', r.clinic.product || '',
+    r.mtn ? 'Yes' : 'No', r.cloud ? 'Yes' : 'No',
+    r.clinic.einv_v1_signed ? 'Yes' : 'No', r.clinic.einv_v2_signed ? 'Yes' : 'No',
+    r.einvoice ? 'Yes' : 'No',
+    r.whatsapp ? 'Yes' : 'No', r.sst ? 'Yes' : 'No',
+    r.cms ? 'Yes' : 'No', r.gflex ? 'Yes' : 'No', r.mhis ? 'Yes' : 'No',
+    r.em2 ? 'Yes' : 'No', r.claimex ? 'Yes' : 'No', r.hardware ? 'Yes' : 'No',
+  ]
+
+  const filterSummary = anyActive
+    ? [
+        ...SERVICE_LIST.filter(p => serviceFilters[p.id] !== 'any').map(p => `${p.label}=${serviceFilters[p.id]}`),
+        ...SOFTWARE_LIST.filter(s => softwareFilters[s.id] !== 'any').map(s => `${s.label}=${softwareFilters[s.id]}`),
+      ].join(', ')
+    : 'all products'
+
+  const statsForExport = [
+    { label: 'Matching', value: rowsSorted.length },
+    ...SERVICE_LIST.map(p => ({ label: p.label, value: totals[p.id] })),
+    ...SOFTWARE_LIST.map(s => ({ label: s.label, value: totals[s.id] })),
+  ]
+
+  const handleExcel = async () => {
+    await exportExcelWithMeta({
+      filename: 'subscriptions-report',
+      title: 'Medex — Clinic Subscriptions',
+      filterSummary, generatedBy,
+      headers: excelHeaders,
+      rows: rowsSorted.map(buildExcelRow),
+    })
+  }
+
+  const pdfHeaders = excelHeaders
+  const handlePdfPreview = () => openPreview({
+    title: 'Medex — Clinic Subscriptions',
+    subtitle: 'Per-clinic product subscription matrix',
+    filterSummary, generatedBy,
+    stats: statsForExport,
+    headers: pdfHeaders,
+    rows: rowsSorted.map(buildExcelRow),
+    pdfFilename: 'subscriptions-report',
+  })
+
+  const handlePrint = () => {
+    printReportNewWindow({
+      title: 'Medex — Clinic Subscriptions',
+      subtitle: 'Per-clinic product subscription matrix',
+      filterSummary, generatedBy,
+      stats: statsForExport,
+      headers: pdfHeaders,
+      rows: rowsSorted.map(buildExcelRow),
+    })
+  }
+
+  return (
+    <div>
+      {/* Filter pills — two rows: services (has_* / date-active) + software (product-field keywords) */}
+      <div className="mb-3 p-3 bg-surface-raised/40 border border-border rounded-lg space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-text-muted uppercase tracking-wider w-20 flex-shrink-0">Services</span>
+          {SERVICE_LIST.map(p => {
+            const f = serviceFilters[p.id]
+            const stateStyle = f === 'yes'
+              ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-400'
+              : f === 'no'
+              ? 'bg-red-500/15 border-red-500/50 text-red-400'
+              : 'bg-surface border-border text-text-secondary hover:border-accent/40'
+            const symbol = f === 'yes' ? '✓' : f === 'no' ? '✗' : '—'
+            return (
+              <button key={p.id} onClick={() => cycleService(p.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] border rounded-full transition-colors ${stateStyle}`}
+                title={`${p.label}: ${f === 'any' ? 'any (click → Has)' : f === 'yes' ? 'Has (click → No)' : 'No (click → clear)'}`}>
+                <span className="font-semibold">{p.label}</span>
+                <span className="tabular-nums">{symbol}</span>
+              </button>
+            )
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-text-muted uppercase tracking-wider w-20 flex-shrink-0">Software</span>
+          {SOFTWARE_LIST.map(s => {
+            const f = softwareFilters[s.id]
+            const stateStyle = f === 'yes'
+              ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-400'
+              : f === 'no'
+              ? 'bg-red-500/15 border-red-500/50 text-red-400'
+              : 'bg-surface border-border text-text-secondary hover:border-accent/40'
+            const symbol = f === 'yes' ? '✓' : f === 'no' ? '✗' : '—'
+            return (
+              <button key={s.id} onClick={() => cycleSoftware(s.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-[12px] border rounded-full transition-colors ${stateStyle}`}
+                title={`${s.label}: ${f === 'any' ? 'any (click → Has)' : f === 'yes' ? 'Has (click → No)' : 'No (click → clear)'}`}>
+                <span className="font-semibold">{s.label}</span>
+                <span className="tabular-nums">{symbol}</span>
+              </button>
+            )
+          })}
+          <div className="ml-auto flex items-center gap-3">
+            {anyActive && <button onClick={resetFilters} className="text-[11px] text-accent hover:underline">Reset</button>}
+            <span className="text-[11px] text-text-muted">
+              {rowsSorted.length.toLocaleString()} / {clinics.length.toLocaleString()} match
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Totals per product within current filter (services + software) */}
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
+        <StatCard label="Matching" value={rowsSorted.length} />
+        {SERVICE_LIST.map(p => (
+          <StatCard key={p.id} label={p.label} value={totals[p.id]}
+            tone={(p.tone as 'green' | 'indigo' | 'blue' | 'amber')} />
+        ))}
+      </div>
+      <div className="grid grid-cols-3 md:grid-cols-6 gap-3 mb-4">
+        {SOFTWARE_LIST.map(s => (
+          <StatCard key={s.id} label={s.label} value={totals[s.id]}
+            tone={(s.tone as 'default' | 'purple' | 'indigo' | 'red' | 'amber' | 'gray')} />
+        ))}
+      </div>
+
+      {/* Bulk action toolbar: shown any time there's a selection OR
+          "Select all visible" is available. Keeps actions within thumb-reach. */}
+      <div className="flex flex-wrap items-center gap-2 mb-2 px-3 py-2 bg-surface-inset/40 border border-border rounded-lg">
+        <button
+          type="button"
+          onClick={selectAllVisible}
+          disabled={rowsSorted.length === 0}
+          className="text-[12px] px-2.5 py-1 rounded bg-surface border border-border text-text-secondary hover:text-text-primary hover:border-accent/40 transition-colors disabled:opacity-40"
+        >
+          Select all visible ({rowsSorted.length.toLocaleString()})
+        </button>
+
+        {selectedCodes.size > 0 ? (
+          <>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[12px] font-medium bg-accent/15 text-accent border border-accent/30">
+              <span className="size-1.5 rounded-full bg-accent" />
+              {selectedCodes.size.toLocaleString()} selected
+            </span>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="text-[11px] text-text-muted hover:text-text-primary underline underline-offset-2"
+            >
+              Clear
+            </button>
+
+            <div className="mx-1 h-4 w-px bg-border" />
+
+            <button
+              type="button"
+              onClick={exportCallList}
+              className="inline-flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/25 transition-colors font-medium"
+              title="Download CSV with contact info for call/email outreach"
+            >
+              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3M3 17V7a2 2 0 012-2h3.28a2 2 0 011.7.95l.86 1.5A2 2 0 0012.54 8H19a2 2 0 012 2v7a2 2 0 01-2 2H5a2 2 0 01-2-2z" /></svg>
+              Export call list (CSV)
+            </button>
+            <button
+              type="button"
+              onClick={() => copyFieldToClipboard('phone numbers', c => c.clinic_phone || c.contact_tel || '')}
+              className="inline-flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-md bg-blue-500/15 border border-blue-500/40 text-blue-400 hover:bg-blue-500/25 transition-colors font-medium"
+            >
+              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+              Copy phones
+            </button>
+            <button
+              type="button"
+              onClick={() => copyFieldToClipboard('emails', c => c.email_main || '')}
+              className="inline-flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-md bg-indigo-500/15 border border-indigo-500/40 text-indigo-400 hover:bg-indigo-500/25 transition-colors font-medium"
+            >
+              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+              Copy emails
+            </button>
+          </>
+        ) : (
+          <span className="text-[11px] text-text-muted italic">Tick the boxes on the left to bulk-export contacts.</span>
+        )}
+
+        <div className="ml-auto">
+          <ExportButtons onExcel={handleExcel} onPdfPreview={handlePdfPreview} onPrint={handlePrint} />
+        </div>
+      </div>
+
+      <ReportTable
+        headers={headers}
+        rows={rowsRendered}
+        rowKeys={rowKeys}
+        rawValues={rawValues}
+        onRowClick={onClinicClick ? (i) => onClinicClick(rowsSorted[i].clinic.clinic_code) : undefined}
+        emptyMessage="No clinics match the selected subscription filters."
+        storageKey="subscriptions"
+      />
+    </div>
+  )
 }
 
 function MaintenanceReport({ clinics, generatedBy, onClinicClick, onCountChange, openPreview }: {
@@ -1453,13 +2363,58 @@ function CloudBackupReport({ clinics, generatedBy, onClinicClick, onCountChange,
 
 // ─ E-Invoice Report ─────────────────────────────────────────────
 
-type EinvStatus = 'live' | 'pending' | 'exempt'
-type EinvBucket = 'all' | EinvStatus | { kind: 'state'; state: string }
+// Fine-grained per-clinic status — used in row "Status" column.
+// Captures the next action needed for each clinic in the E-Invoice funnel.
+type EinvStatus = 'live' | 'paid' | 'signed' | 'po_only' | 'exempt' | 'not_started'
 
+// Coarse-grained bucket — used for top-row summary cards + filter.
+// Each fine-grained status maps to exactly one bucket via bucketOf().
+type EinvBucket = 'live' | 'in_progress' | 'exempt' | 'not_started'
+
+type EinvBucketSel = 'all' | EinvBucket | { kind: 'state'; state: string }
+
+// Precedence order (top wins): Live > Exempt > Paid > Signed > PO only > Not started.
+// Why Exempt beats Paid: explicit opt-out is a terminal state that overrides any
+// legacy payment data — the clinic is no longer pursuing E-Invoice.
 function classifyEinv(c: Clinic): EinvStatus {
   if (c.has_e_invoice) return 'live'
   if (c.einv_no_reason && c.einv_no_reason.trim()) return 'exempt'
-  return 'pending'
+  if (c.einv_payment_date) return 'paid'
+  if (c.einv_v1_signed || c.einv_v2_signed) return 'signed'
+  if (c.einv_po_rcvd_date) return 'po_only'
+  return 'not_started'
+}
+
+function bucketOf(s: EinvStatus): EinvBucket {
+  if (s === 'live') return 'live'
+  if (s === 'exempt') return 'exempt'
+  if (s === 'not_started') return 'not_started'
+  return 'in_progress' // paid | signed | po_only
+}
+
+const STATUS_LABEL: Record<EinvStatus, string> = {
+  live: 'Live',
+  paid: 'Install Pending',
+  signed: 'Payment Pending',
+  po_only: 'Signup Pending',
+  exempt: 'Exempt',
+  not_started: 'Not Started',
+}
+
+const STATUS_TONE: Record<EinvStatus, string> = {
+  live: 'text-emerald-400',
+  paid: 'text-sky-400',
+  signed: 'text-violet-400',
+  po_only: 'text-amber-400',
+  exempt: 'text-zinc-400',
+  not_started: 'text-zinc-500',
+}
+
+const BUCKET_LABEL: Record<EinvBucket, string> = {
+  live: 'Live',
+  in_progress: 'In Progress',
+  exempt: 'Exempt',
+  not_started: 'Not Started',
 }
 
 function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, openPreview }: {
@@ -1470,7 +2425,7 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
   openPreview: (data: PrintData) => void
 }) {
   const { toast } = useToast()
-  const [bucket, setBucket] = useState<EinvBucket>('all')
+  const [bucket, setBucket] = useState<EinvBucketSel>('all')
   const [sstFilter, setSstFilter] = useState<'all' | 'yes' | 'no'>('all')
   const [reasonFilter, setReasonFilter] = useState<string>('all')
   const [reasonSearch, setReasonSearch] = useState('')
@@ -1478,19 +2433,24 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
   const classified = useMemo(() => clinics.map(c => ({ ...c, _status: classifyEinv(c) })), [clinics])
 
   const stats = useMemo(() => {
-    let live = 0, pending = 0, exempt = 0
+    // Both fine-grained (per status) and coarse (per bucket) counts.
+    const fine: Record<EinvStatus, number> = {
+      live: 0, paid: 0, signed: 0, po_only: 0, exempt: 0, not_started: 0,
+    }
+    const coarse: Record<EinvBucket, number> = {
+      live: 0, in_progress: 0, exempt: 0, not_started: 0,
+    }
     const stateCount: Record<string, number> = {}
     for (const c of classified) {
-      if (c._status === 'live') live++
-      else if (c._status === 'exempt') exempt++
-      else pending++
+      fine[c._status]++
+      coarse[bucketOf(c._status)]++
       const st = c.state || 'Unknown'
       stateCount[st] = (stateCount[st] || 0) + 1
     }
     const topStates = Object.entries(stateCount)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3)
-    return { live, pending, exempt, total: classified.length, topStates }
+    return { fine, coarse, total: classified.length, topStates }
   }, [classified])
 
   // Distinct reasons for the dropdown (MEDEXCRM's tracking status equivalent)
@@ -1504,12 +2464,12 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
 
   const rows = useMemo(() => {
     let r = classified
-    // Bucket from card selection
     if (typeof bucket === 'object' && bucket.kind === 'state') {
       r = r.filter(c => (c.state || 'Unknown') === bucket.state)
-    } else if (bucket === 'live') r = r.filter(c => c._status === 'live')
-    else if (bucket === 'pending') r = r.filter(c => c._status === 'pending')
-    else if (bucket === 'exempt') r = r.filter(c => c._status === 'exempt')
+    } else if (bucket !== 'all') {
+      // bucket is one of: 'live' | 'in_progress' | 'exempt' | 'not_started'
+      r = r.filter(c => bucketOf(c._status) === bucket)
+    }
 
     if (sstFilter !== 'all') r = r.filter(c => sstFilter === 'yes' ? c.has_sst : !c.has_sst)
     if (reasonFilter !== 'all') r = r.filter(c => c.einv_no_reason === reasonFilter)
@@ -1524,13 +2484,13 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
 
   const isBucketStateActive = (state: string) => typeof bucket === 'object' && bucket.kind === 'state' && bucket.state === state
 
-  const statusLabel = (s: EinvStatus) => s === 'live' ? 'Live' : s === 'exempt' ? 'Exempt' : 'Pending'
-  const statusTone = (s: EinvStatus) => s === 'live' ? 'text-emerald-400' : s === 'exempt' ? 'text-amber-400' : 'text-red-400'
+  const statusLabel = (s: EinvStatus) => STATUS_LABEL[s]
+  const statusTone = (s: EinvStatus) => STATUS_TONE[s]
 
   const bucketLabel = typeof bucket === 'object'
     ? `State = ${bucket.state}`
     : bucket === 'all' ? 'all'
-    : bucket
+    : BUCKET_LABEL[bucket]
   const filterSummary = `bucket=${bucketLabel}, sst=${sstFilter}, reason=${reasonFilter}${reasonSearch.trim() ? `, reason~="${reasonSearch.trim()}"` : ''}`
 
   const excelHeaders = ['Acct No', 'Clinic Name', 'Status', 'SST', 'Reason', 'Product', 'Contact Name', 'Contact Tel', 'Email', 'Company Name', 'State']
@@ -1543,9 +2503,13 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
 
   const statsForExport = [
     { label: 'Total', value: stats.total },
-    { label: 'Live', value: stats.live, tone: 'green' },
-    { label: 'Pending', value: stats.pending, tone: 'red' },
-    { label: 'Exempt', value: stats.exempt, tone: 'amber' },
+    { label: 'Live', value: stats.coarse.live, tone: 'green' },
+    { label: 'In Progress', value: stats.coarse.in_progress, tone: 'blue' },
+    { label: '  · Install Pending', value: stats.fine.paid },
+    { label: '  · Payment Pending', value: stats.fine.signed },
+    { label: '  · Signup Pending', value: stats.fine.po_only },
+    { label: 'Exempt', value: stats.coarse.exempt, tone: 'amber' },
+    { label: 'Not Started', value: stats.coarse.not_started, tone: 'gray' },
   ]
 
   const pdfHeaders = ['Acct No', 'Clinic', 'Status', 'SST', 'Reason', 'Contact', 'Tel', 'Email', 'Company', 'State']
@@ -1590,18 +2554,23 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
 
   return (
     <div>
-      {/* Summary cards: Total / Live / Pending + top-3 states */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-4">
+      {/* Summary cards: 4 buckets (Live / In Progress / Exempt / Not Started) + top-3 states.
+          The "In Progress" bucket aggregates the 3 funnel sub-stages — drill down via the
+          status column in the table or the secondary chips below. */}
+      <div className="grid grid-cols-2 md:grid-cols-7 gap-3 mb-4">
         <StatCard label="Total E-Invoice" value={stats.total} />
-        <StatCard label="Live" value={stats.live} tone="green"
+        <StatCard label="Live" value={stats.coarse.live} tone="green"
           active={bucket === 'live'}
           onClick={() => setBucket(bucket === 'live' ? 'all' : 'live')} />
-        <StatCard label="Pending" value={stats.pending} tone="red"
-          active={bucket === 'pending'}
-          onClick={() => setBucket(bucket === 'pending' ? 'all' : 'pending')} />
-        <StatCard label="Exempt" value={stats.exempt} tone="amber"
+        <StatCard label="In Progress" value={stats.coarse.in_progress} tone="blue"
+          active={bucket === 'in_progress'}
+          onClick={() => setBucket(bucket === 'in_progress' ? 'all' : 'in_progress')} />
+        <StatCard label="Exempt" value={stats.coarse.exempt} tone="amber"
           active={bucket === 'exempt'}
           onClick={() => setBucket(bucket === 'exempt' ? 'all' : 'exempt')} />
+        <StatCard label="Not Started" value={stats.coarse.not_started} tone="gray"
+          active={bucket === 'not_started'}
+          onClick={() => setBucket(bucket === 'not_started' ? 'all' : 'not_started')} />
         {stats.topStates.map(([state, count]) => (
           <StatCard
             key={state}
@@ -1613,6 +2582,24 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
           />
         ))}
       </div>
+
+      {/* Funnel breakdown chips — visible whenever "In Progress" bucket is active or "all" */}
+      {(bucket === 'all' || bucket === 'in_progress') && (
+        <div className="flex flex-wrap items-center gap-2 mb-3 px-2 py-1.5 bg-surface/50 border border-border/60 rounded-md">
+          <span className="text-[11px] text-text-tertiary uppercase tracking-wider">Funnel:</span>
+          <span className="text-[11px] text-sky-400">
+            Install Pending <span className="font-semibold tabular-nums">{stats.fine.paid}</span>
+          </span>
+          <span className="text-text-muted">·</span>
+          <span className="text-[11px] text-violet-400">
+            Payment Pending <span className="font-semibold tabular-nums">{stats.fine.signed}</span>
+          </span>
+          <span className="text-text-muted">·</span>
+          <span className="text-[11px] text-amber-400">
+            Signup Pending <span className="font-semibold tabular-nums">{stats.fine.po_only}</span>
+          </span>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <span className="text-[12px] text-text-tertiary">SST:</span>
@@ -1687,7 +2674,7 @@ function EInvoiceReport({ clinics, generatedBy, onClinicClick, onCountChange, op
 
 // ─ Main Component ───────────────────────────────────────────────
 
-export default function ReportsView({ onClinicClick }: { onClinicClick?: (code: string) => void } = {}) {
+export default function ReportsView({ onClinicClick, refreshKey = 0 }: { onClinicClick?: (code: string) => void; refreshKey?: number } = {}) {
   const supabase = createClient()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -1696,10 +2683,12 @@ export default function ReportsView({ onClinicClick }: { onClinicClick?: (code: 
   // URL-synced sub-tab: ?tab=maintenance|cloud|einvoice
   const urlTab = searchParams.get('tab')
   const activeTab: ReportTab =
-    urlTab === 'cloud' || urlTab === 'einvoice' || urlTab === 'maintenance' ? urlTab : 'maintenance'
+    urlTab === 'subscriptions' || urlTab === 'cloud' || urlTab === 'einvoice' || urlTab === 'maintenance'
+      ? urlTab
+      : 'subscriptions'
   const setActiveTab = useCallback((tab: ReportTab) => {
     const params = new URLSearchParams(searchParams.toString())
-    if (tab === 'maintenance') params.delete('tab')
+    if (tab === 'subscriptions') params.delete('tab')
     else params.set('tab', tab)
     const qs = params.toString()
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
@@ -1711,12 +2700,13 @@ export default function ReportsView({ onClinicClick }: { onClinicClick?: (code: 
 
   const [common, setCommon] = useState<CommonFilters>(EMPTY_COMMON)
 
-  const [counts, setCounts] = useState<Record<ReportTab, number>>({ maintenance: 0, cloud: 0, einvoice: 0 })
+  const [counts, setCounts] = useState<Record<ReportTab, number>>({ subscriptions: 0, maintenance: 0, cloud: 0, einvoice: 0 })
   const setCountFor = useCallback((tab: ReportTab) => (n: number) => {
     setCounts(prev => prev[tab] === n ? prev : { ...prev, [tab]: n })
   }, [])
 
   const [preview, setPreview] = useState<PrintData | null>(null)
+  const [snapshotOpen, setSnapshotOpen] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -1736,8 +2726,16 @@ export default function ReportsView({ onClinicClick }: { onClinicClick?: (code: 
         'mtn_start', 'mtn_expiry',
         'renewal_status', 'status_renewal',
         'cloud_start', 'cloud_end',
-        'has_backup', 'has_ext_hdd', 'has_e_invoice', 'has_sst',
+        'has_backup', 'has_ext_hdd', 'has_e_invoice', 'has_sst', 'has_whatsapp',
         'einv_no_reason',
+        // Fine-grained E-Invoice funnel fields — classifyEinv() reads these to
+        // bucket a clinic into paid / signed / po_only. Missing them would make
+        // the entire non-Live population fall into "Not Started".
+        'einv_v1_signed', 'einv_v2_signed',
+        'einv_po_rcvd_date', 'einv_payment_date', 'einv_live_date',
+        // WhatsApp + SST detail (for Subscriptions overview)
+        'wspp_live_date', 'wa_account_no',
+        'sst_registration_no', 'sst_start_date', 'sst_frequency', 'sst_period_next',
       ].join(',')
       const PAGE_SIZE = 1000
 
@@ -1785,7 +2783,10 @@ export default function ReportsView({ onClinicClick }: { onClinicClick?: (code: 
       setLoading(false)
     }
     load()
-  }, [supabase])
+    // WHY refreshKey: the parent CRM page bumps this whenever a clinic is
+    // edited or created so the report stats/classification reflect the new
+    // state without a full page reload.
+  }, [supabase, refreshKey])
 
   const options = useMemo(() => {
     const state = new Set<string>()
@@ -1825,6 +2826,15 @@ export default function ReportsView({ onClinicClick }: { onClinicClick?: (code: 
 
   return (
     <div>
+      {/* Today's Action Queue — only visible on the Subscriptions (overview) tab
+          where there's no per-pipeline stats. Inside MTN/Cloud/E-Invoice tabs,
+          each tab's own stats serve this purpose, so showing it again is
+          redundant. */}
+      <ActionQueueStrip clinics={filtered} setActiveTab={setActiveTab} visible={activeTab === 'subscriptions'} />
+
+      {/* Monthly snapshot modal — always available via the tab bar button */}
+      <MonthlySnapshotModal open={snapshotOpen} onClose={() => setSnapshotOpen(false)} clinics={filtered} />
+
       <ReportToolbar
         filters={common}
         options={options}
@@ -1832,29 +2842,57 @@ export default function ReportsView({ onClinicClick }: { onClinicClick?: (code: 
         onReset={() => setCommon(EMPTY_COMMON)}
       />
 
-      <div className="flex items-center gap-1 mb-4 border-b border-border flex-wrap">
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setActiveTab(t.id)}
-            className={`px-3 py-2 text-[13px] font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${
-              activeTab === t.id
-                ? 'text-text-primary border-accent'
-                : 'text-text-tertiary border-transparent hover:text-text-secondary'
-            }`}
-          >
-            {t.label}
-            <span className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded ${
-              activeTab === t.id ? 'bg-accent/15 text-accent' : 'bg-surface-inset text-text-muted'
-            }`}>
-              {counts[t.id]}
+      <div className="mb-4 border-b border-border">
+        <div className="flex items-center gap-1 flex-wrap">
+          {TABS.map(t => (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id)}
+              title={t.hint}
+              className={`px-3 py-2 text-[13px] font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${
+                activeTab === t.id
+                  ? 'text-text-primary border-accent'
+                  : 'text-text-tertiary border-transparent hover:text-text-secondary'
+              }`}
+            >
+              {t.label}
+              <span className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded ${
+                activeTab === t.id ? 'bg-accent/15 text-accent' : 'bg-surface-inset text-text-muted'
+              }`}>
+                {counts[t.id]}
+              </span>
+            </button>
+          ))}
+          <div className="ml-auto flex items-center gap-3 pb-2">
+            <button
+              type="button"
+              onClick={() => setSnapshotOpen(true)}
+              className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full bg-accent/10 border border-accent/30 text-accent hover:bg-accent/20 transition-colors"
+              title="Activity report for a picked month"
+            >
+              <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v12a2 2 0 01-2 2z" /></svg>
+              Monthly snapshot
+            </button>
+            <span className="text-[11px] text-text-muted">
+              Scope: {filtered.length.toLocaleString()} of {clinics.length.toLocaleString()} clinics · {commonSummary}
             </span>
-          </button>
-        ))}
-        <span className="ml-auto pb-2 text-[11px] text-text-muted">
-          Scope: {filtered.length.toLocaleString()} of {clinics.length.toLocaleString()} clinics · {commonSummary}
-        </span>
+          </div>
+        </div>
+        {/* Active tab hint — one-line description of what this view is for */}
+        <p className="pb-2 pt-0.5 text-[11px] text-text-muted italic">
+          {TABS.find(t => t.id === activeTab)?.hint}
+        </p>
       </div>
+
+      {activeTab === 'subscriptions' && (
+        <SubscriptionsReport
+          clinics={filtered}
+          generatedBy={generatedBy}
+          onClinicClick={onClinicClick}
+          onCountChange={setCountFor('subscriptions')}
+          openPreview={setPreview}
+        />
+      )}
 
       {activeTab === 'maintenance' && (
         <MaintenanceReport

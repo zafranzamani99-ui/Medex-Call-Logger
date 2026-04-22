@@ -127,7 +127,7 @@ export default function CrmPage() {
 
       {activeTab === 'reports' && (
         <Suspense fallback={<div className="h-96 skeleton rounded" />}>
-          <ReportsView onClinicClick={setSelectedCode} />
+          <ReportsView onClinicClick={setSelectedCode} refreshKey={tableRefreshKey} />
         </Suspense>
       )}
 
@@ -136,7 +136,12 @@ export default function CrmPage() {
         <ClinicProfilePanel
           clinicCode={selectedCode}
           onClose={() => setSelectedCode(null)}
-          onClinicUpdated={loadStats}
+          onClinicUpdated={() => {
+            // Bump refresh key so CrmDataTable AND ReportsView re-fetch — avoids
+            // stale status/card counts after a profile edit.
+            setTableRefreshKey(k => k + 1)
+            loadStats()
+          }}
           onClinicDeleted={() => {
             setSelectedCode(null)
             setTableRefreshKey(k => k + 1)
