@@ -3,6 +3,7 @@ import { redirect } from 'next/navigation'
 import NavBar from '@/components/NavBar'
 import ThemeToggle from '@/components/ThemeToggle'
 import { ToastProvider } from '@/components/ui/Toast'
+import PageTitle from '@/components/PageTitle'
 
 // WHY: Races any thenable/promise against a timeout.
 // Prevents server component from hanging forever if Supabase is slow/unreachable.
@@ -106,6 +107,7 @@ export default async function AppLayout({
         <div className="relative mx-auto max-w-[1440px] px-4 py-6 pb-24 sm:px-6 md:px-10 md:py-8">
           <ThemeToggle />
           <ToastProvider>
+            <PageTitle />
             {children}
           </ToastProvider>
         </div>

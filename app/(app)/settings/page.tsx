@@ -7,6 +7,7 @@ import { Input, Label } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/Toast'
 import type { UserRole } from '@/lib/types'
 import { toProperCase } from '@/lib/constants'
+import HolidaysSection from '@/components/settings/HolidaysSection'
 
 // WHY: Settings page — spec Section 6.
 // 1. Display name edit (UC-22) — agent can change their name
@@ -389,6 +390,9 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Public Holidays — admin only */}
+      {userRole === 'admin' && <HolidaysSection />}
 
       {/* Feedback */}
       <div className="bg-surface border border-border rounded-lg p-4 mt-4">

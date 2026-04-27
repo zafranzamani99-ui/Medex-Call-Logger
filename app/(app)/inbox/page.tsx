@@ -200,13 +200,25 @@ export default function InboxPage() {
 
   const handleMarkDone = async (msgId: string) => {
     const msg = messages.find(m => m.id === msgId)
+    const doneAt = new Date().toISOString()
     const { error } = await supabase
       .from('inbox_messages')
-      .update({ status: 'done' })
+      .update({
+        status: 'done',
+        done_by: userId,
+        done_by_name: nameWithRole,
+        done_at: doneAt,
+      })
       .eq('id', msgId)
 
     if (!error) {
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'done' as const } : m))
+      setMessages(prev => prev.map(m => m.id === msgId ? {
+        ...m,
+        status: 'done' as const,
+        done_by: userId,
+        done_by_name: nameWithRole,
+        done_at: doneAt,
+      } : m))
       // Also resolve the linked ticket
       if (msg) {
         await supabase
@@ -228,11 +240,22 @@ export default function InboxPage() {
     const msg = messages.find(m => m.id === msgId)
     const { error } = await supabase
       .from('inbox_messages')
-      .update({ status: 'open' })
+      .update({
+        status: 'open',
+        done_by: null,
+        done_by_name: null,
+        done_at: null,
+      })
       .eq('id', msgId)
 
     if (!error) {
-      setMessages(prev => prev.map(m => m.id === msgId ? { ...m, status: 'open' as const } : m))
+      setMessages(prev => prev.map(m => m.id === msgId ? {
+        ...m,
+        status: 'open' as const,
+        done_by: null,
+        done_by_name: null,
+        done_at: null,
+      } : m))
       // Revert ticket back to Escalated to Admin
       if (msg) {
         await supabase
@@ -333,11 +356,22 @@ export default function InboxPage() {
                       : 'border-border bg-surface'
                 }`}
               >
-                {/* Done badge — top right */}
+                {/* Done badge — top right, with attribution */}
                 {isDone && (
-                  <span className="absolute top-3 right-3 px-2 py-0.5 text-[10px] font-medium bg-green-500/20 text-green-400 rounded">
-                    Done
-                  </span>
+                  <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                    {(msg.done_by_name || msg.done_at) && (
+                      <span
+                        className="text-[10px] text-text-tertiary"
+                        title={msg.done_at ? `Marked done at ${format(new Date(msg.done_at), 'd MMM yyyy, h:mm a')}` : undefined}
+                      >
+                        by <span className="text-text-secondary font-medium">{msg.done_by_name ? toProperCase(msg.done_by_name) : 'unknown'}</span>
+                        {msg.done_at && <> · {formatDistanceToNow(new Date(msg.done_at), { addSuffix: true })}</>}
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 text-[10px] font-medium bg-green-500/20 text-green-400 rounded">
+                      Done
+                    </span>
+                  </div>
                 )}
 
                 {/* Header row */}

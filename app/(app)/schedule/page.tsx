@@ -8,11 +8,14 @@ import {
   eachDayOfInterval, format, addMonths, subMonths,
   isSameMonth, isToday,
 } from 'date-fns'
-import type { Schedule } from '@/lib/types'
+import type { Schedule, PublicHoliday, StaffLeave } from '@/lib/types'
+import MarkLeaveModal from '@/components/schedule/MarkLeaveModal'
+import MarkHolidayModal from '@/components/schedule/MarkHolidayModal'
 import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, formatWorkDuration, formatTimeDisplay, toProperCase } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 import { Input, Label, Textarea } from '@/components/ui/Input'
 import ClinicSearch from '@/components/ClinicSearch'
+import StaffPicker from '@/components/StaffPicker'
 import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import RenewalBadge from '@/components/RenewalBadge'
 import type { Clinic } from '@/lib/types'
@@ -38,6 +41,11 @@ function parseTimeToMinutes(t: string): number {
   return hours * 60 + mins
 }
 
+// Holidays from these scopes appear on the calendar; warnings still fire for the
+// clinic's specific state regardless. Team is Selangor/KL-based, so other state
+// holidays would be visual noise.
+const RELEVANT_HOLIDAY_SCOPES = new Set(['federal', 'SEL', 'KUL'])
+
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
   scheduled: { bg: 'bg-blue-500/20', text: 'text-blue-400' },
   in_progress: { bg: 'bg-amber-500/20', text: 'text-amber-400' },
@@ -59,6 +67,12 @@ export default function SchedulePage() {
   // Calendar state
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [schedules, setSchedules] = useState<Schedule[]>([])
+  const [holidays, setHolidays] = useState<PublicHoliday[]>([])
+  const [leaveEntries, setLeaveEntries] = useState<(StaffLeave & { staff_name: string })[]>([])
+  const [showLeaveModal, setShowLeaveModal] = useState(false)
+  const [leavePrefilledDate, setLeavePrefilledDate] = useState<string | undefined>(undefined)
+  const [showHolidayModal, setShowHolidayModal] = useState(false)
+  const [holidayPrefilledDate, setHolidayPrefilledDate] = useState<string | undefined>(undefined)
 
   // Filter by PIC
   const [filterPic, setFilterPic] = useState<string>('all')
@@ -87,6 +101,7 @@ export default function SchedulePage() {
   const [editPic, setEditPic] = useState('')
   const [editClinicWa, setEditClinicWa] = useState('')
   const [editPicSupport, setEditPicSupport] = useState('')
+  const [editPicSupportId, setEditPicSupportId] = useState<string | null>(null)
   const [editClinic, setEditClinic] = useState<Clinic | null>(null)
   const [editClinicNameManual, setEditClinicNameManual] = useState('')
   const [editManualMode, setEditManualMode] = useState(false)
@@ -209,6 +224,7 @@ export default function SchedulePage() {
   const [formMode, setFormMode] = useState<'Remote' | 'Onsite'>('Remote')
   const [formNotes, setFormNotes] = useState('')
   const [formPicSupport, setFormPicSupport] = useState('')
+  const [formPicSupportId, setFormPicSupportId] = useState<string | null>(null)
   const [formSaving, setFormSaving] = useState(false)
 
   // Get user on mount
@@ -283,16 +299,20 @@ export default function SchedulePage() {
       .order('schedule_time')
 
     if (filterPic !== 'all') {
-      query = query.ilike('pic_support', filterPic)
+      query = query.eq('pic_support_id', filterPic)
     }
 
     const { data } = await query
     const scheduleList = (data || []) as Schedule[]
     setSchedules(scheduleList)
 
-    // Auto-resume: if current user has an in_progress schedule, open its work panel
+    // Auto-resume: if current user has an in_progress schedule, open its work panel.
+    // Match assigned PIC first; fall back to logger for legacy unassigned rows.
     if (!showDetailModal && userId) {
-      const activeWork = scheduleList.find(s => s.status === 'in_progress' && s.agent_id === userId)
+      const activeWork = scheduleList.find(s =>
+        s.status === 'in_progress' &&
+        (s.pic_support_id ? s.pic_support_id === userId : s.agent_id === userId)
+      )
       if (activeWork) {
         setSelectedSchedule(activeWork)
         setShowDetailModal(true)
@@ -322,6 +342,29 @@ export default function SchedulePage() {
         setClinicPhones(phoneMap)
       }
     }
+
+    // Public holidays + staff leave for the visible month
+    const [holRes, leaveRes] = await Promise.all([
+      supabase.from('public_holidays')
+        .select('*')
+        .gte('holiday_date', monthStart)
+        .lte('holiday_date', monthEnd),
+      supabase.from('staff_leave')
+        .select('id, staff_id, leave_date, reason, created_by, created_at, profiles!staff_leave_staff_id_fkey(display_name)')
+        .gte('leave_date', monthStart)
+        .lte('leave_date', monthEnd),
+    ])
+    setHolidays((holRes.data || []) as PublicHoliday[])
+    type LeaveRow = StaffLeave & { profiles: { display_name: string } | { display_name: string }[] | null }
+    setLeaveEntries(((leaveRes.data || []) as LeaveRow[]).map((r) => ({
+      id: r.id,
+      staff_id: r.staff_id,
+      leave_date: r.leave_date,
+      reason: r.reason,
+      created_by: r.created_by,
+      created_at: r.created_at,
+      staff_name: Array.isArray(r.profiles) ? (r.profiles[0]?.display_name || '') : (r.profiles?.display_name || ''),
+    })))
   }
 
   // Build calendar grid
@@ -349,15 +392,36 @@ export default function SchedulePage() {
     return map
   }, [schedules])
 
+  // Holidays grouped by date — calendar always renders federal; state ones still render but dimmer
+  const holidaysByDate = useMemo(() => {
+    const map: Record<string, PublicHoliday[]> = {}
+    holidays.forEach(h => {
+      if (!map[h.holiday_date]) map[h.holiday_date] = []
+      map[h.holiday_date].push(h)
+    })
+    return map
+  }, [holidays])
+
+  // Leave grouped by date for chip rendering AND by staff+date for conflict lookup
+  const leaveByDate = useMemo(() => {
+    const map: Record<string, (StaffLeave & { staff_name: string })[]> = {}
+    leaveEntries.forEach(l => {
+      if (!map[l.leave_date]) map[l.leave_date] = []
+      map[l.leave_date].push(l)
+    })
+    return map
+  }, [leaveEntries])
+
   // Month navigation
   const goToPrev = () => setCurrentMonth(subMonths(currentMonth, 1))
   const goToNext = () => setCurrentMonth(addMonths(currentMonth, 1))
   const goToToday = () => setCurrentMonth(new Date())
 
-  // Click on a date cell — open day detail if has schedules, otherwise open add form pre-filled
+  // Click on a date cell — open day detail if has schedules or leave, otherwise open add form pre-filled
   const handleDateClick = (dateKey: string) => {
     const daySchedules = schedulesByDate[dateKey] || []
-    if (daySchedules.length > 0) {
+    const dayLeave = leaveByDate[dateKey] || []
+    if (daySchedules.length > 0 || dayLeave.length > 0) {
       setDayDetailDate(dateKey)
     } else {
       resetForm()
@@ -505,6 +569,7 @@ export default function SchedulePage() {
     }
     setFormPic(s.pic || '')
     setFormPicSupport(s.pic_support || '')
+    setFormPicSupportId(s.pic_support_id || null)
     setFormClinicWa(s.clinic_wa || '')
     setFormDate('')
     setFormTime(s.schedule_time)
@@ -658,6 +723,7 @@ export default function SchedulePage() {
     setEditNotes(s.notes || '')
     setEditPic(s.pic || '')
     setEditPicSupport(s.pic_support || '')
+    setEditPicSupportId(s.pic_support_id || null)
     setEditClinicWa(s.clinic_wa || '')
     setEditClinicNameManual(s.clinic_name)
     // Try to look up clinic from CRM
@@ -695,6 +761,7 @@ export default function SchedulePage() {
       notes: editNotes || null,
       pic: editPic || null,
       pic_support: editPicSupport || null,
+      pic_support_id: editPicSupportId,
       clinic_wa: editClinicWa || null,
       updated_at: new Date().toISOString(),
     }).eq('id', selectedSchedule.id)
@@ -711,11 +778,25 @@ export default function SchedulePage() {
   }
 
   // Reset add form
+  // Delete a leave entry — anyone can delete their own; admins can delete any.
+  // RLS not wired here; just a confirm + delete. created_by stamped at insert.
+  const handleDeleteLeave = async (l: StaffLeave & { staff_name: string }) => {
+    if (!confirm(`Remove leave for ${l.staff_name} on ${l.leave_date}?`)) return
+    const { error } = await supabase.from('staff_leave').delete().eq('id', l.id)
+    if (error) {
+      toast('Failed to delete: ' + error.message, 'error')
+      return
+    }
+    toast('Leave removed', 'success')
+    fetchSchedules()
+  }
+
   const resetForm = () => {
     setFormClinic(null)
     setFormClinicName('')
     setFormPic('')
     setFormPicSupport('')
+    setFormPicSupportId(null)
     setFormClinicWa('')
     setFormDate('')
     setFormTime('')
@@ -772,6 +853,7 @@ export default function SchedulePage() {
       clinic_name: clinicName,
       pic: formPic || null,
       pic_support: formPicSupport || null,
+      pic_support_id: formPicSupportId,
       schedule_date: formDate,
       schedule_time: formTime,
       schedule_type: formType,
@@ -845,9 +927,23 @@ export default function SchedulePage() {
           >
             <option value="all">All PIC</option>
             {agents.map(a => (
-              <option key={a.id} value={a.name}>{a.name}</option>
+              <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </select>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => { setHolidayPrefilledDate(undefined); setShowHolidayModal(true) }}
+          >
+            + Holiday
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => { setLeavePrefilledDate(undefined); setShowLeaveModal(true) }}
+          >
+            Mark Leave
+          </Button>
           <Button size="sm" onClick={() => { resetForm(); setShowAddModal(true) }}>
             + Add
           </Button>
@@ -952,6 +1048,9 @@ export default function SchedulePage() {
           {calendarDays.map((day, i) => {
             const dateKey = format(day, 'yyyy-MM-dd')
             const daySchedules = schedulesByDate[dateKey] || []
+            const dayHolidays = (holidaysByDate[dateKey] || []).filter(h => RELEVANT_HOLIDAY_SCOPES.has(h.scope))
+            const dayLeave = leaveByDate[dateKey] || []
+            const hasFederalHoliday = dayHolidays.some(h => h.scope === 'federal')
             const inMonth = isSameMonth(day, currentMonth)
             const today = isToday(day)
 
@@ -961,7 +1060,7 @@ export default function SchedulePage() {
                 ref={today ? todayRef : undefined}
                 onClick={() => inMonth && handleDateClick(dateKey)}
                 className={`group min-h-[120px] sm:min-h-[160px] border-b border-r border-border p-1.5 ${
-                  !inMonth ? 'bg-zinc-900/30' : 'bg-background'
+                  !inMonth ? 'bg-zinc-900/30' : hasFederalHoliday ? 'bg-rose-500/5' : 'bg-background'
                 } ${today ? 'ring-1 ring-inset ring-accent/40' : ''} ${
                   inMonth ? 'cursor-pointer hover:bg-surface-raised/50 transition-colors' : ''
                 }`}
@@ -975,6 +1074,40 @@ export default function SchedulePage() {
                     <span className="ml-1 text-text-muted">({daySchedules.length})</span>
                   )}
                 </div>
+
+                {/* Holiday labels — federal in red, state dimmer */}
+                {dayHolidays.map(h => (
+                  <div
+                    key={h.id}
+                    title={`${h.name}${h.scope !== 'federal' ? ` (${h.scope} only)` : ''}`}
+                    className={`px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] mb-0.5 truncate ${
+                      h.scope === 'federal'
+                        ? 'bg-rose-500/15 text-rose-300 font-medium'
+                        : 'bg-rose-500/5 text-rose-400/70'
+                    }`}
+                  >
+                    {h.scope === 'federal' ? '' : `[${h.scope}] `}{h.name}
+                  </div>
+                ))}
+
+                {/* Leave chips — grey, distinct from schedules */}
+                {dayLeave.map(l => (
+                  <div
+                    key={l.id}
+                    title={`${l.staff_name} on leave${l.reason ? ` — ${l.reason}` : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleDeleteLeave(l)
+                    }}
+                    className="px-1.5 py-0.5 rounded text-[10px] sm:text-xs mb-0.5 bg-zinc-500/15 text-zinc-300 hover:bg-zinc-500/25 transition-colors truncate flex items-center gap-1"
+                  >
+                    <svg className="size-2.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <span className="truncate font-medium">{l.staff_name}</span>
+                    <span className="text-zinc-500">· Leave</span>
+                  </div>
+                ))}
 
                 {/* Schedule chips — show all, no truncation */}
                 <div className="space-y-0.5">
@@ -1049,10 +1182,18 @@ export default function SchedulePage() {
       </div>
 
       {/* ===== Day Detail Modal ===== */}
-      {dayDetailDate && (schedulesByDate[dayDetailDate] || []).length > 0 && (() => {
+      {dayDetailDate && (
+        (schedulesByDate[dayDetailDate] || []).length > 0 ||
+        (leaveByDate[dayDetailDate] || []).length > 0
+      ) && (() => {
         const dayEntries = schedulesByDate[dayDetailDate] || []
+        const dayLeaveList = leaveByDate[dayDetailDate] || []
+        const dayHolidayList = (holidaysByDate[dayDetailDate] || []).filter(h => RELEVANT_HOLIDAY_SCOPES.has(h.scope))
         const [y, m, d] = dayDetailDate.split('-')
         const dateObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d))
+        const summaryParts: string[] = []
+        if (dayEntries.length) summaryParts.push(`${dayEntries.length} schedule${dayEntries.length !== 1 ? 's' : ''}`)
+        if (dayLeaveList.length) summaryParts.push(`${dayLeaveList.length} on leave`)
         return (
           <>
             <div className="fixed inset-0 bg-black/60 z-50" onClick={() => setDayDetailDate(null)} />
@@ -1062,7 +1203,7 @@ export default function SchedulePage() {
                 <div className="flex items-center justify-between px-5 py-3.5 border-b border-border flex-shrink-0">
                   <div>
                     <h3 className="font-semibold text-text-primary">{format(dateObj, 'EEEE, d MMMM yyyy')}</h3>
-                    <p className="text-xs text-text-tertiary mt-0.5">{dayEntries.length} schedule{dayEntries.length !== 1 ? 's' : ''}</p>
+                    <p className="text-xs text-text-tertiary mt-0.5">{summaryParts.join(' · ') || 'No entries'}</p>
                   </div>
                   <button onClick={() => setDayDetailDate(null)} className="text-text-tertiary hover:text-text-primary p-2 -mr-2 transition-colors">
                     <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1071,8 +1212,61 @@ export default function SchedulePage() {
                   </button>
                 </div>
 
+                {/* Holiday banner */}
+                {dayHolidayList.length > 0 && (
+                  <div className="px-5 py-2.5 bg-rose-500/8 border-b border-rose-500/15 flex-shrink-0">
+                    {dayHolidayList.map(h => (
+                      <p key={h.id} className="text-xs text-rose-300 flex items-center gap-1.5">
+                        <svg className="size-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                          <path d="M5 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm6.5 4a.5.5 0 00-1 0v4.586L9.207 11.293a.5.5 0 10-.707.707l2 2a.5.5 0 00.707 0l2-2a.5.5 0 00-.707-.707L11.5 12.586V8z" />
+                        </svg>
+                        <span className="font-medium">{h.name}</span>
+                        {h.scope !== 'federal' && <span className="text-rose-400/70">({h.scope})</span>}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {/* On Leave section */}
+                {dayLeaveList.length > 0 && (
+                  <div className="flex-shrink-0 border-b border-border">
+                    <div className="px-5 pt-3 pb-1 text-[10px] font-medium text-text-muted uppercase tracking-wider">
+                      On Leave
+                    </div>
+                    <div className="divide-y divide-border/50">
+                      {dayLeaveList.map(l => (
+                        <div key={l.id} className="px-5 py-2 flex items-center justify-between gap-3 hover:bg-surface-raised/40 transition-colors">
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="size-7 rounded-full bg-zinc-500/15 flex items-center justify-center flex-shrink-0">
+                              <svg className="size-3.5 text-zinc-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                              </svg>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-text-primary truncate">{l.staff_name}</p>
+                              {l.reason && <p className="text-xs text-text-tertiary truncate">{l.reason}</p>}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteLeave(l)}
+                            className="text-xs text-text-tertiary hover:text-red-400 px-2 py-1 transition-colors flex-shrink-0"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Schedule list */}
                 <div className="flex-1 overflow-y-auto divide-y divide-border">
+                  {dayEntries.length > 0 && dayLeaveList.length > 0 && (
+                    <div className="px-5 pt-3 pb-1 text-[10px] font-medium text-text-muted uppercase tracking-wider">
+                      Schedules
+                    </div>
+                  )}
                   {dayEntries.map((s) => {
                     const colors = SCHEDULE_TYPE_COLORS[s.schedule_type] || { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
                     const isRemote = s.mode === 'Remote'
@@ -1160,18 +1354,47 @@ export default function SchedulePage() {
                       </button>
                     )
                   })}
-                  {/* Add Schedule button at bottom of day list */}
-                  <div className="px-5 py-3 border-t border-border">
+                  {/* Add Schedule / Mark Leave / Holiday buttons at bottom of day list */}
+                  <div className="px-5 py-3 border-t border-border grid grid-cols-3 gap-2">
                     <button
                       onClick={() => {
+                        const d = dayDetailDate!
                         setDayDetailDate(null)
                         resetForm()
-                        setFormDate(dayDetailDate!)
+                        setFormDate(d)
                         setShowAddModal(true)
                       }}
                       className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-border text-xs text-text-tertiary hover:text-text-primary hover:border-accent/40 transition-colors"
                     >
-                      <span className="text-sm">+</span> Add Schedule
+                      <span className="text-sm">+</span> Schedule
+                    </button>
+                    <button
+                      onClick={() => {
+                        const d = dayDetailDate!
+                        setDayDetailDate(null)
+                        setLeavePrefilledDate(d)
+                        setShowLeaveModal(true)
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-border text-xs text-text-tertiary hover:text-text-primary hover:border-accent/40 transition-colors"
+                    >
+                      <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      Leave
+                    </button>
+                    <button
+                      onClick={() => {
+                        const d = dayDetailDate!
+                        setDayDetailDate(null)
+                        setHolidayPrefilledDate(d)
+                        setShowHolidayModal(true)
+                      }}
+                      className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-border text-xs text-text-tertiary hover:text-text-primary hover:border-accent/40 transition-colors"
+                    >
+                      <svg className="size-3" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M5 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm6.5 4a.5.5 0 00-1 0v4.586L9.207 11.293a.5.5 0 10-.707.707l2 2a.5.5 0 00.707 0l2-2a.5.5 0 00-.707-.707L11.5 12.586V8z" />
+                      </svg>
+                      Holiday
                     </button>
                   </div>
                 </div>
@@ -1252,11 +1475,16 @@ export default function SchedulePage() {
                       </div>
                       <div>
                         <Label>PIC Support</Label>
-                        <Input
-                          type="text"
-                          value={editPicSupport}
-                          onChange={(e) => setEditPicSupport(e.target.value)}
-                          placeholder="Support agent"
+                        <StaffPicker
+                          hideLabel
+                          agents={agents}
+                          value={editPicSupportId}
+                          displayValue={editPicSupport}
+                          onChange={(id, name) => {
+                            setEditPicSupportId(id)
+                            setEditPicSupport(name || '')
+                          }}
+                          placeholder="Assign staff or type a name..."
                         />
                       </div>
                       <div>
@@ -1289,6 +1517,42 @@ export default function SchedulePage() {
                         />
                       </div>
                     </div>
+
+                    {/* Conflict warnings — holiday + PIC leave (edit) */}
+                    {editDate && (() => {
+                      const dayHols = holidaysByDate[editDate] || []
+                      const dayLeave = leaveByDate[editDate] || []
+                      const clinicState = editClinic?.state || ''
+                      const relevantHols = dayHols.filter(h =>
+                        h.scope === 'federal' || (clinicState && h.scope === clinicState)
+                      )
+                      const picOnLeave = editPicSupportId
+                        ? dayLeave.find(l => l.staff_id === editPicSupportId)
+                        : null
+                      if (relevantHols.length === 0 && !picOnLeave) return null
+                      return (
+                        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 space-y-1">
+                          {relevantHols.map(h => (
+                            <p key={h.id} className="text-xs text-amber-300 flex items-start gap-1.5">
+                              <span aria-hidden>⚠</span>
+                              <span>
+                                Public holiday: <span className="font-medium">{h.name}</span>
+                                {h.scope !== 'federal' && <span className="text-amber-400/70"> ({h.scope})</span>}
+                              </span>
+                            </p>
+                          ))}
+                          {picOnLeave && (
+                            <p className="text-xs text-amber-300 flex items-start gap-1.5">
+                              <span aria-hidden>⚠</span>
+                              <span>
+                                <span className="font-medium">{picOnLeave.staff_name}</span> is on leave
+                                {picOnLeave.reason && <span className="text-amber-400/70"> — {picOnLeave.reason}</span>}
+                              </span>
+                            </p>
+                          )}
+                        </div>
+                      )
+                    })()}
 
                     {/* Schedule Type */}
                     <div>
@@ -2016,11 +2280,16 @@ export default function SchedulePage() {
                   </div>
                   <div>
                     <Label>PIC Support</Label>
-                    <Input
-                      type="text"
-                      value={formPicSupport}
-                      onChange={(e) => setFormPicSupport(e.target.value)}
-                      placeholder="Support agent"
+                    <StaffPicker
+                      hideLabel
+                      agents={agents}
+                      value={formPicSupportId}
+                      displayValue={formPicSupport}
+                      onChange={(id, name) => {
+                        setFormPicSupportId(id)
+                        setFormPicSupport(name || '')
+                      }}
+                      placeholder="Assign staff or type a name..."
                     />
                   </div>
                   <div>
@@ -2053,6 +2322,42 @@ export default function SchedulePage() {
                     />
                   </div>
                 </div>
+
+                {/* Conflict warnings — holiday + PIC leave */}
+                {formDate && (() => {
+                  const dayHols = holidaysByDate[formDate] || []
+                  const dayLeave = leaveByDate[formDate] || []
+                  const clinicState = formClinic?.state || ''
+                  const relevantHols = dayHols.filter(h =>
+                    h.scope === 'federal' || (clinicState && h.scope === clinicState)
+                  )
+                  const picOnLeave = formPicSupportId
+                    ? dayLeave.find(l => l.staff_id === formPicSupportId)
+                    : null
+                  if (relevantHols.length === 0 && !picOnLeave) return null
+                  return (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 space-y-1">
+                      {relevantHols.map(h => (
+                        <p key={h.id} className="text-xs text-amber-300 flex items-start gap-1.5">
+                          <span aria-hidden>⚠</span>
+                          <span>
+                            Public holiday: <span className="font-medium">{h.name}</span>
+                            {h.scope !== 'federal' && <span className="text-amber-400/70"> ({h.scope})</span>}
+                          </span>
+                        </p>
+                      ))}
+                      {picOnLeave && (
+                        <p className="text-xs text-amber-300 flex items-start gap-1.5">
+                          <span aria-hidden>⚠</span>
+                          <span>
+                            <span className="font-medium">{picOnLeave.staff_name}</span> is on leave
+                            {picOnLeave.reason && <span className="text-amber-400/70"> — {picOnLeave.reason}</span>}
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* Schedule Type */}
                 <div>
@@ -2153,6 +2458,23 @@ export default function SchedulePage() {
           }}
         />
       )}
+
+      {/* Mark Leave modal */}
+      <MarkLeaveModal
+        open={showLeaveModal}
+        onClose={() => setShowLeaveModal(false)}
+        onSaved={fetchSchedules}
+        agents={agents}
+        prefilledDate={leavePrefilledDate}
+      />
+
+      {/* Add Holiday modal */}
+      <MarkHolidayModal
+        open={showHolidayModal}
+        onClose={() => setShowHolidayModal(false)}
+        onSaved={fetchSchedules}
+        prefilledDate={holidayPrefilledDate}
+      />
     </div>
   )
 }

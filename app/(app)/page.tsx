@@ -120,7 +120,7 @@ export default function DashboardPage() {
     const { data } = await supabase
       .from('schedules')
       .select('*')
-      .eq('agent_id', session.user.id)
+      .eq('pic_support_id', session.user.id)
       .eq('status', 'scheduled')
       .gte('schedule_date', todayStr)
       .order('schedule_date')

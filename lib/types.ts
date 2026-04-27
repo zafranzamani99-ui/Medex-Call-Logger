@@ -323,6 +323,9 @@ export interface InboxMessage {
   replied_at: string | null
   reply_count: number
   created_at: string
+  done_by: string | null
+  done_by_name: string | null
+  done_at: string | null
 }
 
 // Individual reply in an inbox chat thread
@@ -369,9 +372,30 @@ export interface Schedule {
   completed_at: string | null
   actual_duration_minutes: number | null
   pic_support: string | null
+  pic_support_id: string | null
   reschedule_reason: string | null
   created_at: string
   updated_at: string
+}
+
+// ---- Public holidays + staff leave (calendar overlays) ----
+
+export interface PublicHoliday {
+  id: string
+  holiday_date: string  // YYYY-MM-DD
+  name: string
+  scope: string  // 'federal' OR Malaysian state code: SEL, KUL, PNG, JHR, KDH, KTN, MLK, NSN, PHG, PRK, PLS, SBH, SWK, TRG, LBN, PJY
+  created_at: string
+  created_by: string | null
+}
+
+export interface StaffLeave {
+  id: string
+  staff_id: string
+  leave_date: string  // YYYY-MM-DD
+  reason: string | null
+  created_by: string | null
+  created_at: string
 }
 
 // ---- Job Sheet types ----
