@@ -225,6 +225,7 @@ export default function InboxPage() {
           .from('tickets')
           .update({
             status: 'Resolved',
+            need_team_check: false,
             last_updated_by: userId,
             last_updated_by_name: nameWithRole,
             last_change_note: 'Resolved via Inbox',

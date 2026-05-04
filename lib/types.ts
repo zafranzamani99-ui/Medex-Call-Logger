@@ -201,6 +201,10 @@ export interface Ticket {
   // Attachments
   attachment_urls: string[]
 
+  // KB dedupe — set when generate-kb finds an existing matching article and
+  // skips fresh generation. Null for tickets pre-Phase-1 or with no match.
+  kb_match_id?: string | null
+
   // Joined data (optional — only when fetching with timeline)
   timeline_entries?: TimelineEntry[]
 }
@@ -227,6 +231,10 @@ export interface KnowledgeBaseEntry {
   source_ticket_id: string | null
   image_urls: string[]
   created_at: string
+  // Phase-1 dedupe — populated by /api/embed-kb-backfill and /api/generate-kb.
+  // Vector lives in Postgres (pgvector); we never round-trip it through TS,
+  // so it's not exposed as a typed field here.
+  match_count?: number
 }
 
 export interface AuditLog {

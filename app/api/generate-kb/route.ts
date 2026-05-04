@@ -1,12 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { embedText, vectorLiteral } from '@/lib/embeddings'
 
-// WHY: Server-side API route to call Gemini AI and generate a KB draft from a resolved ticket.
-// Runs on server so API key stays secret. Uses service role to write to knowledge_base.
+// WHY: Server-side AI KB generation. Phase-1 dedupe upgrade:
+//
+//   1. Embed the new ticket text (cheap, no images).
+//   2. Cosine-search top KB candidates.
+//   3. similarity ≥ HIGH (0.92) → skip generation entirely. Link the ticket
+//      to the existing article and bump its match_count. No Gemini call.
+//   4. similarity ≥ MID  (0.80) → generate, but seed prompt with the existing
+//      article so the AI improves it instead of starting from scratch
+//      (shorter output, fewer tokens).
+//   5. otherwise → standard fresh generation.
+//
+// Plus per-call diet: maxOutputTokens 8192→1024, image cap 5→2, examples 3→2.
+// All decisions echoed back in the response so the UI can show what happened.
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
+
+const HIGH_SIMILARITY = 0.92  // skip generation outright
+const MID_SIMILARITY  = 0.80  // generate-as-improvement
+const MAX_IMAGES      = 2     // was 5
+const MAX_OUTPUT_TOK  = 1024  // was 8192
+const FEWSHOT_LIMIT   = 2     // was 3
 
 export async function POST(req: NextRequest) {
   if (!GEMINI_API_KEY) {
@@ -22,6 +40,56 @@ export async function POST(req: NextRequest) {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
+  // ─── Phase 1 dedupe gate ────────────────────────────────────────────
+  const ticketEmbeddingText = `${issue}\n\n${my_response || ''}`.slice(0, 8000)
+  const ticketEmbedding = await embedText(ticketEmbeddingText)
+
+  type Candidate = { id: string; issue: string; fix: string; similarity: number }
+  let topMatches: Candidate[] = []
+
+  if (ticketEmbedding) {
+    // pgvector cosine: distance = 1 - similarity. Lower distance = more similar.
+    // Use <=> for cosine distance, ORDER BY ASC, then convert to similarity in JS.
+    const { data: candidates, error: searchErr } = await supabase.rpc('kb_similarity_search', {
+      query_embedding: vectorLiteral(ticketEmbedding),
+      max_results: 3,
+    })
+    if (searchErr) {
+      // RPC missing or failed → fall through to standard generation. Don't fail the call.
+      console.warn('[generate-kb] kb_similarity_search RPC failed, skipping dedupe:', searchErr.message)
+    } else {
+      topMatches = (candidates || []) as Candidate[]
+    }
+  }
+
+  const best = topMatches[0]
+  const isExactMatch = best && best.similarity >= HIGH_SIMILARITY
+  const isVariant    = best && best.similarity >= MID_SIMILARITY && !isExactMatch
+
+  // ─── Path A: skip generation, link ticket to existing KB ─────────────
+  if (isExactMatch) {
+    await supabase
+      .from('tickets')
+      .update({ kb_match_id: best.id })
+      .eq('id', ticket_id)
+
+    await supabase.rpc('increment_kb_match_count', { kb_id: best.id })
+      .then(({ error }) => {
+        // Non-fatal — we still link the ticket even if the counter fails to bump.
+        if (error) console.warn('[generate-kb] match_count bump failed:', error.message)
+      })
+
+    return NextResponse.json({
+      success: true,
+      skipped: true,
+      reason: 'similar_kb_exists',
+      similarity: best.similarity,
+      matched_kb: { id: best.id, issue: best.issue },
+    })
+  }
+
+  // ─── Path B & C: generate (with or without seed) ─────────────────────
+
   // Fetch ticket's attachment images for multimodal analysis
   const { data: ticketRow } = await supabase
     .from('tickets')
@@ -30,9 +98,9 @@ export async function POST(req: NextRequest) {
     .single()
   const imageUrls: string[] = ticketRow?.attachment_urls || []
 
-  // Convert images to base64 for Gemini vision API (max 5)
+  // Convert images to base64 for Gemini vision API (capped to MAX_IMAGES)
   const imageParts: { inlineData: { mimeType: string; data: string } }[] = []
-  for (const url of imageUrls.slice(0, 5)) {
+  for (const url of imageUrls.slice(0, MAX_IMAGES)) {
     try {
       const res = await fetch(url)
       const buffer = Buffer.from(await res.arrayBuffer())
@@ -41,86 +109,73 @@ export async function POST(req: NextRequest) {
     } catch { /* skip failed image fetches */ }
   }
 
-  // Pull from published AND polished drafts — polished drafts have clean text
-  // (not JSON-wrapped), so they're valid style examples even before publishing.
-  // This means: polish a draft → next AI generation already learns from it.
+  // Style examples — published or polished drafts. Skip raw JSON-wrapped entries.
   const { data: recentKB } = await supabase
     .from('knowledge_base')
     .select('issue, fix')
     .in('status', ['published', 'draft'])
     .order('created_at', { ascending: false })
-    .limit(10)
+    .limit(8)
 
-  // Build few-shot examples — skip JSON-wrapped entries (unpolished raw AI output)
   let examplesBlock = ''
   if (recentKB && recentKB.length > 0) {
     const examples = recentKB
       .filter(kb => kb.fix && !kb.fix.trim().startsWith('{'))
-      .slice(0, 3)
+      .slice(0, FEWSHOT_LIMIT)
       .map(kb => `Issue: ${kb.issue}\nFix: ${kb.fix}`)
       .join('\n\n---\n\n')
-
     if (examples) {
-      examplesBlock = `\n\nHERE ARE REAL KB ARTICLES WRITTEN BY OUR AGENTS — match this style closely:\n\n${examples}\n\n---\n\n`
+      examplesBlock = `\n\nReal articles written by our agents (match this tone):\n\n${examples}\n\n---\n\n`
     }
   }
 
-  // Build image context block for prompt
   const imageContextBlock = imageUrls.length > 0 ? `
-ATTACHED SCREENSHOTS: ${imageUrls.length} image(s) attached by the agent.
-These are screenshots from the actual issue — error dialogs, settings screens, proof, etc.
-
-You MUST deeply understand each image, not just read text from it:
-- IDENTIFY what software/screen/module is shown (e.g., "MDOCMS login screen", "SQL Server Management Studio", "Windows Firewall settings")
-- EXTRACT error codes and error messages VERBATIM — agents will search KB by these exact codes (e.g., "Error 1045", "HTTP 500", "ORA-12154")
-- UNDERSTAND the root cause shown in the image — connect it to the agent's description
-- If the image shows PROOF (e.g., a receipt, confirmation screen, successful result), note what it proves in the article
+ATTACHED SCREENSHOTS: ${Math.min(imageUrls.length, MAX_IMAGES)} image(s) attached.
+- IDENTIFY what software/screen is shown
+- EXTRACT error codes/messages VERBATIM (agents search KB by these)
+- CONNECT image to the agent's description
 ` : ''
 
-  // Build cross-reference block
-  const crossRefBlock = examplesBlock ? `
-CROSS-REFERENCE WITH EXISTING KB:
-You were given existing KB articles above as style examples. But also USE them as knowledge:
-- If any existing article relates to this issue (same error, same module, similar symptoms), reference it: "See also: [article title]"
-- If the issue is a VARIATION of a known problem, say so: "This is similar to [known issue] but caused by [different reason]"
-- If no existing article matches, say nothing — don't force a reference
-` : ''
+  // ─── Variant mode: seed prompt with the existing article ────────────
+  let seedBlock = ''
+  if (isVariant && best) {
+    seedBlock = `
+EXISTING RELATED ARTICLE (similarity ${best.similarity.toFixed(2)}):
+Issue: ${best.issue}
+Fix: ${best.fix}
 
-  // Build the prompt
-  const prompt = `You are writing internal KB articles for Medex support agents. Keep it practical — agents read these while on a live call.
-${examplesBlock}
+This new ticket is RELATED to the article above. Improve or vary it:
+- If new ticket reveals a different cause/symptom → write a fresh article that distinguishes itself
+- If new ticket is the same issue with extra details → output a tightened version of the existing fix
+- Keep the output SHORT — don't repeat what the existing article already covers
+`
+  }
+
+  // Compact prompt — trimmed structural padding from earlier version.
+  const prompt = `You are writing internal KB articles for Medex support agents. Practical, agents read these on a live call.
+${examplesBlock}${seedBlock}
 TICKET DATA:
-- Issue Type: ${issue_type}
+- Type: ${issue_type}
 - Issue: ${issue}
 - Response/Solution: ${my_response || 'Not provided'}
 - Next Steps: ${next_step || 'None'}
-${imageContextBlock}${crossRefBlock}
-ARTICLE STRUCTURE — write the KB article as a diagnostic guide, not just a fix list:
-1. "Cause:" — what is likely going wrong and why (connect the image + agent's description)
-2. "Possible causes:" — ONLY if genuinely ambiguous. List 2-3 possibilities ranked by likelihood. Skip this if the cause is obvious
-3. Numbered fix steps — practical suggestions on HOW to approach it, not just "do X"
-   - Reference what's visible in screenshots where relevant (e.g., "In the screenshot, the Server Name field shows the old IP — change it to...")
-   - Include specific paths/menus/buttons where relevant
-   - One sub-bullet per step max, only if needed
-4. "How we handle this:" — ONE line on how the Medex support team typically deals with this (based on the agent's response/solution provided in the ticket data). This helps junior agents know the team's standard approach
-5. "Note:" — ONLY if there's a genuine warning or gotcha. Skip if not needed
+${imageContextBlock}
+ARTICLE STRUCTURE:
+1. "Cause:" — what is going wrong and why
+2. "Possible causes:" — only if genuinely ambiguous (2-3 ranked)
+3. Numbered fix steps — practical, reference visible screenshot details, include menu paths
+4. "How we handle this:" — ONE line on the team's standard approach (from the agent response)
+5. "Note:" — only if there's a real warning
 
-TONE: Like a senior agent writing a quick guide for a junior — clear, confident, no padding. Aim for 80-200 words in the fix. Match the style of the example articles above if provided.
+TONE: Senior agent → junior. 80-200 words for the fix. No padding, no bold/markdown.
 
-DO NOT:
-- Over-explain simple actions
-- Add "Important Notes and Warnings" sections with multiple paragraphs
-- Repeat information from the steps
-- Use bold/markdown formatting
-
-OUTPUT FORMAT (return ONLY this JSON, no markdown, no code fences):
+OUTPUT (JSON ONLY, no fences):
 {
-  "issue": "Clear issue title — include error code if extracted from screenshot (max 80 chars)",
-  "fix": "Cause + optional possible causes + fix steps + how we handle this + optional note"
+  "issue": "Clear title with error code if any (max 80 chars)",
+  "fix": "Cause + steps + how we handle + optional note"
 }`
 
   try {
-    // Call Gemini API
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
       {
@@ -130,7 +185,7 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown, no code fences):
           contents: [{ parts: [{ text: prompt }, ...imageParts] }],
           generationConfig: {
             temperature: 0.3,
-            maxOutputTokens: 8192,
+            maxOutputTokens: MAX_OUTPUT_TOK,
           },
         }),
       }
@@ -143,28 +198,22 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown, no code fences):
     }
 
     const geminiData = await geminiRes.json()
-
-    // WHY: Gemini 2.5 Flash has "thinking" — parts array may contain a thought part
-    // followed by the actual response. Get the LAST text part (the real answer).
     const parts = geminiData.candidates?.[0]?.content?.parts || []
     const rawText = parts.filter((p: { text?: string }) => p.text).pop()?.text || ''
 
-    // Parse the JSON from Gemini response (strip markdown fences if present)
     const jsonStr = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
     let parsed: { issue: string; fix: string }
-
     try {
       parsed = JSON.parse(jsonStr)
     } catch {
-      // Fallback: use raw text as fix
-      parsed = {
-        issue: issue.slice(0, 80),
-        fix: rawText.trim(),
-      }
+      parsed = { issue: issue.slice(0, 80), fix: rawText.trim() }
     }
 
-    // Save to knowledge_base as draft (update existing draft if re-resolved)
-    // Check for existing draft from this ticket — prevents duplicates on re-resolve
+    // Embed the new article so future tickets can dedupe against it.
+    const articleEmbedding = await embedText(`${parsed.issue}\n\n${parsed.fix}`.slice(0, 8000))
+    const embeddingPayload = articleEmbedding ? { embedding: vectorLiteral(articleEmbedding) } : {}
+
+    // Upsert by source_ticket_id (re-resolve case)
     const { data: existing } = await supabase
       .from('knowledge_base')
       .select('id')
@@ -175,7 +224,6 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown, no code fences):
 
     let data, error
     if (existing) {
-      // Update existing draft instead of creating a duplicate
       ;({ data, error } = await supabase
         .from('knowledge_base')
         .update({
@@ -184,6 +232,7 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown, no code fences):
           fix: parsed.fix,
           added_by: agent_name || 'AI (Gemini)',
           image_urls: imageUrls,
+          ...embeddingPayload,
         })
         .eq('id', existing.id)
         .select()
@@ -199,6 +248,7 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown, no code fences):
           status: 'draft',
           source_ticket_id: ticket_id,
           image_urls: imageUrls,
+          ...embeddingPayload,
         })
         .select()
         .single())
@@ -209,7 +259,13 @@ OUTPUT FORMAT (return ONLY this JSON, no markdown, no code fences):
       return NextResponse.json({ error: 'Failed to save KB draft' }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, kb_entry: data })
+    return NextResponse.json({
+      success: true,
+      skipped: false,
+      mode: isVariant ? 'variant' : 'fresh',
+      similarity: best?.similarity ?? null,
+      kb_entry: data,
+    })
   } catch (err) {
     console.error('Generate KB error:', err)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

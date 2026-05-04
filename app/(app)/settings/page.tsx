@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/Toast'
 import type { UserRole } from '@/lib/types'
 import { toProperCase } from '@/lib/constants'
 import HolidaysSection from '@/components/settings/HolidaysSection'
+import KBMaintenanceSection from '@/components/settings/KBMaintenanceSection'
 
 // WHY: Settings page — spec Section 6.
 // 1. Display name edit (UC-22) — agent can change their name
@@ -393,6 +394,9 @@ export default function SettingsPage() {
 
       {/* Public Holidays — admin only */}
       {userRole === 'admin' && <HolidaysSection />}
+
+      {/* KB Maintenance — admin only */}
+      {userRole === 'admin' && <KBMaintenanceSection />}
 
       {/* Feedback */}
       <div className="bg-surface border border-border rounded-lg p-4 mt-4">

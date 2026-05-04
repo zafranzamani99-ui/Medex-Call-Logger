@@ -243,8 +243,8 @@ export default function HolidaysSection() {
           ))}
         </div>
       )}
-      </>
-      )}
+    </>
+    )}
     </div>
   )
 }

@@ -157,10 +157,11 @@ export default function TicketDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { window.scrollTo(0, 0); fetchTicket() }, [ticketId])
 
-  // KB generation via AI
+  // KB generation via AI — Phase-1 dedupe gate may skip generation if a similar
+  // article already exists. Toast reflects the outcome.
   const triggerKBGeneration = async (t: Ticket) => {
     if (!t.issue || !t.my_response) return
-    toast('AI is generating KB article...', 'info')
+    toast('Checking existing KB...', 'info')
     try {
       const res = await fetch('/api/generate-kb', {
         method: 'POST',
@@ -171,7 +172,22 @@ export default function TicketDetailPage() {
           next_step: t.next_step, agent_name: userName,
         }),
       })
-      toast(res.ok ? 'KB draft created! Review it in Knowledge Base.' : 'KB generation failed — you can add it manually.', res.ok ? 'success' : 'error')
+      if (!res.ok) {
+        toast('KB generation failed — you can add it manually.', 'error')
+        return
+      }
+      const json = await res.json() as {
+        skipped?: boolean
+        mode?: 'fresh' | 'variant'
+        matched_kb?: { id: string; issue: string }
+      }
+      if (json.skipped && json.matched_kb) {
+        toast(`Matches existing KB: "${json.matched_kb.issue}" — no new draft generated.`, 'success')
+      } else if (json.mode === 'variant') {
+        toast('KB draft created (improved from existing article).', 'success')
+      } else {
+        toast('KB draft created! Review it in Knowledge Base.', 'success')
+      }
     } catch {
       toast('KB generation failed — you can add it manually.', 'error')
     }
@@ -188,6 +204,11 @@ export default function TicketDetailPage() {
 
     setSaving(true)
 
+    // Resolved tickets can't carry a "Needs Attention" flag — work is done.
+    // Force-clear here so the History page doesn't keep showing red badges
+    // on closed tickets.
+    const effectiveNeedCheck = editStatus === 'Resolved' ? false : editNeedCheck
+
     const changes: string[] = []
     if (editStatus !== ticket.status) changes.push(`Status: ${ticket.status} → ${editStatus}`)
     if (editIssue !== ticket.issue) changes.push('Issue updated')
@@ -195,7 +216,10 @@ export default function TicketDetailPage() {
     if ((editNextStep || null) !== ticket.next_step) changes.push('Next step updated')
     if ((editTimelineFromCustomer || null) !== ticket.timeline_from_customer) changes.push('Timeline updated')
     if ((editInternalTimeline || null) !== ticket.internal_timeline) changes.push('Internal timeline updated')
-    if (editNeedCheck !== ticket.need_team_check) changes.push(editNeedCheck ? 'Flagged for attention' : 'Flag removed')
+    if (effectiveNeedCheck !== ticket.need_team_check) {
+      const cleanedOnResolve = editStatus === 'Resolved' && ticket.need_team_check && editNeedCheck
+      changes.push(cleanedOnResolve ? 'Flag cleared on resolve' : (effectiveNeedCheck ? 'Flagged for attention' : 'Flag removed'))
+    }
     if ((editIssueCategory || null) !== (ticket.issue_category || null)) changes.push(`Category: ${ticket.issue_category || 'None'} → ${editIssueCategory || 'None'}`)
     if (editIssueType !== ticket.issue_type) changes.push(`Type: ${ticket.issue_type} → ${editIssueType}`)
     if ((editDuration || null) !== (ticket.call_duration || null)) changes.push(`Duration: ${getDurationLabel(ticket.call_duration)} → ${getDurationLabel(editDuration)}`)
@@ -213,7 +237,7 @@ export default function TicketDetailPage() {
         timeline_from_customer: editTimelineFromCustomer || null,
         internal_timeline: editInternalTimeline || null,
         status: editStatus,
-        need_team_check: editNeedCheck,
+        need_team_check: effectiveNeedCheck,
         issue_category: editIssueCategory || null,
         issue_type: editIssueType,
         call_duration: editDuration,
@@ -261,13 +285,17 @@ export default function TicketDetailPage() {
       toast('Please add a message before escalating to admin', 'error')
       return
     }
+    const clearedFlag = newStatus === 'Resolved' && ticket.need_team_check
     await supabase
       .from('tickets')
       .update({
         status: newStatus,
+        ...(newStatus === 'Resolved' ? { need_team_check: false } : {}),
         last_updated_by: userId,
         last_updated_by_name: userName,
-        last_change_note: `Status: ${ticket.status} → ${newStatus}`,
+        last_change_note: clearedFlag
+          ? `Status: ${ticket.status} → ${newStatus} · Flag cleared on resolve`
+          : `Status: ${ticket.status} → ${newStatus}`,
         last_activity_at: new Date().toISOString(),
       })
       .eq('id', ticket.id)
@@ -319,7 +347,13 @@ export default function TicketDetailPage() {
         return
       }
       ticketUpdate.status = followUpStatus
-      ticketUpdate.last_change_note = `Status → ${followUpStatus} (${data.channel})`
+      const clearedFlagFollowUp = followUpStatus === 'Resolved' && ticket.need_team_check
+      if (followUpStatus === 'Resolved') {
+        ticketUpdate.need_team_check = false
+      }
+      ticketUpdate.last_change_note = clearedFlagFollowUp
+        ? `Status → ${followUpStatus} (${data.channel}) · Flag cleared on resolve`
+        : `Status → ${followUpStatus} (${data.channel})`
     }
     // Optional: update Jira link
     if (followUpJiraLink.trim()) {

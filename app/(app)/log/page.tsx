@@ -494,7 +494,8 @@ export default function LogCallPage() {
       timeline_from_customer: timelineFromCustomer.trim() || null,
       internal_timeline: internalTimeline.trim() || null,
       status,
-      need_team_check: needTeamCheck,
+      // Resolved tickets can't carry a Needs Attention flag — work is done.
+      need_team_check: status === 'Resolved' ? false : needTeamCheck,
       jira_link: status === 'Escalated' ? (jiraLink.trim() || null) : null,
       admin_message: status === 'Escalated to Admin' ? adminMessage.trim() : null,
       attachment_urls: attachments.length > 0 ? attachments : [],
@@ -675,6 +676,28 @@ export default function LogCallPage() {
       timelineFromCustomer, internalTimeline, needTeamCheck,
       status, jiraLink, adminMessage, callDate,
     }
+
+    // If a draft was loaded, update that row instead of creating a duplicate.
+    if (activeDraftId) {
+      const nowIso = new Date().toISOString()
+      const { error: err } = await supabase
+        .from('call_log_drafts')
+        .update({ label, form_data: formData, updated_at: nowIso })
+        .eq('id', activeDraftId)
+      if (err) {
+        toast('Failed to update draft', 'error')
+        return
+      }
+      setDrafts(prev => prev.map(d =>
+        d.id === activeDraftId
+          ? { ...d, label, savedAt: nowIso, ...formData }
+          : d
+      ).sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || '')))
+      resetFormSilent()
+      toast('Draft updated — start your next call')
+      return
+    }
+
     const { data, error: err } = await supabase.from('call_log_drafts').insert({
       user_id: userId,
       label,
@@ -1343,7 +1366,7 @@ export default function LogCallPage() {
               <kbd className="ml-2 px-1.5 py-0.5 text-[10px] bg-white/10 rounded font-mono">Ctrl+Enter</kbd>
             </Button>
             <Button variant="ghost" size="lg" onClick={handleSaveDraft} className="border border-border">
-              Draft
+              {activeDraftId ? 'Update Draft' : 'Draft'}
             </Button>
             <Button variant="secondary" size="lg" onClick={handleClear}>
               Clear
@@ -1508,7 +1531,7 @@ export default function LogCallPage() {
                 <svg className="size-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
                 </svg>
-                Save as Draft
+                {activeDraftId ? 'Update Draft' : 'Save as Draft'}
               </button>
             </div>
 
@@ -1541,7 +1564,7 @@ export default function LogCallPage() {
             {saving ? 'Saving...' : 'Save'}
           </Button>
           <Button variant="ghost" size="lg" onClick={handleSaveDraft} className="border border-border px-3">
-            Draft
+            {activeDraftId ? 'Update' : 'Draft'}
           </Button>
           <Button variant="secondary" size="lg" onClick={handleClear} className="px-3">
             Clear

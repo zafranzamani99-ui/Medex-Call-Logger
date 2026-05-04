@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { format, isToday, isYesterday } from 'date-fns'
+import { format, isToday, isYesterday, formatDistanceToNow } from 'date-fns'
 import type { Ticket, TicketStatus, RecordType } from '@/lib/types'
 import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor, toProperCase } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
@@ -15,6 +15,8 @@ import { SlidePanel } from '@/components/Modal'
 import Button from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import EmptyState, { EmptyIcons } from '@/components/ui/EmptyState'
+import HeaderFilter from '@/components/table/HeaderFilter'
+import { HorizontalDndProvider, SortableHeader, reorderColumns, PlainResizeProvider, PlainResizeHandle, PlainResizeIndicator } from '@/components/table/spreadsheet-kit'
 
 // WHY: History page — spec Section 10. All tickets with filters, search, CSV export.
 // UPGRADE: Desktop table layout at md:, sortable columns, filter chips, better pagination.
@@ -49,6 +51,18 @@ export default function HistoryPage() {
   // Sorting
   const [sortKey, setSortKey] = useState<SortKey>('created_at')
   const [sortDir, setSortDir] = useState<SortDir>('desc')
+
+  // Per-column filters (Excel-style header dropdowns) — applied on top of the
+  // existing slide-panel filters so both stay usable.
+  const [colClinic, setColClinic] = useState<Set<string>>(new Set())
+  const [colType, setColType] = useState<Set<string>>(new Set())
+  const [colStatus, setColStatus] = useState<Set<string>>(new Set())
+  const [colStaff, setColStaff] = useState<Set<string>>(new Set())
+  const [colJira, setColJira] = useState<Set<string>>(new Set())
+
+  // Bulk row selection
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   // Pagination
   const [page, setPage] = useState(1)
@@ -123,57 +137,84 @@ export default function HistoryPage() {
     }
   }, [loading])
 
-  // ─── Column resize ───
-  const STORAGE_KEY = 'history-col-widths'
+  // ─── Column resize / visibility / order (persisted to localStorage) ───
+  const STORAGE_KEY = 'history-col-widths-v2'
+  const VIS_KEY = 'history-col-visibility'
   const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'jira', 'next', 'staff', 'actions'] as const
+  const COL_LABELS: Record<string, string> = {
+    ref: 'Ref / Date', phone: 'Phone', clinic: 'Clinic', issue: 'Details',
+    type: 'Type', status: 'Status', jira: 'Jira', next: 'Next Step',
+    staff: 'Staff', actions: 'Actions',
+  }
+  const ALWAYS_VISIBLE = new Set(['ref', 'actions'])
   const DEFAULT_WIDTHS: Record<string, number> = {
     ref: 155, phone: 120, clinic: 200, issue: 320, type: 105, status: 150, jira: 90, next: 150, staff: 80, actions: 50,
   }
+  const [colVisibility, setColVisibility] = useState<Record<string, boolean>>(() => {
+    if (typeof window === 'undefined') return Object.fromEntries(COL_KEYS.map(k => [k, true]))
+    try {
+      const saved = localStorage.getItem(VIS_KEY)
+      const base = Object.fromEntries(COL_KEYS.map(k => [k, true]))
+      return saved ? { ...base, ...JSON.parse(saved) } : base
+    } catch { return Object.fromEntries(COL_KEYS.map(k => [k, true])) }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(VIS_KEY, JSON.stringify(colVisibility)) } catch {}
+  }, [colVisibility])
+  const visibleCols = useMemo(
+    () => COL_KEYS.filter(k => ALWAYS_VISIBLE.has(k) || colVisibility[k]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [colVisibility]
+  )
+  const toggleColVisibility = (k: string) => {
+    if (ALWAYS_VISIBLE.has(k)) return
+    setColVisibility(prev => ({ ...prev, [k]: !prev[k] }))
+  }
+  const [showColMenu, setShowColMenu] = useState(false)
+
+  // Column order — persisted; user can drag header to reorder.
+  const ORDER_KEY = 'history-col-order'
+  const [colOrder, setColOrder] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [...COL_KEYS]
+    try {
+      const saved = localStorage.getItem(ORDER_KEY)
+      if (saved) {
+        const parsed = JSON.parse(saved) as string[]
+        // Ensure all keys present (e.g. after a deploy adds a new column)
+        const missing = COL_KEYS.filter(k => !parsed.includes(k))
+        return [...parsed.filter(k => COL_KEYS.includes(k as typeof COL_KEYS[number])), ...missing]
+      }
+    } catch { /* ignore */ }
+    return [...COL_KEYS]
+  })
+  useEffect(() => {
+    try { localStorage.setItem(ORDER_KEY, JSON.stringify(colOrder)) } catch {}
+  }, [colOrder])
+  const handleColReorder = (fromId: string, toId: string) => {
+    setColOrder(prev => reorderColumns(prev, fromId, toId))
+  }
+  // Final ordered list of column ids actually rendered.
+  const orderedVisibleCols = useMemo(
+    () => colOrder.filter(k => ALWAYS_VISIBLE.has(k) || colVisibility[k]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [colOrder, colVisibility]
+  )
   const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return DEFAULT_WIDTHS
     try {
-      const saved = sessionStorage.getItem(STORAGE_KEY)
+      const saved = localStorage.getItem(STORAGE_KEY)
       return saved ? { ...DEFAULT_WIDTHS, ...JSON.parse(saved) } : DEFAULT_WIDTHS
     } catch { return DEFAULT_WIDTHS }
   })
-  const resizing = useRef<{ col: string; startX: number; startW: number } | null>(null)
-
-  const onResizeStart = useCallback((col: string, e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    resizing.current = { col, startX: e.clientX, startW: colWidths[col] }
-    document.body.style.cursor = 'col-resize'
-    document.body.style.userSelect = 'none'
-  }, [colWidths])
-
-  useEffect(() => {
-    let rafId: number | null = null
-    const onMove = (e: MouseEvent) => {
-      if (!resizing.current) return
-      const { col, startX, startW } = resizing.current
-      const newW = Math.max(60, startW + (e.clientX - startX))
-      if (rafId) return // skip if rAF already pending
-      rafId = requestAnimationFrame(() => {
-        rafId = null
-        setColWidths(prev => ({ ...prev, [col]: newW }))
-      })
-    }
-    const onUp = () => {
-      if (!resizing.current) return
-      resizing.current = null
-      if (rafId) { cancelAnimationFrame(rafId); rafId = null }
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-      // Save to session
-      setColWidths(prev => {
-        try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(prev)) } catch {}
-        return prev
-      })
-    }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
+  // Single setter used by PlainResizeProvider — fires once on drag end.
+  const setColumnWidth = useCallback((col: string, w: number) => {
+    setColWidths(prev => {
+      const next = { ...prev, [col]: w }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)) } catch {}
+      return next
+    })
   }, [])
+  const tableScrollRef = useRef<HTMLDivElement | null>(null)
 
   // WHY: Previously fetched every ticket ever created with a timeline_entries
   // count subquery on every page load. That payload scales linearly with the
@@ -244,8 +285,22 @@ export default function HistoryPage() {
     if (recordTypeFilter !== 'all') result = result.filter((t) => t.record_type === recordTypeFilter)
     if (renewalFilter) result = result.filter((t) => t.renewal_status === renewalFilter)
 
+    // Per-column header filters
+    if (colClinic.size > 0) result = result.filter((t) => colClinic.has(t.clinic_name))
+    if (colType.size > 0) result = result.filter((t) => colType.has(t.issue_type))
+    if (colStatus.size > 0) result = result.filter((t) => colStatus.has(t.status))
+    if (colStaff.size > 0) result = result.filter((t) => colStaff.has(t.created_by_name))
+    if (colJira.size > 0) {
+      result = result.filter((t) => {
+        const has = !!t.jira_link
+        if (colJira.has('With Jira') && has) return true
+        if (colJira.has('Without Jira') && !has) return true
+        return false
+      })
+    }
+
     return result
-  }, [tickets, search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter, loggedByFilter, flaggedOnly, staleOnly, recordTypeFilter, renewalFilter])
+  }, [tickets, search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter, loggedByFilter, flaggedOnly, staleOnly, recordTypeFilter, renewalFilter, colClinic, colType, colStatus, colStaff, colJira])
 
   // Apply sorting
   const sorted = useMemo(() => {
@@ -277,12 +332,34 @@ export default function HistoryPage() {
     return arr
   }, [filtered, sortKey, sortDir])
 
+  // Distinct values per column for HeaderFilter dropdowns (computed against the
+  // search-filtered set so dropdown options reflect the visible universe).
+  const colDistinct = useMemo(() => {
+    const clinic = new Set<string>()
+    const type = new Set<string>()
+    const status = new Set<string>()
+    const staff = new Set<string>()
+    tickets.forEach(t => {
+      if (t.clinic_name) clinic.add(t.clinic_name)
+      if (t.issue_type) type.add(t.issue_type)
+      if (t.status) status.add(t.status)
+      if (t.created_by_name) staff.add(t.created_by_name)
+    })
+    return {
+      clinic: Array.from(clinic).sort(),
+      type: Array.from(type).sort(),
+      status: Array.from(status).sort(),
+      staff: Array.from(staff).sort(),
+      jira: ['With Jira', 'Without Jira'],
+    }
+  }, [tickets])
+
   // Pagination
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   // Reset page when filters or sort change
-  useEffect(() => { setPage(1) }, [search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter, loggedByFilter, flaggedOnly, staleOnly, recordTypeFilter, renewalFilter, sortKey, sortDir])
+  useEffect(() => { setPage(1) }, [search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter, loggedByFilter, flaggedOnly, staleOnly, recordTypeFilter, renewalFilter, sortKey, sortDir, colClinic, colType, colStatus, colStaff, colJira])
 
   // "/" keyboard shortcut — focus search
   useEffect(() => {
@@ -318,27 +395,36 @@ export default function HistoryPage() {
     )
   }
 
-  // CSV Export (spec Section 10.3)
+  // CSV Export — mirrors the visible columns + their current order so the file
+  // matches what's on screen. The "actions" column has no data; it's skipped.
   const handleExport = () => {
-    const headers = [
-      'Ref', 'Type', 'Date', 'Duration', 'Clinic Code', 'Clinic Name', 'City', 'State', 'Product',
-      'MTN Expiry', 'Renewal', 'Category', 'Issue Type', 'Issue', 'My Response', 'Jira Link', 'Next Step', 'Next Step PIC', 'Next Step Contact',
-      'Status', 'PIC', 'Caller Tel', 'Logged By', 'Need Team Check'
-    ]
-    const rows = filtered.map((t) => [
-      t.ticket_ref,
-      t.record_type === 'ticket' ? 'Ticket' : 'Call Log',
-      format(new Date(t.created_at), 'dd/MM/yyyy HH:mm'),
-      getDurationLabel(t.call_duration),
-      t.clinic_code, t.clinic_name, t.city || '', t.state || '', t.product_type || '',
-      t.mtn_expiry ? t.mtn_expiry.split('-').reverse().join('/') : '', t.renewal_status || '',
-      t.issue_category || '', t.issue_type,
-      `"${(t.issue || '').replace(/"/g, '""')}"`,
-      `"${(t.my_response || '').replace(/"/g, '""')}"`,
-      t.jira_link || '', t.next_step || '', t.next_step_pic || '', t.next_step_contact || '', t.status, t.pic || '', t.caller_tel || '',
-      t.created_by_name, t.need_team_check ? 'Yes' : 'No',
-    ])
-    const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
+    type ColMap = { header: string; value: (t: Ticket) => string }
+    const csvFor: Record<string, ColMap> = {
+      ref:   { header: 'Ref',         value: (t) => `${t.ticket_ref}\t${format(new Date(t.created_at), 'dd/MM/yyyy HH:mm')}` },
+      phone: { header: 'Caller Tel',  value: (t) => t.caller_tel || '' },
+      clinic:{ header: 'Clinic',      value: (t) => `${t.clinic_code} — ${t.clinic_name}` },
+      issue: { header: 'Details',     value: (t) => {
+        const parts = [
+          t.issue_category && `[${t.issue_category}]`,
+          t.pic && `PIC: ${t.pic}`,
+          t.issue && `Issue: ${t.issue}`,
+          t.my_response && `Response: ${t.my_response}`,
+          t.timeline_from_customer && `Timeline: ${t.timeline_from_customer}`,
+          t.internal_timeline && `Internal: ${t.internal_timeline}`,
+        ].filter(Boolean)
+        return parts.join(' | ')
+      } },
+      type:  { header: 'Type',        value: (t) => `${t.record_type === 'ticket' ? 'Ticket' : 'Call Log'} — ${t.issue_type}` },
+      status:{ header: 'Status',      value: (t) => `${t.status}${t.need_team_check ? ' (Needs Attention)' : ''}` },
+      jira:  { header: 'Jira',        value: (t) => t.jira_link || '' },
+      next:  { header: 'Next Step',   value: (t) => [t.next_step, t.next_step_pic, t.next_step_contact].filter(Boolean).join(' · ') },
+      staff: { header: 'Logged By',   value: (t) => t.created_by_name },
+    }
+    const csvCols = orderedVisibleCols.filter(k => k !== 'actions' && csvFor[k])
+    const headers = csvCols.map(k => csvFor[k].header)
+    const escape = (s: string) => `"${s.replace(/"/g, '""').replace(/\n/g, ' ')}"`
+    const rows = filtered.map((t) => csvCols.map(k => escape(csvFor[k].value(t))))
+    const csv = [headers.map(escape).join(','), ...rows.map((r) => r.join(','))].join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -441,6 +527,49 @@ export default function HistoryPage() {
               Load all history
             </Button>
           )}
+          <div className="relative">
+            <Button variant="secondary" size="sm" onClick={() => setShowColMenu(v => !v)}>
+              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h10M4 18h6" />
+              </svg>
+              Columns
+            </Button>
+            {showColMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowColMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 z-40 bg-surface border border-border rounded-lg shadow-theme-lg w-[200px] p-1.5">
+                  <p className="px-2 py-1 text-[10px] font-medium text-text-muted uppercase tracking-wider">Show columns</p>
+                  {COL_KEYS.filter(k => k !== 'actions').map(k => {
+                    const locked = ALWAYS_VISIBLE.has(k)
+                    const visible = colVisibility[k]
+                    return (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => toggleColVisibility(k)}
+                        disabled={locked}
+                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-[13px] text-left transition-colors ${
+                          locked ? 'text-text-muted cursor-not-allowed' : 'text-text-secondary hover:bg-surface-raised hover:text-text-primary'
+                        }`}
+                      >
+                        <span className={`size-3.5 rounded border flex items-center justify-center flex-shrink-0 ${
+                          visible ? 'bg-accent border-accent' : 'border-border'
+                        }`}>
+                          {visible && (
+                            <svg className="size-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </span>
+                        <span className="truncate">{COL_LABELS[k]}</span>
+                        {locked && <span className="ml-auto text-[10px] text-text-muted">locked</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+          </div>
           <Button variant="secondary" size="sm" onClick={handleExport}>
             <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
@@ -692,54 +821,200 @@ export default function HistoryPage() {
         </div>
       </SlidePanel>
 
-      {/* ─── Desktop table layout (md+) — resizable columns, saved to sessionStorage ─── */}
-      <div className="hidden md:block card overflow-x-auto">
+      {/* Bulk action toolbar — shows when rows are selected */}
+      {selectedIds.size > 0 && (
+        <div className="hidden md:flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-accent/10 border border-accent/30 text-sm">
+          <span className="text-text-primary font-medium">{selectedIds.size} selected</span>
+          <span className="text-text-muted">·</span>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="text-text-tertiary hover:text-text-primary text-xs"
+          >
+            Clear
+          </button>
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={async () => {
+                if (!confirm(`Mark ${selectedIds.size} ticket${selectedIds.size === 1 ? '' : 's'} as Resolved?`)) return
+                setBulkBusy(true)
+                const ids = Array.from(selectedIds)
+                const { data: { session } } = await supabase.auth.getSession()
+                const profile = session?.user
+                  ? await supabase.from('profiles').select('display_name').eq('id', session.user.id).single()
+                  : null
+                const me = profile?.data?.display_name || ''
+                const { error } = await supabase.from('tickets').update({
+                  status: 'Resolved',
+                  need_team_check: false,
+                  last_updated_by: session?.user?.id || null,
+                  last_updated_by_name: me,
+                  last_change_note: 'Bulk-resolved from History',
+                  last_activity_at: new Date().toISOString(),
+                }).in('id', ids)
+                setBulkBusy(false)
+                if (error) { alert('Failed: ' + error.message); return }
+                setTickets(prev => prev.map(t => ids.includes(t.id) ? { ...t, status: 'Resolved' as TicketStatus, need_team_check: false } : t))
+                setSelectedIds(new Set())
+              }}
+              className="px-2.5 py-1 rounded text-xs font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 disabled:opacity-50"
+            >
+              Mark Resolved
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={async () => {
+                if (!confirm(`Clear "Needs Attention" flag on ${selectedIds.size} ticket${selectedIds.size === 1 ? '' : 's'}?`)) return
+                setBulkBusy(true)
+                const ids = Array.from(selectedIds)
+                const { error } = await supabase.from('tickets').update({ need_team_check: false }).in('id', ids)
+                setBulkBusy(false)
+                if (error) { alert('Failed: ' + error.message); return }
+                setTickets(prev => prev.map(t => ids.includes(t.id) ? { ...t, need_team_check: false } : t))
+                setSelectedIds(new Set())
+              }}
+              className="px-2.5 py-1 rounded text-xs font-medium bg-zinc-500/15 text-zinc-300 hover:bg-zinc-500/25 disabled:opacity-50"
+            >
+              Clear Flag
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={async () => {
+                if (!confirm(`PERMANENTLY DELETE ${selectedIds.size} ticket${selectedIds.size === 1 ? '' : 's'}? This can't be undone.`)) return
+                setBulkBusy(true)
+                const ids = Array.from(selectedIds)
+                const { error } = await supabase.from('tickets').delete().in('id', ids)
+                setBulkBusy(false)
+                if (error) { alert('Failed: ' + error.message); return }
+                setTickets(prev => prev.filter(t => !ids.includes(t.id)))
+                setSelectedIds(new Set())
+              }}
+              className="px-2.5 py-1 rounded text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-50"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Desktop table layout (md+) — resize, drag-reorder, hide columns, all persisted to localStorage ─── */}
+      <div ref={tableScrollRef} className="hidden md:block card overflow-x-auto relative">
         {paginated.length === 0 ? (
           <EmptyState icon={EmptyIcons.search} title="No records match your filters" description="Try adjusting your search or filters" />
         ) : (
-          <table className="text-sm table-fixed" style={{ width: COL_KEYS.reduce((sum, k) => sum + colWidths[k], 0) }}>
+          <PlainResizeProvider widths={colWidths} onChangeWidth={setColumnWidth}>
+          <HorizontalDndProvider columnIds={orderedVisibleCols} onReorder={handleColReorder}>
+          <table className="text-sm table-fixed" style={{ width: orderedVisibleCols.reduce((sum, k) => sum + colWidths[k], 0) }}>
             <colgroup>
-              {COL_KEYS.map((k) => <col key={k} style={{ width: colWidths[k] }} />)}
+              {orderedVisibleCols.map((k) => <col key={k} style={{ width: colWidths[k] }} />)}
             </colgroup>
             <thead>
               <tr className="border-b border-border text-xs text-text-tertiary uppercase tracking-wider">
-                <th className="text-left px-4 py-3 font-medium relative cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('created_at')}>
-                  <span className="inline-flex items-center gap-1">Ref / Date <SortIcon column="created_at" /></span>
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('ref', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-left px-4 py-3 font-medium relative">
-                  Phone
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('phone', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-left px-4 py-3 font-medium relative cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('clinic_name')}>
-                  <span className="inline-flex items-center gap-1">Clinic <SortIcon column="clinic_name" /></span>
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('clinic', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-left px-4 py-3 font-medium relative">
-                  Details
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('issue', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-left px-4 py-3 font-medium relative cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('issue_type')}>
-                  <span className="inline-flex items-center gap-1">Type <SortIcon column="issue_type" /></span>
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('type', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-left px-4 py-3 font-medium relative cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('status')}>
-                  <span className="inline-flex items-center gap-1">Status <SortIcon column="status" /></span>
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('status', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-left px-4 py-3 font-medium relative">
-                  <span>Jira</span>
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('jira', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-left px-4 py-3 font-medium relative">
-                  <span>Next Step</span>
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('next', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-left px-4 py-3 font-medium relative cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('created_by_name')}>
-                  <span className="inline-flex items-center gap-1">Staff <SortIcon column="created_by_name" /></span>
-                  <div className="absolute -right-1.5 top-0 bottom-0 w-3 cursor-col-resize z-10 group" onMouseDown={(e) => onResizeStart('staff', e)}><div className="mx-auto w-px h-full bg-transparent group-hover:bg-accent/60 transition-colors" /></div>
-                </th>
-                <th className="text-right px-4 py-3 font-medium"></th>
+                {orderedVisibleCols.map(k => {
+                  const dragDisabled = ALWAYS_VISIBLE.has(k)
+                  const baseTh = 'text-left px-4 py-3 font-medium relative'
+                  const cursorTh = dragDisabled ? '' : ' cursor-grab active:cursor-grabbing'
+                  const resizeHandle = <PlainResizeHandle columnId={k} currentWidth={colWidths[k]} />
+                  if (k === 'ref') {
+                    const allVisibleSelected = paginated.length > 0 && paginated.every(t => selectedIds.has(t.id))
+                    return (
+                      <SortableHeader key={k} id={k} disabled className={baseTh}>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={allVisibleSelected}
+                            onChange={(e) => {
+                              setSelectedIds(prev => {
+                                const next = new Set(prev)
+                                if (e.target.checked) paginated.forEach(t => next.add(t.id))
+                                else paginated.forEach(t => next.delete(t.id))
+                                return next
+                              })
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="rounded border-border cursor-pointer"
+                            title="Select all visible rows"
+                          />
+                          <span className="inline-flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('created_at')}>
+                            Ref / Date <SortIcon column="created_at" />
+                          </span>
+                        </div>
+                        {resizeHandle}
+                      </SortableHeader>
+                    )
+                  }
+                  if (k === 'phone') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      Phone
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
+                  if (k === 'clinic') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      <span className="inline-flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('clinic_name')} onPointerDown={(e) => e.stopPropagation()}>
+                        Clinic <SortIcon column="clinic_name" />
+                      </span>
+                      <HeaderFilter headerText="Clinic" values={colDistinct.clinic} selected={colClinic} onChange={setColClinic} totalRows={filtered.length} />
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
+                  if (k === 'issue') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      Details
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
+                  if (k === 'type') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      <span className="inline-flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('issue_type')} onPointerDown={(e) => e.stopPropagation()}>
+                        Type <SortIcon column="issue_type" />
+                      </span>
+                      <HeaderFilter headerText="Type" values={colDistinct.type} selected={colType} onChange={setColType} totalRows={filtered.length} />
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
+                  if (k === 'status') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      <span className="inline-flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('status')} onPointerDown={(e) => e.stopPropagation()}>
+                        Status <SortIcon column="status" />
+                      </span>
+                      <HeaderFilter headerText="Status" values={colDistinct.status} selected={colStatus} onChange={setColStatus} totalRows={filtered.length} />
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
+                  if (k === 'jira') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      <span>Jira</span>
+                      <HeaderFilter headerText="Jira" values={colDistinct.jira} selected={colJira} onChange={setColJira} totalRows={filtered.length} />
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
+                  if (k === 'next') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      <span>Next Step</span>
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
+                  if (k === 'staff') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      <span className="inline-flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('created_by_name')} onPointerDown={(e) => e.stopPropagation()}>
+                        Staff <SortIcon column="created_by_name" />
+                      </span>
+                      <HeaderFilter headerText="Staff" values={colDistinct.staff} selected={colStaff} onChange={setColStaff} totalRows={filtered.length} />
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
+                  if (k === 'actions') return (
+                    <SortableHeader key={k} id={k} disabled className="text-right px-4 py-3 font-medium">
+                      <span></span>
+                    </SortableHeader>
+                  )
+                  return null
+                })}
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -752,7 +1027,7 @@ export default function HistoryPage() {
                   <Fragment key={ticket.id}>
                     {showDateHeader && (
                       <tr>
-                        <td colSpan={10} className="px-4 py-2 bg-surface-raised/50">
+                        <td colSpan={visibleCols.length} className="px-4 py-2 bg-surface-raised/50">
                           <div className="flex items-center gap-3">
                             <span className="text-xs font-semibold text-text-secondary tracking-wide">{getDateLabel(ticket.created_at)}</span>
                             <div className="flex-1 h-px bg-border" />
@@ -765,108 +1040,180 @@ export default function HistoryPage() {
                       onClick={() => navigateToTicket(ticket.id)}
                       className={getRowClasses(ticket)}
                     >
-                      <td className="px-4 py-3 align-top">
-                        <span className="font-mono text-xs text-text-tertiary block whitespace-nowrap">{ticket.ticket_ref}</span>
-                        <span className="text-xs text-text-muted tabular-nums whitespace-nowrap">{format(new Date(ticket.created_at), 'dd/MM/yy HH:mm')}</span>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <span className="font-mono text-sm text-emerald-400 font-medium whitespace-nowrap">{ticket.caller_tel || '-'}</span>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <span className="text-text-primary font-medium block">{ticket.clinic_name}</span>
-                        <span className="font-mono text-xs text-text-muted">{ticket.clinic_code}</span>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <div className="space-y-0.5 text-xs leading-relaxed">
-                          {ticket.issue_category && (
-                            <p className={`text-[11px] font-semibold uppercase tracking-wide ${getIssueCategoryColor(ticket.issue_category).text}`}>{ticket.issue_category}</p>
-                          )}
-                          <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic || ''}</span></p>
-                          <p><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
-                          <p><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response || ''}</span></p>
-                          {ticket.call_duration && <p><span className="text-violet-400 font-medium">DURATION:</span> <span className="text-text-secondary">{getDurationLabel(ticket.call_duration)}</span></p>}
-                          <p><span className="text-orange-400 font-medium">TIMELINE:</span> <span className="text-text-secondary">{ticket.timeline_from_customer || ''}</span></p>
-                          <p><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline || ''}</span></p>
-                        </div>
-                        {ticket.attachment_urls?.length > 0 && (
-                          <div className="flex items-center gap-1 mt-1 text-text-tertiary">
-                            <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
-                            </svg>
-                            <span className="text-xs">{ticket.attachment_urls.length} file{ticket.attachment_urls.length > 1 ? 's' : ''}</span>
-                          </div>
-                        )}
-                        {sortKey === 'updated_at' && ticket.last_change_note && (
-                          <p className="text-xs text-purple-400 mt-0.5 truncate">{ticket.last_change_note}{ticket.last_updated_by_name ? ` — ${toProperCase(ticket.last_updated_by_name)}` : ''}</p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <div className="flex flex-col gap-1">
-                          <RecordTypeBadge recordType={ticket.record_type} />
-                          <IssueTypeBadge issueType={ticket.issue_type} />
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <StatusBadge status={ticket.status} />
-                          {ticket.need_team_check && <NeedsAttentionBadge />}
-                          {isStale(ticket) && <StaleBadge />}
-                          {(updateCounts[ticket.id] || 0) > 0 && (
-                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 text-xs font-medium">
-                              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                      {orderedVisibleCols.map(k => {
+                        if (k === 'ref') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            <div className="flex items-start gap-2">
+                              <input
+                                type="checkbox"
+                                checked={selectedIds.has(ticket.id)}
+                                onChange={(e) => {
+                                  setSelectedIds(prev => {
+                                    const next = new Set(prev)
+                                    if (e.target.checked) next.add(ticket.id); else next.delete(ticket.id)
+                                    return next
+                                  })
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="mt-0.5 rounded border-border cursor-pointer flex-shrink-0"
+                              />
+                              <div className="min-w-0">
+                                <span className="font-mono text-xs text-text-tertiary block whitespace-nowrap">{ticket.ticket_ref}</span>
+                                <span className="text-xs text-text-muted tabular-nums whitespace-nowrap">{format(new Date(ticket.created_at), 'dd/MM/yy HH:mm')}</span>
+                              </div>
+                            </div>
+                          </td>
+                        )
+                        if (k === 'phone') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            {ticket.caller_tel ? (
+                              <div className="flex flex-col gap-0.5 leading-tight">
+                                {ticket.caller_tel.split(/[,;/]/).map(s => s.trim()).filter(Boolean).map((num, i) => (
+                                  <a
+                                    key={`${num}-${i}`}
+                                    href={`tel:${num.replace(/\s+/g, '')}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="font-mono text-sm text-emerald-400 font-medium hover:text-emerald-300 hover:underline whitespace-nowrap break-all"
+                                  >
+                                    {num}
+                                  </a>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-text-muted">-</span>
+                            )}
+                          </td>
+                        )
+                        if (k === 'clinic') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            <span className="text-text-primary font-medium block">{ticket.clinic_name}</span>
+                            <span className="font-mono text-xs text-text-muted">{ticket.clinic_code}</span>
+                          </td>
+                        )
+                        if (k === 'issue') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            <div className="space-y-0.5 text-xs leading-relaxed">
+                              {ticket.issue_category && (
+                                <p className={`text-[11px] font-semibold uppercase tracking-wide ${getIssueCategoryColor(ticket.issue_category).text}`}>{ticket.issue_category}</p>
+                              )}
+                              <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic || ''}</span></p>
+                              <p><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
+                              <p><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response || ''}</span></p>
+                              {ticket.call_duration && <p><span className="text-violet-400 font-medium">DURATION:</span> <span className="text-text-secondary">{getDurationLabel(ticket.call_duration)}</span></p>}
+                              <p><span className="text-orange-400 font-medium">TIMELINE:</span> <span className="text-text-secondary">{ticket.timeline_from_customer || ''}</span></p>
+                              <p><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline || ''}</span></p>
+                            </div>
+                            {ticket.attachment_urls?.length > 0 && (
+                              <div className="flex items-center gap-1 mt-1 text-text-tertiary">
+                                <svg className="size-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+                                </svg>
+                                <span className="text-xs">{ticket.attachment_urls.length} file{ticket.attachment_urls.length > 1 ? 's' : ''}</span>
+                              </div>
+                            )}
+                            {sortKey === 'updated_at' && ticket.last_change_note && (
+                              <p className="text-xs text-purple-400 mt-0.5 truncate">{ticket.last_change_note}{ticket.last_updated_by_name ? ` — ${toProperCase(ticket.last_updated_by_name)}` : ''}</p>
+                            )}
+                          </td>
+                        )
+                        if (k === 'type') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            <div className="flex flex-col gap-1">
+                              <RecordTypeBadge recordType={ticket.record_type} />
+                              <IssueTypeBadge issueType={ticket.issue_type} />
+                            </div>
+                          </td>
+                        )
+                        if (k === 'status') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <StatusBadge status={ticket.status} />
+                              {ticket.need_team_check && <NeedsAttentionBadge />}
+                              {isStale(ticket) && <StaleBadge />}
+                              {(updateCounts[ticket.id] || 0) > 0 && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-400 text-xs font-medium">
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                  </svg>
+                                  {updateCounts[ticket.id]}
+                                </span>
+                              )}
+                            </div>
+                            {ticket.last_updated_by_name && ticket.last_activity_at && (() => {
+                              const ageMs = Date.now() - new Date(ticket.last_activity_at).getTime()
+                              const isRecent = ageMs < 7 * 86400000 // 7 days
+                              if (!isRecent) return null
+                              return (
+                                <p
+                                  className="mt-1 text-[10px] text-text-muted truncate"
+                                  title={`${ticket.last_change_note || 'Updated'} — ${format(new Date(ticket.last_activity_at), 'd MMM yyyy, h:mm a')}`}
+                                >
+                                  by <span className="text-text-tertiary">{toProperCase(ticket.last_updated_by_name)}</span>
+                                  {' · '}{formatDistanceToNow(new Date(ticket.last_activity_at), { addSuffix: true })}
+                                </p>
+                              )
+                            })()}
+                          </td>
+                        )
+                        if (k === 'jira') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            {ticket.jira_link ? (
+                              <a
+                                href={ticket.jira_link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-xs text-accent hover:text-accent-hover underline break-all line-clamp-1"
+                                title={ticket.jira_link}
+                              >
+                                {ticket.jira_link.match(/browse\/([A-Z]+-\d+)/)?.[1] || 'Link'}
+                              </a>
+                            ) : (
+                              <span className="text-xs text-text-muted">-</span>
+                            )}
+                          </td>
+                        )
+                        if (k === 'next') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            <span className="text-xs text-violet-400">{ticket.next_step || ''}</span>
+                            {(ticket.next_step_pic || ticket.next_step_contact) && (
+                              <p className="text-[11px] text-text-secondary mt-0.5">
+                                {ticket.next_step_pic && <span>{ticket.next_step_pic}</span>}
+                                {ticket.next_step_pic && ticket.next_step_contact && <span className="text-text-muted"> · </span>}
+                                {ticket.next_step_contact && <span className="text-text-tertiary">{ticket.next_step_contact}</span>}
+                              </p>
+                            )}
+                          </td>
+                        )
+                        if (k === 'staff') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            <span className="text-xs text-accent font-medium">{toProperCase(ticket.created_by_name)}</span>
+                          </td>
+                        )
+                        if (k === 'actions') return (
+                          <td key={k} className="px-4 py-3 text-right align-top">
+                            <button
+                              onClick={(e) => handleDelete(ticket, e)}
+                              className="text-text-muted hover:text-red-400 p-1 transition-colors"
+                              aria-label={`Delete ${ticket.ticket_ref}`}
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                               </svg>
-                              {updateCounts[ticket.id]}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        {ticket.jira_link ? (
-                          <a
-                            href={ticket.jira_link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="text-xs text-accent hover:text-accent-hover underline break-all line-clamp-1"
-                            title={ticket.jira_link}
-                          >
-                            {ticket.jira_link.match(/browse\/([A-Z]+-\d+)/)?.[1] || 'Link'}
-                          </a>
-                        ) : (
-                          <span className="text-xs text-text-muted">-</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <span className="text-xs text-violet-400">{ticket.next_step || ''}</span>
-                        {(ticket.next_step_pic || ticket.next_step_contact) && (
-                          <p className="text-[11px] text-text-secondary mt-0.5">
-                            {ticket.next_step_pic && <span>{ticket.next_step_pic}</span>}
-                            {ticket.next_step_pic && ticket.next_step_contact && <span className="text-text-muted"> · </span>}
-                            {ticket.next_step_contact && <span className="text-text-tertiary">{ticket.next_step_contact}</span>}
-                          </p>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 align-top">
-                        <span className="text-xs text-accent font-medium">{toProperCase(ticket.created_by_name)}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right align-top">
-                        <button
-                          onClick={(e) => handleDelete(ticket, e)}
-                          className="text-text-muted hover:text-red-400 p-1 transition-colors"
-                          aria-label={`Delete ${ticket.ticket_ref}`}
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </td>
+                            </button>
+                          </td>
+                        )
+                        return null
+                      })}
                     </tr>
                   </Fragment>
                 )
               })}
             </tbody>
           </table>
+          </HorizontalDndProvider>
+          <PlainResizeIndicator containerRef={tableScrollRef} />
+          </PlainResizeProvider>
         )}
       </div>
 
