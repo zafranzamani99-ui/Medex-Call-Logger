@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { format } from 'date-fns'
 import { createClient } from '@/lib/supabase/client'
+import { useToast } from '@/components/ui/Toast'
 import type { Clinic } from '@/lib/types'
 
 // WHY: License Key Request Form generator — produces rich HTML table matching the Excel form exactly.
@@ -18,6 +19,42 @@ const ACTION_PRESETS = [
   'ADD WS', 'ADD SST', 'ADD E-INV', 'NEW WS API + E-INV + SST LIVE',
   'NEW CLIENT', 'REM MTN', 'REM CHANGE ADDRESS', 'RENEWAL', 'Others',
 ]
+
+// Recipients: multi-select for To, Cc defaults to allsupport.
+// Edit here when LK request approvers change.
+const RECIPIENT_OPTIONS: { id: string; name: string; email: string }[] = [
+  { id: 'tengku',   name: 'Tengku Arshad',                email: 'Tengku.arshad@medexoneglobal.com' },
+  { id: 'shahidin', name: 'MOHAMAD SHAHIDIN BIN SELAMAT', email: 'mohamad.shahidin@medexoneglobal.com' },
+]
+const DEFAULT_CC = 'allsupport <allsupport@medexoneglobal.com>'
+
+// Encode a Subject header per RFC 2047 if it contains non-ASCII; else passthrough.
+function encodeMimeSubject(s: string): string {
+  if (/^[\x20-\x7E]*$/.test(s)) return s
+  const bytes = new TextEncoder().encode(s)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return `=?UTF-8?B?${btoa(bin)}?=`
+}
+
+// UTF-8 → base64 without exceeding btoa's char-code limits on long strings.
+function utf8ToBase64(s: string): string {
+  const bytes = new TextEncoder().encode(s)
+  let bin = ''
+  // Chunk to avoid `apply` arg limits on very large bodies.
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK)))
+  }
+  return btoa(bin)
+}
+
+// Wrap base64 to RFC 2045 max line length (76).
+function wrap76(s: string): string {
+  const out: string[] = []
+  for (let i = 0; i < s.length; i += 76) out.push(s.slice(i, i + 76))
+  return out.join('\r\n')
+}
 
 const MONTHS = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE',
   'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER']
@@ -37,8 +74,22 @@ function formatDate(dateStr: string | null): string {
   }
 }
 
+// Reverse of formatDate: D/M/YYYY (or D-M-YYYY) → YYYY-MM-DD for postgres date columns.
+// Returns null on blank/invalid so we never overwrite a good DB value with garbage.
+function parseDateInput(input: string): string | null {
+  const s = (input || '').trim()
+  if (!s) return null
+  const m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/)
+  if (!m) return null
+  const [, d, mo, y] = m
+  const day = Number(d), mon = Number(mo), year = Number(y)
+  if (mon < 1 || mon > 12 || day < 1 || day > 31) return null
+  return `${year}-${String(mon).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
 export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseKeyModalProps) {
   const supabase = createClient()
+  const { toast } = useToast()
   const [copied, setCopied] = useState(false)
   const [saved, setSaved] = useState(false)
   const previewRef = useRef<HTMLDivElement>(null)
@@ -144,11 +195,15 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
     setTimeout(() => setSubjectCopied(false), 2000)
   }
 
-  // === Email Header & Footer (persisted in Supabase profiles.email_settings) ===
+  // === Email Header & Footer + Recipients (persisted in profiles.email_settings) ===
   const [emailHeader, setEmailHeader] = useState('Dear [Name],\nKindly create this for the clinic above. Thanks.')
   const [emailFooter, setEmailFooter] = useState('')
+  const [recipients, setRecipients] = useState<string[]>(['tengku'])
+  const [ccList, setCcList] = useState(DEFAULT_CC)
   const headerRef = useRef(emailHeader)
   const footerRef = useRef(emailFooter)
+  const recipientsRef = useRef(recipients)
+  const ccRef = useRef(ccList)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Load from Supabase (localStorage as instant fallback)
@@ -156,17 +211,28 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
     // Instant: show localStorage values while Supabase loads
     const localHeader = localStorage.getItem('lk_email_header')
     const localFooter = localStorage.getItem('lk_email_footer')
+    const localTo = localStorage.getItem('lk_to')
+    const localCc = localStorage.getItem('lk_cc')
     if (localHeader !== null) { setEmailHeader(localHeader); headerRef.current = localHeader }
     if (localFooter !== null) { setEmailFooter(localFooter); footerRef.current = localFooter }
+    if (localTo) {
+      try { const arr = JSON.parse(localTo); if (Array.isArray(arr)) { setRecipients(arr); recipientsRef.current = arr } } catch {}
+    }
+    if (localCc !== null) { setCcList(localCc); ccRef.current = localCc }
 
     // Then fetch from Supabase (source of truth)
     ;(async () => {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.user?.id) return
       const { data } = await supabase.from('profiles').select('email_settings').eq('id', session.user.id).single()
-      const s = (data?.email_settings || {}) as Record<string, string>
-      if (s.lk_header !== undefined) { setEmailHeader(s.lk_header); headerRef.current = s.lk_header; localStorage.setItem('lk_email_header', s.lk_header) }
-      if (s.lk_footer !== undefined) { setEmailFooter(s.lk_footer); footerRef.current = s.lk_footer; localStorage.setItem('lk_email_footer', s.lk_footer) }
+      const s = (data?.email_settings || {}) as Record<string, unknown>
+      if (typeof s.lk_header === 'string') { setEmailHeader(s.lk_header); headerRef.current = s.lk_header; localStorage.setItem('lk_email_header', s.lk_header) }
+      if (typeof s.lk_footer === 'string') { setEmailFooter(s.lk_footer); footerRef.current = s.lk_footer; localStorage.setItem('lk_email_footer', s.lk_footer) }
+      if (Array.isArray(s.lk_to)) {
+        const arr = (s.lk_to as unknown[]).filter((x): x is string => typeof x === 'string')
+        setRecipients(arr); recipientsRef.current = arr; localStorage.setItem('lk_to', JSON.stringify(arr))
+      }
+      if (typeof s.lk_cc === 'string') { setCcList(s.lk_cc); ccRef.current = s.lk_cc; localStorage.setItem('lk_cc', s.lk_cc) }
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -178,9 +244,15 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.user?.id) return
       const { data } = await supabase.from('profiles').select('email_settings').eq('id', session.user.id).single()
-      const existing = (data?.email_settings || {}) as Record<string, string>
+      const existing = (data?.email_settings || {}) as Record<string, unknown>
       await supabase.from('profiles').update({
-        email_settings: { ...existing, lk_header: headerRef.current, lk_footer: footerRef.current }
+        email_settings: {
+          ...existing,
+          lk_header: headerRef.current,
+          lk_footer: footerRef.current,
+          lk_to: recipientsRef.current,
+          lk_cc: ccRef.current,
+        }
       }).eq('id', session.user.id)
     }, 1500)
   }, [supabase])
@@ -196,6 +268,23 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
     setEmailFooter(val)
     footerRef.current = val
     localStorage.setItem('lk_email_footer', val)
+    scheduleSave()
+  }
+
+  const toggleRecipient = (id: string) => {
+    setRecipients(prev => {
+      const next = prev.includes(id) ? prev.filter(r => r !== id) : [...prev, id]
+      recipientsRef.current = next
+      localStorage.setItem('lk_to', JSON.stringify(next))
+      scheduleSave()
+      return next
+    })
+  }
+
+  const handleCcChange = (val: string) => {
+    setCcList(val)
+    ccRef.current = val
+    localStorage.setItem('lk_cc', val)
     scheduleSave()
   }
 
@@ -284,6 +373,47 @@ ${r('28', 'Email Password', emailPassword)}
     return `${headerHTML}<br>${tableHTML}${footerHTML}`
   }
 
+  // Shared DB sync — runs on every Copy / Open in Outlook click so re-edits flow.
+  // Returns 'ok' | error message; the caller decides what to toast.
+  const syncToCRM = async (): Promise<string | null> => {
+    if (!saved) {
+      // Audit row: only on first action of this session, so we don't duplicate.
+      supabase.from('license_key_requests').insert({
+        clinic_code: clinic.clinic_code,
+        clinic_name: clinic.clinic_name,
+        created_by: agentName,
+        subject: currentSubject,
+      }).then(() => setSaved(true))
+    }
+    // parseDateInput returns null on blank/invalid → we never null out good DB values from a bad parse.
+    const mtnStartIso = parseDateInput(mtnStart)
+    const mtnEndIso = parseDateInput(mtnEnd)
+    const { error } = await supabase.from('clinics').update({
+      main_pc_name: serverName || null,
+      device_id: deviceId || null,
+      has_e_invoice: eInvoice === 'Yes',
+      has_sst: hasSst,
+      has_whatsapp: waActive === 'Yes',
+      wa_account_no: waAccountNo || null,
+      wa_api_key: waApiKey || null,
+      sst_registration_no: registrationNo || null,
+      sst_start_date: startDate || null,
+      sst_submission: submission || null,
+      sst_frequency: frequency || null,
+      lkey_line1: clinicName || null,
+      lkey_line2: address1 || null,
+      lkey_line3: address2 || null,
+      lkey_line4: address3 || null,
+      lkey_line5: tel || null,
+      product_type: baseProductType || null,
+      ...(mtnStartIso ? { mtn_start: mtnStartIso } : {}),
+      ...(mtnEndIso ? { mtn_expiry: mtnEndIso } : {}),
+      registered_contact: picName || null,
+      email_main: picEmail || null,
+    }).eq('clinic_code', clinic.clinic_code)
+    return error ? error.message : null
+  }
+
   // Copy approach: ClipboardItem API with both text/html and text/plain.
   // Include bgcolor + background-color + mso-highlight on every cell.
   // User must paste with "Keep Source Formatting" in Outlook (Ctrl+Shift+V or paste options).
@@ -320,30 +450,52 @@ ${r('28', 'Email Password', emailPassword)}
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
 
-    // Save to database (fire and forget — don't block the copy)
-    if (!saved) {
-      supabase.from('license_key_requests').insert({
-        clinic_code: clinic.clinic_code,
-        clinic_name: clinic.clinic_name,
-        created_by: agentName,
-        subject: currentSubject,
-      }).then(() => setSaved(true))
+    const err = await syncToCRM()
+    if (err) toast(`CRM not updated: ${err}`, 'error')
+    else toast('Copied & CRM updated', 'success')
+  }
 
-      // Update CRM with LK form data — keeps clinic record current
-      supabase.from('clinics').update({
-        main_pc_name: serverName || null,
-        device_id: deviceId || null,
-        has_e_invoice: eInvoice === 'Yes',
-        has_sst: hasSst,
-        has_whatsapp: waActive === 'Yes',
-        wa_account_no: waAccountNo || null,
-        wa_api_key: waApiKey || null,
-        sst_registration_no: registrationNo || null,
-        sst_start_date: startDate || null,
-        sst_submission: submission || null,
-        sst_frequency: frequency || null,
-      }).eq('clinic_code', clinic.clinic_code).then(() => {})
+  // Open in Outlook: build an RFC 822 .eml with To/Cc/Subject + HTML body and
+  // download it. Double-clicking the file opens Outlook in compose mode (X-Unsent: 1)
+  // with the formatted table already in the body — no copy/paste, no formatting loss.
+  const handleOpenInOutlook = async () => {
+    if (recipients.length === 0) {
+      toast('Pick at least one recipient (To)', 'error')
+      return
     }
+    const html = generateHTML()
+    const toLine = recipients
+      .map(id => RECIPIENT_OPTIONS.find(o => o.id === id))
+      .filter((o): o is { id: string; name: string; email: string } => !!o)
+      .map(o => `${o.name} <${o.email}>`)
+      .join(', ')
+    const ccLine = ccList.trim()
+
+    const headers = [
+      `To: ${toLine}`,
+      ...(ccLine ? [`Cc: ${ccLine}`] : []),
+      `Subject: ${encodeMimeSubject(currentSubject)}`,
+      // X-Unsent tells Outlook to open this as a new draft, not an inbox item.
+      `X-Unsent: 1`,
+      `MIME-Version: 1.0`,
+      `Content-Type: text/html; charset=utf-8`,
+      `Content-Transfer-Encoding: base64`,
+    ]
+    const eml = headers.join('\r\n') + '\r\n\r\n' + wrap76(utf8ToBase64(html)) + '\r\n'
+
+    const blob = new Blob([eml], { type: 'message/rfc822' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `LK-${clinic.clinic_code}-${new Date().toISOString().slice(0, 10)}.eml`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+
+    const err = await syncToCRM()
+    if (err) toast(`Email file ready · CRM not updated: ${err}`, 'error')
+    else toast('Email file downloaded — double-click to open in Outlook', 'success')
   }
 
   const inputClass = 'w-full px-2 py-1.5 bg-background border border-border rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/50'
@@ -428,7 +580,41 @@ ${r('28', 'Email Password', emailPassword)}
                       {subjectCopied ? 'Copied!' : 'Copy Subject'}
                     </button>
                   </div>
-                  <p className="text-[10px] text-text-muted mt-1.5">Step 1: Copy Subject &rarr; Step 2: Copy Body</p>
+                  <p className="text-[10px] text-text-muted mt-1.5">Tip: &ldquo;Open in Outlook&rdquo; below pre-fills To, Cc, Subject and Body in one click.</p>
+                </div>
+              </div>
+
+              {/* Recipients (To / Cc) */}
+              <div>
+                <h4 className={sh}>Send To</h4>
+                <div className="space-y-2">
+                  <div>
+                    <div className={labelClass}>To</div>
+                    <div className="flex flex-wrap gap-1.5 mt-1">
+                      {RECIPIENT_OPTIONS.map(opt => {
+                        const active = recipients.includes(opt.id)
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => toggleRecipient(opt.id)}
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors border ${
+                              active
+                                ? 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                                : 'bg-white/[0.03] text-zinc-400 border-border hover:border-zinc-500 hover:text-zinc-300'
+                            }`}
+                            title={opt.email}
+                          >
+                            {active ? '✓ ' : ''}{opt.name}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <div>
+                    <div className={labelClass}>Cc</div>
+                    <input value={ccList} onChange={(e) => handleCcChange(e.target.value)} className={inputClass} placeholder={DEFAULT_CC} />
+                  </div>
                 </div>
               </div>
 
@@ -693,13 +879,22 @@ ${r('28', 'Email Password', emailPassword)}
           </button>
           <button
             onClick={handleCopy}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
               copied
-                ? 'bg-green-600 text-white'
-                : 'bg-blue-600 hover:bg-blue-700 text-white'
+                ? 'bg-green-600 text-white border-transparent'
+                : 'border-border text-zinc-300 hover:text-white hover:border-zinc-500'
             }`}
+            title="Copy formatted body — paste into an existing email"
           >
-            {copied ? 'Copied! — Paste with "Keep Source Formatting" in Outlook' : 'Copy to Clipboard'}
+            {copied ? 'Copied!' : 'Copy Body'}
+          </button>
+          <button
+            onClick={handleOpenInOutlook}
+            disabled={recipients.length === 0}
+            className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white disabled:bg-zinc-700 disabled:text-zinc-400 disabled:cursor-not-allowed"
+            title="Download an .eml file — double-click to open Outlook with To, Cc, Subject and Body filled"
+          >
+            {recipients.length === 0 ? 'Pick a recipient above ↑' : 'Open in Outlook (.eml)'}
           </button>
         </div>
       </div>

@@ -40,6 +40,7 @@ export default function SettingsPage() {
 
   // CRM upload state
   const [uploading, setUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null)
   const [uploadResult, setUploadResult] = useState<{
     success: boolean
     message: string
@@ -157,53 +158,107 @@ export default function SettingsPage() {
     setSavingName(false)
   }
 
-  // CRM CSV upload (spec Section 5.7)
+  // CRM upload (spec Section 5.7).
+  // WHY: Parses the workbook in the BROWSER, then POSTs JSON batches to
+  // /api/crm-upload. This bypasses Vercel's 4.5 MB serverless body limit (the old
+  // path uploaded the raw .xlsx, which 413'd at ~5 MB) and gives a real progress
+  // bar. Server-side parsing path still exists in the route as a fallback for
+  // small CSVs uploaded via formData.
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
     setUploading(true)
     setUploadResult(null)
+    setUploadProgress(null)
 
-    const formData = new FormData()
-    formData.append('file', file)
+    // Reset input early so the same file can be re-picked after this run.
+    e.target.value = ''
 
-    try {
-      const response = await fetch('/api/crm-upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      const result = await response.json()
-
-      if (response.ok) {
-        setUploadResult({
-          success: true,
-          message: `Successfully imported ${result.count} clinics`,
-          count: result.count,
-          timestamp: result.timestamp,
-        })
-        setLastUpload(result.timestamp)
-        setClinicCount(result.count)
-        toast(`Successfully imported ${result.count} clinics`)
-      } else {
-        setUploadResult({
-          success: false,
-          message: result.error,
-        })
-        toast(result.error, 'error')
+    // Helper: read response, surfacing non-JSON bodies (e.g. Vercel's 413
+    // plaintext) as a useful error instead of an opaque JSON-parse exception.
+    const readResp = async (resp: Response): Promise<{ ok: boolean; data: { error?: string; [k: string]: unknown } }> => {
+      const text = await resp.text()
+      try {
+        return { ok: resp.ok, data: JSON.parse(text) }
+      } catch {
+        return {
+          ok: false,
+          data: { error: `${resp.status} ${resp.statusText}: ${text.slice(0, 200)}` },
+        }
       }
-    } catch (err) {
-      setUploadResult({
-        success: false,
-        message: 'Upload failed: ' + (err as Error).message,
-      })
-      toast('Upload failed: ' + (err as Error).message, 'error')
     }
 
-    setUploading(false)
-    // Reset file input so same file can be re-uploaded
-    e.target.value = ''
+    try {
+      const fileName = file.name.toLowerCase()
+      const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls')
+
+      // CSV path: small, parse server-side via existing FormData route.
+      if (!isExcel) {
+        const formData = new FormData()
+        formData.append('file', file)
+        const resp = await fetch('/api/crm-upload', { method: 'POST', body: formData })
+        const { ok, data } = await readResp(resp)
+        if (!ok) throw new Error(data.error || `HTTP ${resp.status}`)
+        const count = (data.count as number) || 0
+        const timestamp = (data.timestamp as string) || new Date().toISOString()
+        setUploadResult({ success: true, message: `Successfully imported ${count} clinics`, count, timestamp })
+        setLastUpload(timestamp)
+        setClinicCount(count)
+        toast(`Successfully imported ${count} clinics`)
+        return
+      }
+
+      // Excel path: parse client-side, stream JSON batches.
+      const { parseCrmWorkbook } = await import('@/lib/crm-import')
+      const buffer = await file.arrayBuffer()
+      const parsed = parseCrmWorkbook(buffer)
+      if (!parsed.ok) throw new Error(parsed.error)
+
+      const total = parsed.clinics.length
+      const BATCH_SIZE = 500
+      const uploadStart = new Date().toISOString()
+      setUploadProgress({ done: 0, total })
+
+      for (let i = 0; i < total; i += BATCH_SIZE) {
+        const batch = parsed.clinics.slice(i, i + BATCH_SIZE)
+        const isLast = i + BATCH_SIZE >= total
+        const resp = await fetch('/api/crm-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode: 'batch',
+            uploadStart,
+            clinics: batch,
+            isLast,
+            totalCount: total,
+            einvSheetFound: parsed.einvSheetFound,
+            einvRowsMerged: parsed.einvRowsMerged,
+          }),
+        })
+        const { ok, data } = await readResp(resp)
+        if (!ok) throw new Error(data.error || `Batch ${Math.floor(i / BATCH_SIZE) + 1} failed`)
+        setUploadProgress({ done: Math.min(i + BATCH_SIZE, total), total })
+      }
+
+      const timestamp = new Date().toISOString()
+      setUploadResult({
+        success: true,
+        message: `Successfully imported ${total} clinics`,
+        count: total,
+        timestamp,
+      })
+      setLastUpload(timestamp)
+      setClinicCount(total)
+      toast(`Successfully imported ${total} clinics`)
+    } catch (err) {
+      const msg = (err as Error).message || 'Unknown error'
+      setUploadResult({ success: false, message: 'Upload failed: ' + msg })
+      toast('Upload failed: ' + msg, 'error')
+    } finally {
+      setUploading(false)
+      setUploadProgress(null)
+    }
   }
 
   return (
@@ -294,7 +349,21 @@ export default function SettingsPage() {
         {/* Upload status */}
         {uploading && (
           <div className="mt-3 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-            <p className="text-sm text-blue-400">Uploading and processing...</p>
+            {uploadProgress ? (
+              <>
+                <p className="text-sm text-blue-400 tabular-nums">
+                  Uploading {uploadProgress.done.toLocaleString()} / {uploadProgress.total.toLocaleString()} clinics
+                </p>
+                <div className="mt-2 h-1.5 w-full rounded-full bg-blue-500/15 overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-200"
+                    style={{ width: `${Math.round((uploadProgress.done / Math.max(uploadProgress.total, 1)) * 100)}%` }}
+                  />
+                </div>
+              </>
+            ) : (
+              <p className="text-sm text-blue-400">Reading and parsing file…</p>
+            )}
           </div>
         )}
 

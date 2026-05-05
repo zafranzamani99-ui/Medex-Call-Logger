@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { format, isToday, isYesterday, formatDistanceToNow } from 'date-fns'
+import { format, isToday, isYesterday } from 'date-fns'
 import type { Ticket, TicketStatus, RecordType } from '@/lib/types'
 import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor, toProperCase } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
@@ -59,10 +59,6 @@ export default function HistoryPage() {
   const [colStatus, setColStatus] = useState<Set<string>>(new Set())
   const [colStaff, setColStaff] = useState<Set<string>>(new Set())
   const [colJira, setColJira] = useState<Set<string>>(new Set())
-
-  // Bulk row selection
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkBusy, setBulkBusy] = useState(false)
 
   // Pagination
   const [page, setPage] = useState(1)
@@ -821,86 +817,6 @@ export default function HistoryPage() {
         </div>
       </SlidePanel>
 
-      {/* Bulk action toolbar — shows when rows are selected */}
-      {selectedIds.size > 0 && (
-        <div className="hidden md:flex items-center gap-2 mb-2 px-3 py-2 rounded-lg bg-accent/10 border border-accent/30 text-sm">
-          <span className="text-text-primary font-medium">{selectedIds.size} selected</span>
-          <span className="text-text-muted">·</span>
-          <button
-            type="button"
-            onClick={() => setSelectedIds(new Set())}
-            className="text-text-tertiary hover:text-text-primary text-xs"
-          >
-            Clear
-          </button>
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={async () => {
-                if (!confirm(`Mark ${selectedIds.size} ticket${selectedIds.size === 1 ? '' : 's'} as Resolved?`)) return
-                setBulkBusy(true)
-                const ids = Array.from(selectedIds)
-                const { data: { session } } = await supabase.auth.getSession()
-                const profile = session?.user
-                  ? await supabase.from('profiles').select('display_name').eq('id', session.user.id).single()
-                  : null
-                const me = profile?.data?.display_name || ''
-                const { error } = await supabase.from('tickets').update({
-                  status: 'Resolved',
-                  need_team_check: false,
-                  last_updated_by: session?.user?.id || null,
-                  last_updated_by_name: me,
-                  last_change_note: 'Bulk-resolved from History',
-                  last_activity_at: new Date().toISOString(),
-                }).in('id', ids)
-                setBulkBusy(false)
-                if (error) { alert('Failed: ' + error.message); return }
-                setTickets(prev => prev.map(t => ids.includes(t.id) ? { ...t, status: 'Resolved' as TicketStatus, need_team_check: false } : t))
-                setSelectedIds(new Set())
-              }}
-              className="px-2.5 py-1 rounded text-xs font-medium bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25 disabled:opacity-50"
-            >
-              Mark Resolved
-            </button>
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={async () => {
-                if (!confirm(`Clear "Needs Attention" flag on ${selectedIds.size} ticket${selectedIds.size === 1 ? '' : 's'}?`)) return
-                setBulkBusy(true)
-                const ids = Array.from(selectedIds)
-                const { error } = await supabase.from('tickets').update({ need_team_check: false }).in('id', ids)
-                setBulkBusy(false)
-                if (error) { alert('Failed: ' + error.message); return }
-                setTickets(prev => prev.map(t => ids.includes(t.id) ? { ...t, need_team_check: false } : t))
-                setSelectedIds(new Set())
-              }}
-              className="px-2.5 py-1 rounded text-xs font-medium bg-zinc-500/15 text-zinc-300 hover:bg-zinc-500/25 disabled:opacity-50"
-            >
-              Clear Flag
-            </button>
-            <button
-              type="button"
-              disabled={bulkBusy}
-              onClick={async () => {
-                if (!confirm(`PERMANENTLY DELETE ${selectedIds.size} ticket${selectedIds.size === 1 ? '' : 's'}? This can't be undone.`)) return
-                setBulkBusy(true)
-                const ids = Array.from(selectedIds)
-                const { error } = await supabase.from('tickets').delete().in('id', ids)
-                setBulkBusy(false)
-                if (error) { alert('Failed: ' + error.message); return }
-                setTickets(prev => prev.filter(t => !ids.includes(t.id)))
-                setSelectedIds(new Set())
-              }}
-              className="px-2.5 py-1 rounded text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-50"
-            >
-              Delete
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* ─── Desktop table layout (md+) — resize, drag-reorder, hide columns, all persisted to localStorage ─── */}
       <div ref={tableScrollRef} className="hidden md:block card overflow-x-auto relative">
         {paginated.length === 0 ? (
@@ -919,34 +835,14 @@ export default function HistoryPage() {
                   const baseTh = 'text-left px-4 py-3 font-medium relative'
                   const cursorTh = dragDisabled ? '' : ' cursor-grab active:cursor-grabbing'
                   const resizeHandle = <PlainResizeHandle columnId={k} currentWidth={colWidths[k]} />
-                  if (k === 'ref') {
-                    const allVisibleSelected = paginated.length > 0 && paginated.every(t => selectedIds.has(t.id))
-                    return (
-                      <SortableHeader key={k} id={k} disabled className={baseTh}>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={allVisibleSelected}
-                            onChange={(e) => {
-                              setSelectedIds(prev => {
-                                const next = new Set(prev)
-                                if (e.target.checked) paginated.forEach(t => next.add(t.id))
-                                else paginated.forEach(t => next.delete(t.id))
-                                return next
-                              })
-                            }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="rounded border-border cursor-pointer"
-                            title="Select all visible rows"
-                          />
-                          <span className="inline-flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('created_at')}>
-                            Ref / Date <SortIcon column="created_at" />
-                          </span>
-                        </div>
-                        {resizeHandle}
-                      </SortableHeader>
-                    )
-                  }
+                  if (k === 'ref') return (
+                    <SortableHeader key={k} id={k} disabled className={baseTh}>
+                      <span className="inline-flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('created_at')}>
+                        Ref / Date <SortIcon column="created_at" />
+                      </span>
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
                   if (k === 'phone') return (
                     <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
                       Phone
@@ -1043,25 +939,8 @@ export default function HistoryPage() {
                       {orderedVisibleCols.map(k => {
                         if (k === 'ref') return (
                           <td key={k} className="px-4 py-3 align-top">
-                            <div className="flex items-start gap-2">
-                              <input
-                                type="checkbox"
-                                checked={selectedIds.has(ticket.id)}
-                                onChange={(e) => {
-                                  setSelectedIds(prev => {
-                                    const next = new Set(prev)
-                                    if (e.target.checked) next.add(ticket.id); else next.delete(ticket.id)
-                                    return next
-                                  })
-                                }}
-                                onClick={(e) => e.stopPropagation()}
-                                className="mt-0.5 rounded border-border cursor-pointer flex-shrink-0"
-                              />
-                              <div className="min-w-0">
-                                <span className="font-mono text-xs text-text-tertiary block whitespace-nowrap">{ticket.ticket_ref}</span>
-                                <span className="text-xs text-text-muted tabular-nums whitespace-nowrap">{format(new Date(ticket.created_at), 'dd/MM/yy HH:mm')}</span>
-                              </div>
-                            </div>
+                            <span className="font-mono text-xs text-text-tertiary block whitespace-nowrap">{ticket.ticket_ref}</span>
+                            <span className="text-xs text-text-muted tabular-nums whitespace-nowrap">{format(new Date(ticket.created_at), 'dd/MM/yy HH:mm')}</span>
                           </td>
                         )
                         if (k === 'phone') return (
@@ -1139,20 +1018,6 @@ export default function HistoryPage() {
                                 </span>
                               )}
                             </div>
-                            {ticket.last_updated_by_name && ticket.last_activity_at && (() => {
-                              const ageMs = Date.now() - new Date(ticket.last_activity_at).getTime()
-                              const isRecent = ageMs < 7 * 86400000 // 7 days
-                              if (!isRecent) return null
-                              return (
-                                <p
-                                  className="mt-1 text-[10px] text-text-muted truncate"
-                                  title={`${ticket.last_change_note || 'Updated'} — ${format(new Date(ticket.last_activity_at), 'd MMM yyyy, h:mm a')}`}
-                                >
-                                  by <span className="text-text-tertiary">{toProperCase(ticket.last_updated_by_name)}</span>
-                                  {' · '}{formatDistanceToNow(new Date(ticket.last_activity_at), { addSuffix: true })}
-                                </p>
-                              )
-                            })()}
                           </td>
                         )
                         if (k === 'jira') return (
