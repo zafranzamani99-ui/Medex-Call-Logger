@@ -3,9 +3,9 @@
 import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { format, isToday, isYesterday } from 'date-fns'
-import type { Ticket, TicketStatus, RecordType } from '@/lib/types'
-import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor, toProperCase } from '@/lib/constants'
+import { format, isToday, isYesterday, formatDistanceToNow } from 'date-fns'
+import type { Ticket, TicketStatus, RecordType, Channel } from '@/lib/types'
+import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor, toProperCase, CHANNEL_COLORS } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
@@ -139,7 +139,7 @@ export default function HistoryPage() {
   const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'jira', 'next', 'staff', 'actions'] as const
   const COL_LABELS: Record<string, string> = {
     ref: 'Ref / Date', phone: 'Phone', clinic: 'Clinic', issue: 'Details',
-    type: 'Type', status: 'Status', jira: 'Jira', next: 'Next Step',
+    type: 'Type', status: 'Status', jira: 'Jira', next: 'Latest Activity',
     staff: 'Staff', actions: 'Actions',
   }
   const ALWAYS_VISIBLE = new Set(['ref', 'actions'])
@@ -413,7 +413,14 @@ export default function HistoryPage() {
       type:  { header: 'Type',        value: (t) => `${t.record_type === 'ticket' ? 'Ticket' : 'Call Log'} — ${t.issue_type}` },
       status:{ header: 'Status',      value: (t) => `${t.status}${t.need_team_check ? ' (Needs Attention)' : ''}` },
       jira:  { header: 'Jira',        value: (t) => t.jira_link || '' },
-      next:  { header: 'Next Step',   value: (t) => [t.next_step, t.next_step_pic, t.next_step_contact].filter(Boolean).join(' · ') },
+      next:  { header: 'Latest Activity', value: (t) => {
+        if (!t.last_timeline_at) return ''
+        const when = format(new Date(t.last_timeline_at), 'dd/MM/yyyy HH:mm')
+        const who = t.last_timeline_by_name ? toProperCase(t.last_timeline_by_name) : ''
+        const ch = t.last_timeline_channel || ''
+        const note = t.last_timeline_notes || ''
+        return [when, ch, who, note].filter(Boolean).join(' · ')
+      } },
       staff: { header: 'Logged By',   value: (t) => t.created_by_name },
     }
     const csvCols = orderedVisibleCols.filter(k => k !== 'actions' && csvFor[k])
@@ -891,7 +898,7 @@ export default function HistoryPage() {
                   )
                   if (k === 'next') return (
                     <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
-                      <span>Next Step</span>
+                      <span>Latest Activity</span>
                       {resizeHandle}
                     </SortableHeader>
                   )
@@ -1038,18 +1045,37 @@ export default function HistoryPage() {
                             )}
                           </td>
                         )
-                        if (k === 'next') return (
-                          <td key={k} className="px-4 py-3 align-top">
-                            <span className="text-xs text-violet-400">{ticket.next_step || ''}</span>
-                            {(ticket.next_step_pic || ticket.next_step_contact) && (
-                              <p className="text-[11px] text-text-secondary mt-0.5">
-                                {ticket.next_step_pic && <span>{ticket.next_step_pic}</span>}
-                                {ticket.next_step_pic && ticket.next_step_contact && <span className="text-text-muted"> · </span>}
-                                {ticket.next_step_contact && <span className="text-text-tertiary">{ticket.next_step_contact}</span>}
-                              </p>
-                            )}
-                          </td>
-                        )
+                        if (k === 'next') {
+                          if (!ticket.last_timeline_at) {
+                            return (
+                              <td key={k} className="px-4 py-3 align-top">
+                                <span className="text-[11px] text-text-muted italic">No activity yet</span>
+                              </td>
+                            )
+                          }
+                          const channelColor = CHANNEL_COLORS[ticket.last_timeline_channel as Channel] || { bg: 'bg-gray-500/20', text: 'text-gray-400' }
+                          const relTime = formatDistanceToNow(new Date(ticket.last_timeline_at), { addSuffix: true })
+                          return (
+                            <td key={k} className="px-4 py-3 align-top">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {ticket.last_timeline_channel && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${channelColor.bg} ${channelColor.text} font-medium`}>
+                                    {ticket.last_timeline_channel}
+                                  </span>
+                                )}
+                                {ticket.last_timeline_by_name && (
+                                  <span className="text-[11px] text-text-secondary">{toProperCase(ticket.last_timeline_by_name)}</span>
+                                )}
+                                <span className="text-[10px] text-text-muted tabular-nums">· {relTime}</span>
+                              </div>
+                              {ticket.last_timeline_notes && (
+                                <p className="text-[11px] text-text-tertiary mt-0.5 whitespace-normal break-words">
+                                  {ticket.last_timeline_notes}
+                                </p>
+                              )}
+                            </td>
+                          )
+                        }
                         if (k === 'staff') return (
                           <td key={k} className="px-4 py-3 align-top">
                             <span className="text-xs text-accent font-medium">{toProperCase(ticket.created_by_name)}</span>
@@ -1142,7 +1168,18 @@ export default function HistoryPage() {
                   <p><span className="text-amber-400 font-medium">PIC:</span> <span className="text-text-primary">{ticket.pic || ''}</span></p>
                   <p className="truncate"><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue}</span></p>
                   <p className="truncate"><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response || ''}</span></p>
-                  <p className="truncate"><span className="text-violet-400 font-medium">NEXT:</span> <span className="text-text-secondary">{ticket.next_step || ''}</span>{ticket.next_step_pic && <span className="text-text-tertiary"> — {ticket.next_step_pic}</span>}{ticket.next_step_contact && <span className="text-text-muted"> {ticket.next_step_contact}</span>}</p>
+                  {ticket.last_timeline_at ? (
+                    <p>
+                      <span className="text-violet-400 font-medium">LATEST:</span>{' '}
+                      <span className="text-text-secondary">
+                        {ticket.last_timeline_channel}
+                        {ticket.last_timeline_by_name && ` · ${toProperCase(ticket.last_timeline_by_name)}`}
+                        {ticket.last_timeline_notes && ` — ${ticket.last_timeline_notes}`}
+                      </span>
+                    </p>
+                  ) : (
+                    <p className="truncate"><span className="text-violet-400 font-medium">LATEST:</span> <span className="text-text-muted italic">No activity yet</span></p>
+                  )}
                   <p className="truncate"><span className="text-orange-400 font-medium">TIMELINE:</span> <span className="text-text-secondary">{ticket.timeline_from_customer || ''}</span></p>
                   <p className="truncate"><span className="text-rose-400 font-medium">INTERNAL:</span> <span className="text-text-secondary">{ticket.internal_timeline || ''}</span></p>
                 </div>

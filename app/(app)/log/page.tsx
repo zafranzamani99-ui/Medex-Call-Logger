@@ -529,6 +529,21 @@ export default function LogCallPage() {
       })
     }
 
+    // Seed plan history (v1) when the agent set a next step at log time. The
+    // ticket row already carries the denormalised values, so this is purely
+    // historical — every subsequent plan change versions a new row.
+    if (nextStep.trim() || nextStepPic.trim() || nextStepContact.trim()) {
+      await supabase.from('ticket_plans').insert({
+        ticket_id: ticket.id,
+        next_step: nextStep.trim() || null,
+        next_step_pic: nextStepPic.trim() || null,
+        next_step_contact: nextStepContact.trim() || null,
+        set_by: userId,
+        set_by_name: userName,
+        reason: 'created',
+      })
+    }
+
     // Insert inbox message when escalated to admin
     if (status === 'Escalated to Admin' && adminMessage.trim()) {
       await supabase.from('inbox_messages').insert({

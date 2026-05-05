@@ -198,6 +198,14 @@ export interface Ticket {
   // Stale detection
   last_activity_at: string
 
+  // Latest timeline activity (migration 079, denormalised) — surfaces on the
+  // History page list as the "Latest Activity" column, so we don't have to
+  // join against timeline_entries on every list query.
+  last_timeline_at: string | null
+  last_timeline_channel: string | null
+  last_timeline_notes: string | null
+  last_timeline_by_name: string | null
+
   // Attachments
   attachment_urls: string[]
 
@@ -209,6 +217,10 @@ export interface Ticket {
   timeline_entries?: TimelineEntry[]
 }
 
+// Timeline entry types — 'note' is a real follow-up; 'status_change' is a
+// system-emitted chronology row when status changes outside the Add Update form.
+export type TimelineEntryType = 'note' | 'status_change'
+
 export interface TimelineEntry {
   id: string
   ticket_id: string
@@ -218,7 +230,34 @@ export interface TimelineEntry {
   added_by: string
   added_by_name: string
   attachment_urls?: string[]
+  entry_type?: TimelineEntryType
+  // Rich follow-up context (migration 078) — captures everything the agent
+  // entered on the Add Update form so the entry card can show sub-blocks and
+  // the edit modal can offer all the fields, not just notes.
+  response_added?: string | null
+  customer_timeline_update?: string | null
+  internal_timeline_update?: string | null
+  status_from?: string | null
+  status_to?: string | null
+  jira_link?: string | null
   created_at: string
+}
+
+// Plan version — every "Next Step" change creates one of these. The latest
+// non-superseded row per ticket is the current plan; tickets.next_step etc.
+// stay denormalised for fast reads by existing consumers.
+export interface TicketPlan {
+  id: string
+  ticket_id: string
+  next_step: string | null
+  next_step_pic: string | null
+  next_step_contact: string | null
+  set_by: string | null
+  set_by_name: string | null
+  set_at: string
+  superseded_at: string | null
+  related_timeline_entry_id: string | null
+  reason: string | null
 }
 
 export interface KnowledgeBaseEntry {

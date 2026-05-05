@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
-import type { Ticket, TimelineEntry, TicketStatus, Channel } from '@/lib/types'
+import type { Ticket, TimelineEntry, TicketStatus, Channel, TicketPlan } from '@/lib/types'
 import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel, formatWorkDuration, CALL_DURATIONS, ISSUE_CATEGORIES, ISSUE_TYPES, getIssueCategoryColor, toProperCase } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
@@ -18,6 +18,9 @@ import Button from '@/components/ui/Button'
 import { Input, Textarea, Label } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/Toast'
 import ClinicProfilePanel from '@/components/ClinicProfilePanel'
+import PlanCard from '@/components/PlanCard'
+import TimelineEntryEditModal from '@/components/TimelineEntryEditModal'
+import { ModalDialog } from '@/components/Modal'
 
 // WHY: Ticket Detail — spec Section 9.
 // UPGRADE: Breadcrumb nav, two-column layout on lg, redesigned vertical timeline.
@@ -30,6 +33,7 @@ export default function TicketDetailPage() {
 
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [timeline, setTimeline] = useState<TimelineEntry[]>([])
+  const [planHistory, setPlanHistory] = useState<TicketPlan[]>([])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [auditEntries, setAuditEntries] = useState<{ action: string; changed_by: string; created_at: string; old_data: Record<string, unknown>; new_data: Record<string, unknown> }[]>([])
   const [auditOpen, setAuditOpen] = useState(false)
@@ -48,12 +52,10 @@ export default function TicketDetailPage() {
   const [saving, setSaving] = useState(false)
   const [showCrmPanel, setShowCrmPanel] = useState(false)
 
-  // Edit fields
+  // Edit fields — note: next_step / pic / contact are NOT edited here anymore.
+  // The PlanCard owns plan changes and writes to ticket_plans for history.
   const [editIssue, setEditIssue] = useState('')
   const [editResponse, setEditResponse] = useState('')
-  const [editNextStep, setEditNextStep] = useState('')
-  const [editNextStepPic, setEditNextStepPic] = useState('')
-  const [editNextStepContact, setEditNextStepContact] = useState('')
   const [editStatus, setEditStatus] = useState<TicketStatus | null>(null)
   const [editNeedCheck, setEditNeedCheck] = useState(false)
   const [editJiraLink, setEditJiraLink] = useState('')
@@ -67,9 +69,10 @@ export default function TicketDetailPage() {
   const [editIssueType, setEditIssueType] = useState('')
   const [editDuration, setEditDuration] = useState<number | null>(null)
 
-  // Timeline entry edit/delete state
-  const [editingTimelineId, setEditingTimelineId] = useState<string | null>(null)
-  const [editTimelineNotes, setEditTimelineNotes] = useState('')
+  // Timeline entry edit modal state — replaces the old inline notes-only edit
+  // so agents can change response_added / customer_timeline_update / internal_
+  // timeline_update / jira_link / channel / date / notes on saved entries.
+  const [editingEntry, setEditingEntry] = useState<TimelineEntry | null>(null)
 
   // Follow-up image attachments
   const MAX_UPDATE_ATTACHMENTS = 5
@@ -95,14 +98,16 @@ export default function TicketDetailPage() {
   }, [])
 
   const fetchTicket = async () => {
-    const [ticketRes, timelineRes, auditRes] = await Promise.all([
+    const [ticketRes, timelineRes, auditRes, planRes] = await Promise.all([
       supabase.from('tickets').select('*').eq('id', ticketId).single(),
       supabase.from('timeline_entries').select('*').eq('ticket_id', ticketId)
-        .order('entry_date', { ascending: true })
-        .order('created_at', { ascending: true }),
+        .order('entry_date', { ascending: false })
+        .order('created_at', { ascending: false }),
       supabase.from('audit_log').select('action, changed_by, created_at, old_data, new_data')
         .eq('record_id', ticketId).eq('table_name', 'tickets')
         .order('created_at', { ascending: false }),
+      supabase.from('ticket_plans').select('*').eq('ticket_id', ticketId)
+        .order('set_at', { ascending: false }),
     ])
 
     if (ticketRes.data) {
@@ -110,9 +115,6 @@ export default function TicketDetailPage() {
       setTicket(t as Ticket)
       setEditIssue(t.issue)
       setEditResponse(t.my_response || '')
-      setEditNextStep(t.next_step || '')
-      setEditNextStepPic(t.next_step_pic || '')
-      setEditNextStepContact(t.next_step_contact || '')
       setEditStatus(t.status as TicketStatus)
       setEditNeedCheck(t.need_team_check)
       setEditJiraLink(t.jira_link || '')
@@ -129,6 +131,7 @@ export default function TicketDetailPage() {
 
     if (timelineRes.data) setTimeline(timelineRes.data as TimelineEntry[])
     if (auditRes.data) setAuditEntries(auditRes.data)
+    if (planRes.data) setPlanHistory(planRes.data as TicketPlan[])
 
     // Fetch linked schedule (if this ticket was created from a schedule)
     const { data: schedData } = await supabase
@@ -213,7 +216,6 @@ export default function TicketDetailPage() {
     if (editStatus !== ticket.status) changes.push(`Status: ${ticket.status} → ${editStatus}`)
     if (editIssue !== ticket.issue) changes.push('Issue updated')
     if ((editResponse || null) !== ticket.my_response) changes.push('Response updated')
-    if ((editNextStep || null) !== ticket.next_step) changes.push('Next step updated')
     if ((editTimelineFromCustomer || null) !== ticket.timeline_from_customer) changes.push('Timeline updated')
     if ((editInternalTimeline || null) !== ticket.internal_timeline) changes.push('Internal timeline updated')
     if (effectiveNeedCheck !== ticket.need_team_check) {
@@ -231,9 +233,6 @@ export default function TicketDetailPage() {
         ...(ticket.clinic_code === 'MANUAL' && editClinicName !== ticket.clinic_name ? { clinic_name: editClinicName } : {}),
         issue: editIssue,
         my_response: editResponse || null,
-        next_step: editNextStep || null,
-        next_step_pic: editNextStepPic || null,
-        next_step_contact: editNextStepContact || null,
         timeline_from_customer: editTimelineFromCustomer || null,
         internal_timeline: editInternalTimeline || null,
         status: editStatus,
@@ -253,8 +252,20 @@ export default function TicketDetailPage() {
       .eq('id', ticket.id)
 
     if (!error) {
+      // Emit chronology row for the status change so it shows inline in the timeline
+      if (editStatus !== ticket.status) {
+        await supabase.from('timeline_entries').insert({
+          ticket_id: ticket.id,
+          entry_date: format(new Date(), 'yyyy-MM-dd'),
+          channel: 'Internal',
+          entry_type: 'status_change',
+          notes: `Status: ${ticket.status} → ${editStatus}`,
+          added_by: userId,
+          added_by_name: userName,
+        })
+      }
       if (editStatus === 'Resolved' && ticket.status !== 'Resolved') {
-        triggerKBGeneration({ ...ticket, issue: editIssue, my_response: editResponse || null, next_step: editNextStep || null })
+        triggerKBGeneration({ ...ticket, issue: editIssue, my_response: editResponse || null })
       }
       // Insert inbox message when escalated to admin
       if (editStatus === 'Escalated to Admin' && ticket.status !== 'Escalated to Admin' && editAdminMessage.trim()) {
@@ -285,6 +296,7 @@ export default function TicketDetailPage() {
       toast('Please add a message before escalating to admin', 'error')
       return
     }
+    if (newStatus === ticket.status) return
     const clearedFlag = newStatus === 'Resolved' && ticket.need_team_check
     await supabase
       .from('tickets')
@@ -299,6 +311,17 @@ export default function TicketDetailPage() {
         last_activity_at: new Date().toISOString(),
       })
       .eq('id', ticket.id)
+    // Emit a synthetic chronology row so the timeline shows the status change
+    // inline. Rendered with reduced visual weight (no chat-bubble border).
+    await supabase.from('timeline_entries').insert({
+      ticket_id: ticket.id,
+      entry_date: format(new Date(), 'yyyy-MM-dd'),
+      channel: 'Internal',
+      entry_type: 'status_change',
+      notes: `Status: ${ticket.status} → ${newStatus}`,
+      added_by: userId,
+      added_by_name: userName,
+    })
     if (newStatus === 'Resolved' && ticket.status !== 'Resolved') {
       triggerKBGeneration(ticket)
     }
@@ -312,6 +335,9 @@ export default function TicketDetailPage() {
   const [followUpInternal, setFollowUpInternal] = useState('')
   const [followUpJiraLink, setFollowUpJiraLink] = useState('')
   const [followUpAdminMessage, setFollowUpAdminMessage] = useState('')
+  // "Also update plan" toggle inside Add Update — when checked, the plan is
+  // versioned to ticket_plans alongside the timeline_entries insert (atomic).
+  const [alsoUpdatePlan, setAlsoUpdatePlan] = useState(false)
   const [followUpNextStep, setFollowUpNextStep] = useState('')
   const [followUpNextStepPic, setFollowUpNextStepPic] = useState('')
   const [followUpNextStepContact, setFollowUpNextStepContact] = useState('')
@@ -320,16 +346,51 @@ export default function TicketDetailPage() {
     entryDate: string; channel: Channel; notes: string; formattedString: string
   }) => {
     if (!ticket || !data.channel || !data.notes) return
+
+    // Pre-flight: when escalating to admin via this form, the admin message is
+    // required. Validate before any inserts so a failed validation doesn't
+    // leave behind a half-saved timeline row.
+    const statusChanged = !!(followUpStatus && followUpStatus !== ticket.status)
+    if (statusChanged && followUpStatus === 'Escalated to Admin' && !followUpAdminMessage.trim()) {
+      toast('Message is required when escalating to admin', 'error')
+      return
+    }
+
     setSaving(true)
-    await supabase.from('timeline_entries').insert({
-      ticket_id: ticket.id,
-      entry_date: data.entryDate,
-      channel: data.channel,
-      notes: data.formattedString || data.notes,
-      added_by: userId,
-      added_by_name: userName,
-      attachment_urls: updateAttachments.length > 0 ? updateAttachments : [],
-    })
+
+    const trimmedResponse = followUpResponse.trim()
+    const trimmedCustomerTimeline = followUpTimeline.trim()
+    const trimmedInternalTimeline = followUpInternal.trim()
+    const trimmedJiraLink = followUpJiraLink.trim()
+
+    // Insert timeline entry — capture all rich follow-up context on the row
+    // itself so the entry card can show sub-blocks ("Added to response", etc.)
+    // and the edit modal can let the agent change them later. id is captured
+    // for an optional ticket_plans row that links via related_timeline_entry_id.
+    const { data: timelineRow, error: timelineErr } = await supabase
+      .from('timeline_entries')
+      .insert({
+        ticket_id: ticket.id,
+        entry_date: data.entryDate,
+        channel: data.channel,
+        notes: data.formattedString || data.notes,
+        added_by: userId,
+        added_by_name: userName,
+        attachment_urls: updateAttachments.length > 0 ? updateAttachments : [],
+        response_added: trimmedResponse || null,
+        customer_timeline_update: trimmedCustomerTimeline || null,
+        internal_timeline_update: trimmedInternalTimeline || null,
+        status_from: statusChanged ? ticket.status : null,
+        status_to: statusChanged ? followUpStatus : null,
+        jira_link: trimmedJiraLink || null,
+      })
+      .select()
+      .single()
+    if (timelineErr || !timelineRow) {
+      toast('Failed to save follow-up', 'error')
+      setSaving(false)
+      return
+    }
     // Build ticket update — always update activity + audit
     const ticketUpdate: Record<string, unknown> = {
       last_activity_at: new Date().toISOString(),
@@ -337,15 +398,9 @@ export default function TicketDetailPage() {
       last_updated_by_name: userName,
       last_change_note: `Timeline update added (${data.channel})`,
     }
-    // Optional: update status if agent changed it
-    if (followUpStatus && followUpStatus !== ticket.status) {
-      // Require admin message when escalating to admin via Add Update
-      // (Jira link is advisory — save proceeds even if empty)
-      if (followUpStatus === 'Escalated to Admin' && !followUpAdminMessage.trim()) {
-        toast('Message is required when escalating to admin', 'error')
-        setSaving(false)
-        return
-      }
+    // Status denormalisation onto the parent ticket (the entry already records
+    // status_from / status_to)
+    if (statusChanged) {
       ticketUpdate.status = followUpStatus
       const clearedFlagFollowUp = followUpStatus === 'Resolved' && ticket.need_team_check
       if (followUpStatus === 'Resolved') {
@@ -355,38 +410,59 @@ export default function TicketDetailPage() {
         ? `Status → ${followUpStatus} (${data.channel}) · Flag cleared on resolve`
         : `Status → ${followUpStatus} (${data.channel})`
     }
-    // Optional: update Jira link
-    if (followUpJiraLink.trim()) {
-      ticketUpdate.jira_link = followUpJiraLink.trim()
+    // Optional: denormalise jira_link onto the ticket (entry already has it)
+    if (trimmedJiraLink) {
+      ticketUpdate.jira_link = trimmedJiraLink
     }
     // Optional: update admin message when escalating to admin
     if (followUpStatus === 'Escalated to Admin' && followUpAdminMessage.trim()) {
       ticketUpdate.admin_message = followUpAdminMessage.trim()
     }
-    // Optional: append to my_response if agent added follow-up notes
-    if (followUpResponse.trim()) {
+    // Optional: append to my_response (the entry already carries the bare text
+    // in response_added — this preserves the legacy "wall of timestamped paragraphs"
+    // display at the top of the Details card for KB gen + WA draft compat)
+    if (trimmedResponse) {
       const existing = ticket.my_response || ''
       const timestamp = format(new Date(), 'dd/MM HH:mm')
       ticketUpdate.my_response = existing
-        ? `${existing}\n\n[${timestamp} - ${userName}] ${followUpResponse.trim()}`
-        : `[${timestamp} - ${userName}] ${followUpResponse.trim()}`
+        ? `${existing}\n\n[${timestamp} - ${userName}] ${trimmedResponse}`
+        : `[${timestamp} - ${userName}] ${trimmedResponse}`
     }
-    // Optional: update next step fields
-    if (followUpNextStep.trim()) {
-      ticketUpdate.next_step = followUpNextStep.trim()
+    // Optional: version the plan into ticket_plans (history) when the agent
+    // ticked "Also update plan". Denormalise latest values onto tickets so
+    // existing readers (CSV, KB gen, WA draft) stay current.
+    const wantsPlanUpdate = alsoUpdatePlan && (
+      followUpNextStep.trim() || followUpNextStepPic.trim() || followUpNextStepContact.trim()
+    )
+    if (wantsPlanUpdate) {
+      const trimmedStep = followUpNextStep.trim()
+      const trimmedPic = followUpNextStepPic.trim()
+      const trimmedContact = followUpNextStepContact.trim()
+      const { error: planErr } = await supabase.from('ticket_plans').insert({
+        ticket_id: ticket.id,
+        next_step: trimmedStep || null,
+        next_step_pic: trimmedPic || null,
+        next_step_contact: trimmedContact || null,
+        set_by: userId,
+        set_by_name: userName,
+        related_timeline_entry_id: timelineRow.id,
+        reason: 'follow_up',
+      })
+      if (planErr) {
+        toast('Plan update failed: ' + planErr.message, 'error')
+      } else {
+        ticketUpdate.next_step = trimmedStep || null
+        ticketUpdate.next_step_pic = trimmedPic || null
+        ticketUpdate.next_step_contact = trimmedContact || null
+      }
     }
-    if (followUpNextStepPic.trim()) {
-      ticketUpdate.next_step_pic = followUpNextStepPic.trim()
+    // Denormalise timeline fields (entry already carries them in
+    // customer_timeline_update / internal_timeline_update)
+    if (trimmedCustomerTimeline) {
+      ticketUpdate.timeline_from_customer = trimmedCustomerTimeline
     }
-    if (followUpNextStepContact.trim()) {
-      ticketUpdate.next_step_contact = followUpNextStepContact.trim()
-    }
-    // Optional: update timeline fields
-    if (followUpTimeline.trim()) {
-      ticketUpdate.timeline_from_customer = followUpTimeline.trim()
-    }
-    if (followUpInternal.trim()) {
-      ticketUpdate.internal_timeline = followUpInternal.trim()
+    if (trimmedInternalTimeline) {
+      ticketUpdate.internal_timeline = trimmedInternalTimeline
     }
     // Append follow-up images to ticket's attachment_urls
     if (updateAttachments.length > 0) {
@@ -415,6 +491,7 @@ export default function TicketDetailPage() {
     setFollowUpNextStep('')
     setFollowUpNextStepPic('')
     setFollowUpNextStepContact('')
+    setAlsoUpdatePlan(false)
     setUpdateAttachments([])
     fetchTicket()
     setSaving(false)
@@ -429,18 +506,6 @@ export default function TicketDetailPage() {
     } else {
       fetchTicket()
       toast('Timeline entry deleted')
-    }
-  }
-
-  const handleSaveTimeline = async (entryId: string) => {
-    if (!editTimelineNotes.trim()) return
-    const { error } = await supabase.from('timeline_entries').update({ notes: editTimelineNotes.trim() }).eq('id', entryId)
-    if (error) {
-      toast('Failed to update entry', 'error')
-    } else {
-      setEditingTimelineId(null)
-      fetchTicket()
-      toast('Timeline entry updated')
     }
   }
 
@@ -779,29 +844,6 @@ export default function TicketDetailPage() {
                   <p className="text-text-primary mt-1 whitespace-pre-wrap">{ticket.my_response || '-'}</p>
                 )}
               </div>
-              <div className="sm:col-span-2">
-                <span className="text-text-tertiary text-xs">Next Step</span>
-                {editing ? (
-                  <>
-                    <Input value={editNextStep} onChange={(e) => setEditNextStep(e.target.value)} className="mt-1" placeholder="What happens next..." />
-                    <div className="grid grid-cols-2 gap-2 mt-2">
-                      <Input value={editNextStepPic} onChange={(e) => setEditNextStepPic(e.target.value)} placeholder="PIC — who to follow up with" />
-                      <Input value={editNextStepContact} onChange={(e) => setEditNextStepContact(e.target.value)} placeholder="Contact — phone / WhatsApp" />
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-text-primary mt-1">{ticket.next_step || '-'}</p>
-                    {(ticket.next_step_pic || ticket.next_step_contact) && (
-                      <p className="text-text-secondary text-sm mt-0.5">
-                        {ticket.next_step_pic && <span>{ticket.next_step_pic}</span>}
-                        {ticket.next_step_pic && ticket.next_step_contact && <span className="text-text-muted"> · </span>}
-                        {ticket.next_step_contact && <span className="text-text-tertiary">{ticket.next_step_contact}</span>}
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
               <div>
                 <span className="text-text-tertiary text-xs">Logged By</span>
                 <p className="text-text-primary mt-1">
@@ -942,23 +984,32 @@ export default function TicketDetailPage() {
                   {timeline.length} {timeline.length === 1 ? 'entry' : 'entries'}
                 </span>
               </h2>
-              <Button size="sm" onClick={() => setShowAddUpdate(!showAddUpdate)}>
-                {showAddUpdate ? 'Cancel' : '+ Add Update'}
+              <Button size="sm" onClick={() => setShowAddUpdate(true)}>
+                + Add Update
               </Button>
             </div>
 
-            {/* Add Follow-up form */}
-            {showAddUpdate && (
-              <div className="mb-5 p-4 rounded-xl border border-indigo-500/20" style={{ background: 'rgba(99, 102, 241, 0.04)' }}>
+            {/* Add Follow-up — floating modal */}
+            <ModalDialog
+              open={showAddUpdate}
+              onClose={() => setShowAddUpdate(false)}
+              title="Add Follow-up"
+              size="lg"
+            >
+              <div className="p-4 space-y-4">
+                {/* The TimelineBuilder already renders its own labelled card */}
                 <TimelineBuilder
                   agentName={userName}
                   onChange={(data) => {
                     timelineDataRef.current = data
                   }}
                 />
-                {/* Optional: Update status */}
-                <div className="mt-3 pt-3 border-t border-border/50">
-                  <p className="text-xs text-text-muted mb-2">Update status? <span className="text-text-tertiary">(optional)</span></p>
+
+                {/* Update status */}
+                <div className="pt-3 border-t border-border">
+                  <label className="text-xs text-text-tertiary mb-2 block">
+                    Update status <span className="text-text-muted">(optional)</span>
+                  </label>
                   <div className="flex flex-wrap gap-1.5">
                     {STATUSES.map((s) => {
                       const colors = STATUS_COLORS[s]
@@ -967,10 +1018,10 @@ export default function TicketDetailPage() {
                       return (
                         <button key={s} type="button"
                           onClick={() => setFollowUpStatus(isActive ? null : s)}
-                          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
-                            isActive ? `${colors.bg} ${colors.text} ring-1 ring-current` :
-                            isCurrent ? `${colors.bg} ${colors.text} opacity-50` :
-                            'bg-zinc-800/50 text-zinc-400 hover:opacity-80'
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                            isActive ? `${colors.bg} ${colors.text}` :
+                            isCurrent ? `${colors.bg} ${colors.text} opacity-60` :
+                            'bg-surface-inset text-text-tertiary hover:text-text-primary'
                           }`}
                         >
                           {s}{isCurrent ? ' (current)' : ''}
@@ -978,63 +1029,91 @@ export default function TicketDetailPage() {
                       )
                     })}
                   </div>
-                  {/* Jira link — advisory when Escalated (save still works when empty) */}
                   {followUpStatus === 'Escalated' && (
                     <div className="mt-2">
-                      <div className="text-[11px] text-text-tertiary mb-1">
+                      <label className="text-xs text-text-tertiary mb-1 block">
                         Jira Link <span className="text-red-400">*</span>
-                      </div>
+                      </label>
                       <input
                         value={followUpJiraLink}
                         onChange={(e) => setFollowUpJiraLink(e.target.value)}
                         placeholder="https://medex.atlassian.net/browse/..."
-                        className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-red-500/50"
+                        className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
                       />
                       {!followUpJiraLink.trim() && (
                         <p className="text-xs text-amber-400 mt-1">Jira link recommended when escalating</p>
                       )}
                     </div>
                   )}
-                  {/* Admin message — required when Escalated to Admin */}
                   {followUpStatus === 'Escalated to Admin' && (
                     <div className="mt-2">
+                      <label className="text-xs text-text-tertiary mb-1 block">
+                        Message to Admin <span className="text-red-400">*</span>
+                      </label>
                       <textarea
                         value={followUpAdminMessage}
                         onChange={(e) => setFollowUpAdminMessage(e.target.value)}
                         placeholder="Describe why this needs admin attention..."
                         rows={3}
-                        className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-purple-500/50 resize-none"
+                        className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-none"
                       />
-                      {!followUpAdminMessage.trim() && (
-                        <p className="text-xs text-purple-400 mt-1">Message is required when escalating to admin</p>
-                      )}
                     </div>
                   )}
                 </div>
-                {/* Optional: Append to response */}
-                <div className="mt-3">
-                  <p className="text-xs text-text-muted mb-1">Add to response <span className="text-text-tertiary">(optional)</span></p>
+
+                {/* Add to response */}
+                <div className="pt-3 border-t border-border">
+                  <label className="text-xs text-text-tertiary mb-1 block">
+                    Add to response <span className="text-text-muted">(optional)</span>
+                  </label>
                   <textarea
                     value={followUpResponse}
                     onChange={(e) => setFollowUpResponse(e.target.value)}
                     placeholder="Additional response or notes to append..."
                     rows={2}
-                    className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50 resize-none"
+                    className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent resize-none"
                   />
                 </div>
-                {/* Image attachments */}
-                <div className="mt-3">
-                  <div className="flex items-center gap-2">
+
+                {/* Customer / Internal timeline */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-text-tertiary mb-1 block">
+                      Customer timeline <span className="text-text-muted">(optional)</span>
+                    </label>
+                    <input
+                      value={followUpTimeline}
+                      onChange={(e) => setFollowUpTimeline(e.target.value)}
+                      placeholder="Timeline stated by customer"
+                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-tertiary mb-1 block">
+                      Internal timeline <span className="text-text-muted">(optional)</span>
+                    </label>
+                    <input
+                      value={followUpInternal}
+                      onChange={(e) => setFollowUpInternal(e.target.value)}
+                      placeholder='e.g. "By Hazleen: 06/05/2026"'
+                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                    />
+                  </div>
+                </div>
+
+                {/* Attachments */}
+                <div>
+                  <div className="flex items-center gap-2 text-xs">
                     <button type="button" onClick={() => updateFileInputRef.current?.click()}
                       disabled={updateAttachments.length >= MAX_UPDATE_ATTACHMENTS || updateUploading}
-                      className="text-xs text-text-secondary hover:text-text-primary flex items-center gap-1 disabled:opacity-40 transition-colors"
+                      className="inline-flex items-center gap-1 text-text-secondary hover:text-text-primary disabled:opacity-40 transition-colors"
                     >
                       <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
                       Attach Image
                     </button>
-                    <span className="text-xs text-text-muted">or Ctrl+V to paste</span>
+                    <span className="text-text-muted">or Ctrl+V to paste</span>
                     {updateAttachments.length > 0 && (
-                      <span className="text-xs text-text-tertiary">{updateAttachments.length}/{MAX_UPDATE_ATTACHMENTS}</span>
+                      <span className="text-text-tertiary tabular-nums">{updateAttachments.length}/{MAX_UPDATE_ATTACHMENTS}</span>
                     )}
                     <input ref={updateFileInputRef} type="file" accept="image/*" hidden onChange={handleUpdateFileUpload} />
                   </div>
@@ -1053,51 +1132,56 @@ export default function TicketDetailPage() {
                     </div>
                   )}
                 </div>
-                {/* Optional: Timeline fields */}
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="text-xs text-text-muted mb-1">Timeline from customer <span className="text-text-tertiary">(optional)</span></p>
+
+                {/* Also update plan */}
+                <div className="pt-3 border-t border-border">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
                     <input
-                      value={followUpTimeline}
-                      onChange={(e) => setFollowUpTimeline(e.target.value)}
-                      placeholder="Timeline stated by customer"
-                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
+                      type="checkbox"
+                      checked={alsoUpdatePlan}
+                      onChange={(e) => setAlsoUpdatePlan(e.target.checked)}
+                      className="size-4 rounded border-border bg-surface-inset accent-accent"
                     />
-                  </div>
-                  <div>
-                    <p className="text-xs text-text-muted mb-1">Internal timeline <span className="text-text-tertiary">(optional)</span></p>
-                    <input
-                      value={followUpInternal}
-                      onChange={(e) => setFollowUpInternal(e.target.value)}
-                      placeholder='e.g. "By Hazleen: 06/04/2026"'
-                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
-                    />
-                  </div>
+                    <span className="text-sm text-text-secondary">
+                      Also update plan after this follow-up
+                    </span>
+                    <span className="text-xs text-text-muted">(versions a new plan)</span>
+                  </label>
+                  {alsoUpdatePlan && (
+                    <div className="mt-2 space-y-2">
+                      <input
+                        value={followUpNextStep}
+                        onChange={(e) => setFollowUpNextStep(e.target.value)}
+                        placeholder="What happens next..."
+                        className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                      />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <input
+                          value={followUpNextStepPic}
+                          onChange={(e) => setFollowUpNextStepPic(e.target.value)}
+                          placeholder="PIC — who to follow up with"
+                          className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                        />
+                        <input
+                          value={followUpNextStepContact}
+                          onChange={(e) => setFollowUpNextStepContact(e.target.value)}
+                          placeholder="Contact — phone / WhatsApp"
+                          className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                        />
+                      </div>
+                      <p className="text-xs text-text-muted">
+                        Previous plan stays in history.
+                      </p>
+                    </div>
+                  )}
                 </div>
-                {/* Optional: Next Step fields */}
-                <div className="mt-3">
-                  <p className="text-xs text-text-muted mb-1">Update next step <span className="text-text-tertiary">(optional)</span></p>
-                  <input
-                    value={followUpNextStep}
-                    onChange={(e) => setFollowUpNextStep(e.target.value)}
-                    placeholder="What happens next..."
-                    className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
-                  />
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <input
-                      value={followUpNextStepPic}
-                      onChange={(e) => setFollowUpNextStepPic(e.target.value)}
-                      placeholder="PIC — who to follow up with"
-                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
-                    />
-                    <input
-                      value={followUpNextStepContact}
-                      onChange={(e) => setFollowUpNextStepContact(e.target.value)}
-                      placeholder="Contact — phone / WhatsApp"
-                      className="w-full px-3 py-2 bg-surface-inset border border-border rounded-lg text-sm text-white placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-indigo-500/50"
-                    />
-                  </div>
-                </div>
+              </div>
+
+              {/* Sticky footer with Cancel / Save */}
+              <div className="sticky bottom-0 z-10 px-4 py-3 border-t border-border bg-surface backdrop-blur-sm flex justify-end gap-2">
+                <Button variant="secondary" size="sm" onClick={() => setShowAddUpdate(false)} disabled={saving}>
+                  Cancel
+                </Button>
                 <Button
                   onClick={() => {
                     const data = timelineDataRef.current
@@ -1109,12 +1193,11 @@ export default function TicketDetailPage() {
                   }}
                   loading={saving}
                   size="sm"
-                  className="mt-3"
                 >
                   Save Follow-up
                 </Button>
               </div>
-            )}
+            </ModalDialog>
 
             {/* Timeline entries — channel-colored left border, chat-log style */}
             {timeline.length === 0 ? (
@@ -1146,8 +1229,39 @@ export default function TicketDetailPage() {
                   const thisDate = format(new Date(entry.entry_date), 'yyyy-MM-dd')
                   const showDateBadge = thisDate !== prevDate
 
+                  // System rows (status_change) render with reduced visual weight —
+                  // a centered slim pill, no chat-bubble border, no edit/delete actions.
+                  if (entry.entry_type === 'status_change') {
+                    return (
+                      <div key={entry.id} id={`timeline-entry-${entry.id}`}>
+                        {showDateBadge && (
+                          <div className={`flex items-center gap-3 ${i > 0 ? 'mt-4' : ''} mb-2`}>
+                            <div className="h-px flex-1 bg-border" />
+                            <span className="text-[10px] font-semibold text-text-muted uppercase tracking-wider">
+                              {format(new Date(entry.entry_date), 'dd MMM yyyy')}
+                            </span>
+                            <div className="h-px flex-1 bg-border" />
+                          </div>
+                        )}
+                        <div className="flex items-center justify-center gap-2 py-1.5">
+                          <span className="text-[11px] text-text-tertiary tabular-nums">
+                            {format(new Date(entry.created_at), 'HH:mm')}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-inset border border-border text-[11px] text-text-secondary">
+                            <svg className="size-3 text-text-muted" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            <span>
+                              {toProperCase(entry.added_by_name)} · {entry.notes}
+                            </span>
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  }
+
                   return (
-                    <div key={entry.id}>
+                    <div key={entry.id} id={`timeline-entry-${entry.id}`}>
                       {/* Date separator */}
                       {showDateBadge && (
                         <div className={`flex items-center gap-3 ${i > 0 ? 'mt-4' : ''} mb-2`}>
@@ -1173,7 +1287,7 @@ export default function TicketDetailPage() {
                             {/* Edit/Delete buttons — visible on hover */}
                             <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                               <button
-                                onClick={() => { setEditingTimelineId(entry.id); setEditTimelineNotes(entry.notes) }}
+                                onClick={() => setEditingEntry(entry)}
                                 className="p-1 text-text-muted hover:text-text-primary rounded hover:bg-surface-inset transition-colors"
                                 title="Edit"
                               >
@@ -1192,23 +1306,45 @@ export default function TicketDetailPage() {
                               </button>
                             </div>
                           </div>
-                          {editingTimelineId === entry.id ? (
-                            <div className="mt-2">
-                              <input
-                                type="text"
-                                value={editTimelineNotes}
-                                onChange={(e) => setEditTimelineNotes(e.target.value)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTimeline(entry.id); if (e.key === 'Escape') setEditingTimelineId(null) }}
-                                className="w-full px-2 py-1.5 bg-surface-inset border border-border rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                                autoFocus
-                              />
-                              <div className="flex gap-2 mt-2">
-                                <Button size="sm" onClick={() => handleSaveTimeline(entry.id)}>Save</Button>
-                                <Button size="sm" variant="ghost" onClick={() => setEditingTimelineId(null)}>Cancel</Button>
-                              </div>
+                          <p className="text-sm text-text-primary mt-1.5 whitespace-pre-wrap leading-relaxed">{entry.notes}</p>
+                          {/* Sub-blocks: rich follow-up context (migration 078) */}
+                          {entry.status_from && entry.status_to && (
+                            <div className="mt-2 flex items-center gap-2 text-xs">
+                              <span className="text-text-tertiary">Status:</span>
+                              <span className="px-2 py-0.5 rounded-full bg-zinc-700/40 text-zinc-300">{entry.status_from}</span>
+                              <span className="text-text-muted">→</span>
+                              <span className={`px-2 py-0.5 rounded-full ${channelColor.bg} ${channelColor.text}`}>{entry.status_to}</span>
                             </div>
-                          ) : (
-                            <p className="text-sm text-text-primary mt-1.5 whitespace-pre-wrap leading-relaxed">{entry.notes}</p>
+                          )}
+                          {entry.response_added && (
+                            <div className="mt-2 px-3 py-2 rounded-md border-l-2 border-indigo-400/40 bg-indigo-500/[0.04]">
+                              <p className="text-[11px] text-indigo-300/80 mb-0.5 uppercase tracking-wider">Added to response</p>
+                              <p className="text-sm text-text-primary whitespace-pre-wrap">{entry.response_added}</p>
+                            </div>
+                          )}
+                          {entry.customer_timeline_update && (
+                            <p className="mt-2 text-xs text-text-secondary">
+                              <span className="text-text-tertiary">Customer timeline:</span> {entry.customer_timeline_update}
+                            </p>
+                          )}
+                          {entry.internal_timeline_update && (
+                            <p className="mt-1 text-xs text-text-secondary">
+                              <span className="text-text-tertiary">Internal timeline:</span> {entry.internal_timeline_update}
+                            </p>
+                          )}
+                          {entry.jira_link && (
+                            <p className="mt-1 text-xs">
+                              <span className="text-text-tertiary">Jira:</span>{' '}
+                              <a href={entry.jira_link} target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-hover underline break-all">
+                                {entry.jira_link}
+                              </a>
+                            </p>
+                          )}
+                          {planHistory.find(p => p.related_timeline_entry_id === entry.id) && (
+                            <p className="mt-1 text-xs">
+                              <span className="text-text-tertiary">Plan updated</span>{' '}
+                              <span className="text-indigo-400">→ versioned in Plan history</span>
+                            </p>
                           )}
                           {entry.attachment_urls && entry.attachment_urls.length > 0 && (
                             <div className="flex flex-wrap gap-1.5 mt-2">
@@ -1228,8 +1364,18 @@ export default function TicketDetailPage() {
           </div>
         </div>
 
-        {/* Right column (40%) — Status, Actions, Audit */}
+        {/* Right column (40%) — Plan, Status, Actions, Audit */}
         <div className="lg:w-2/5 space-y-4">
+
+          {/* Plan / Next Step — pinned at top so the current plan is always visible */}
+          <PlanCard
+            ticket={ticket}
+            planHistory={planHistory}
+            userId={userId}
+            userName={userName}
+            onChange={fetchTicket}
+            timelineEntries={timeline}
+          />
 
           {/* Status Quick Change — pill selector for desktop */}
           {!editing && (
@@ -1538,6 +1684,14 @@ export default function TicketDetailPage() {
           onClose={() => setShowCrmPanel(false)}
         />
       )}
+
+      {/* Timeline entry edit modal */}
+      <TimelineEntryEditModal
+        open={!!editingEntry}
+        onClose={() => setEditingEntry(null)}
+        entry={editingEntry}
+        onSaved={fetchTicket}
+      />
 
       {/* Image lightbox overlay */}
       {lightboxUrl && (
