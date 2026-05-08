@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { ISSUE_TYPES, getIssueTypeColor, ADMIN_PRIORITY_ISSUE_TYPES } from '@/lib/constants'
+import { ISSUE_TYPES, getIssueTypeColor, ADMIN_PRIORITY_ISSUE_TYPES, isAdminOrAbove } from '@/lib/constants'
 import { getIssueHexColor } from '@/lib/theme'
 import type { UserRole } from '@/lib/types'
 
@@ -11,9 +11,10 @@ interface Props {
   onChange: (value: string) => void
   required?: boolean
   userRole?: UserRole
+  hideTypes?: string[]
 }
 
-export default function IssueTypeSelect({ value, onChange, required, userRole }: Props) {
+export default function IssueTypeSelect({ value, onChange, required, userRole, hideTypes }: Props) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [customTypes, setCustomTypes] = useState<string[]>([])
@@ -41,12 +42,15 @@ export default function IssueTypeSelect({ value, onChange, required, userRole }:
   // All available types = defaults + custom from DB
   // WHY: Admin (clerk) uses Active/Expired Customer most — reorder to top for admin
   const allTypes = useMemo(() => {
-    const base = [...ISSUE_TYPES, ...customTypes]
-    if (userRole !== 'admin') return base
-    const priority = ADMIN_PRIORITY_ISSUE_TYPES
+    let base = [...ISSUE_TYPES, ...customTypes]
+    if (hideTypes?.length) {
+      base = base.filter(t => !hideTypes.includes(t))
+    }
+    if (!userRole || !isAdminOrAbove(userRole)) return base
+    const priority = ADMIN_PRIORITY_ISSUE_TYPES.filter(t => !hideTypes?.includes(t))
     const rest = base.filter(t => !priority.includes(t))
     return [...priority, ...rest]
-  }, [customTypes, userRole])
+  }, [customTypes, userRole, hideTypes])
 
   // Filtered by search
   const filtered = useMemo(() => {

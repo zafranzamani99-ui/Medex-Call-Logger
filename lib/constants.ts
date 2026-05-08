@@ -2,7 +2,7 @@
 // Prevents typos and keeps colour coding consistent across all components.
 // Colours from spec Section 13.2.
 
-import type { TicketStatus, Channel, RecordType } from './types'
+import type { TicketStatus, Channel, RecordType, UserRole } from './types'
 
 // Psychology-based color mapping:
 // Red/Rose = problems, errors, danger | Amber/Orange = warnings, attention needed
@@ -51,6 +51,9 @@ export const ISSUE_CATEGORIES: string[] = [
 
 // Admin-priority categories — shown first for admin role
 export const ADMIN_PRIORITY_CATEGORIES = ['AR', 'MTN']
+
+// Admin-only categories — admin role sees only these 3 on the Log Call form
+export const ADMIN_ONLY_CATEGORIES = ['AR', 'MTN', 'Label', 'Hardware']
 
 export const ISSUE_CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
   'Service':               { bg: 'bg-cyan-500/20', text: 'text-cyan-400' },
@@ -124,6 +127,9 @@ export const ISSUE_TYPES: string[] = [
 
 // Admin-priority issue types — shown first for admin role
 export const ADMIN_PRIORITY_ISSUE_TYPES = ['Active Customer', 'Expired Customer']
+
+// Admin customer status — separate pill toggle, not in the main issue type dropdown
+export const ADMIN_CUSTOMER_STATUS_TYPES = ['Active Customer', 'Expired Customer']
 
 // Status options (spec Section 4.3)
 export const STATUSES: TicketStatus[] = [
@@ -225,6 +231,17 @@ export const CHANNEL_COLORS: Record<Channel, { bg: string; text: string }> = {
   'WhatsApp':  { bg: 'bg-green-500/20', text: 'text-green-400' },
   'Email':     { bg: 'bg-purple-500/20', text: 'text-purple-400' },
   'Internal':  { bg: 'bg-gray-500/20', text: 'text-gray-400' },
+}
+
+// Currency formatting — Malaysian Ringgit
+export function formatRM(amount: number): string {
+  if (amount === 0) return 'RM 0'
+  return `RM ${amount.toLocaleString('en-MY', { minimumFractionDigits: amount % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 })}`
+}
+
+// Role helpers — administrator is the superset of admin
+export function isAdminOrAbove(role: UserRole): boolean {
+  return role === 'administrator' || role === 'admin'
 }
 
 // Convert ALL CAPS or mixed-case names to Proper Case (e.g. "ZAFRAN ZAMANI" → "Zafran Zamani")

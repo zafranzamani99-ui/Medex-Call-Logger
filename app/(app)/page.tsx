@@ -27,7 +27,7 @@ export default function DashboardPage() {
   const supabase = createClient()
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [stats, setStats] = useState<DashboardStats>({
-    callsToday: 0, openCalls: 0, openTickets: 0, needsAttention: 0, stale: 0, resolvedToday: 0,
+    callsToday: 0, openCalls: 0, openTickets: 0, needsAttention: 0, stale: 0, resolvedToday: 0, outstandingAmount: 0,
   })
   const [chartData, setChartData] = useState({
     dailyCalls: [] as { date: string; count: number }[],
@@ -90,8 +90,9 @@ export default function DashboardPage() {
     const needsAttention = open.filter((t) => t.need_team_check).length
     const staleCount = open.filter((t) => isStale(t)).length
     const resolvedToday = resolvedTodayRes.count ?? 0
+    const outstandingAmount = open.reduce((sum, t) => sum + ((t as Ticket).amount_hutang || 0), 0)
 
-    setStats({ callsToday, openCalls: openCallsCount, openTickets: openTicketsCount, needsAttention, stale: staleCount, resolvedToday })
+    setStats({ callsToday, openCalls: openCallsCount, openTickets: openTicketsCount, needsAttention, stale: staleCount, resolvedToday, outstandingAmount })
 
     const dailyCalls: { date: string; count: number }[] = []
     for (let i = 13; i >= 0; i--) {

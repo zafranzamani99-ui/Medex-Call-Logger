@@ -1,6 +1,7 @@
 'use client'
 
 import type { DashboardStats } from '@/lib/types'
+import { formatRM } from '@/lib/constants'
 
 interface StatsBarProps {
   stats: DashboardStats
@@ -11,6 +12,7 @@ interface StatsBarProps {
 const cards = [
   { key: 'callsToday' as const, label: 'Calls Today', accent: 'bg-indigo-400', textAccent: 'text-indigo-400' },
   { key: 'openTickets' as const, label: 'Open Tickets', accent: 'bg-sky-400', textAccent: 'text-sky-400' },
+  { key: 'outstandingAmount' as const, label: 'Outstanding', warn: true, accent: 'bg-orange-400', textAccent: 'text-orange-400', currency: true },
   { key: 'needsAttention' as const, label: 'Needs Attention', alert: true, accent: 'bg-red-400', textAccent: 'text-red-400' },
   { key: 'stale' as const, label: 'Stale Tickets', warn: true, accent: 'bg-amber-400', textAccent: 'text-amber-400' },
   { key: 'resolvedToday' as const, label: 'Resolved Today', success: true, accent: 'bg-emerald-400', textAccent: 'text-emerald-400' },
@@ -35,7 +37,7 @@ function TrendIndicator({ current, previous }: { current: number; previous: numb
 
 export default function StatsBar({ stats, yesterdayStats, onCardClick }: StatsBarProps) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
       {cards.map((card) => {
         const value = stats[card.key]
         const hasAlert = card.alert && value > 0
@@ -59,7 +61,7 @@ export default function StatsBar({ stats, yesterdayStats, onCardClick }: StatsBa
               <span className={`text-2xl font-bold tabular-nums ${
                 hasAlert ? 'text-red-400' : hasWarn ? 'text-amber-400' : card.success && value > 0 ? 'text-emerald-400' : 'text-text-primary'
               }`}>
-                {value}
+                {'currency' in card && card.currency ? formatRM(value) : value}
               </span>
               {yesterdayStats && (
                 <TrendIndicator current={value} previous={yesterdayStats[card.key]} />

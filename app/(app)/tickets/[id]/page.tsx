@@ -4,8 +4,8 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
-import type { Ticket, TimelineEntry, TicketStatus, Channel, TicketPlan } from '@/lib/types'
-import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel, formatWorkDuration, CALL_DURATIONS, ISSUE_CATEGORIES, ISSUE_TYPES, getIssueCategoryColor, toProperCase } from '@/lib/constants'
+import type { Ticket, TimelineEntry, TicketStatus, Channel, TicketPlan, InvoiceItem } from '@/lib/types'
+import { STATUSES, STATUS_COLORS, CHANNEL_COLORS, getDurationLabel, formatWorkDuration, CALL_DURATIONS, ISSUE_CATEGORIES, ISSUE_TYPES, getIssueCategoryColor, toProperCase, formatRM } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
@@ -68,6 +68,8 @@ export default function TicketDetailPage() {
   const [editIssueCategory, setEditIssueCategory] = useState<string | null>(null)
   const [editIssueType, setEditIssueType] = useState('')
   const [editDuration, setEditDuration] = useState<number | null>(null)
+  const [editInvoices, setEditInvoices] = useState<{ invoice_number: string; amount: string }[]>([])
+  const [editDescription, setEditDescription] = useState('')
 
   // Timeline entry edit modal state — replaces the old inline notes-only edit
   // so agents can change response_added / customer_timeline_update / internal_
@@ -127,6 +129,8 @@ export default function TicketDetailPage() {
       setEditIssueCategory(t.issue_category || null)
       setEditIssueType(t.issue_type || '')
       setEditDuration(t.call_duration || null)
+      setEditInvoices((t.invoices || []).map((inv: InvoiceItem) => ({ invoice_number: inv.invoice_number, amount: String(inv.amount) })))
+      setEditDescription(t.description || '')
     }
 
     if (timelineRes.data) setTimeline(timelineRes.data as TimelineEntry[])
@@ -205,6 +209,12 @@ export default function TicketDetailPage() {
       return
     }
 
+    // Block resolve when outstanding balance remains
+    if (editStatus === 'Resolved' && ticket.status !== 'Resolved' && (ticket.amount_hutang || 0) > 0) {
+      toast(`Cannot resolve — ${formatRM(ticket.amount_hutang || 0)} still outstanding`, 'error')
+      return
+    }
+
     setSaving(true)
 
     // Resolved tickets can't carry a "Needs Attention" flag — work is done.
@@ -244,6 +254,13 @@ export default function TicketDetailPage() {
         admin_message: editStatus === 'Escalated to Admin' ? editAdminMessage.trim() : (editAdminMessage.trim() || null),
         pic: editPic || null,
         caller_tel: editCallerTel || null,
+        invoices: editInvoices.filter(inv => inv.invoice_number.trim()).map(inv => ({ invoice_number: inv.invoice_number.trim(), amount: parseFloat(inv.amount) || 0 })),
+        amount_hutang: (() => {
+          const invoiceTotal = editInvoices.reduce((sum, inv) => sum + (parseFloat(inv.amount) || 0), 0)
+          const totalCollected = timeline.reduce((sum, e) => sum + (e.amount_collected || 0), 0)
+          return Math.max(0, invoiceTotal - totalCollected)
+        })(),
+        description: editDescription.trim() || null,
         last_updated_by: userId,
         last_updated_by_name: userName,
         last_change_note: changes.join(', ') || 'Details edited',
@@ -297,6 +314,10 @@ export default function TicketDetailPage() {
       return
     }
     if (newStatus === ticket.status) return
+    if (newStatus === 'Resolved' && (ticket.amount_hutang || 0) > 0) {
+      toast(`Cannot resolve — ${formatRM(ticket.amount_hutang || 0)} still outstanding`, 'error')
+      return
+    }
     const clearedFlag = newStatus === 'Resolved' && ticket.need_team_check
     await supabase
       .from('tickets')
@@ -341,6 +362,7 @@ export default function TicketDetailPage() {
   const [followUpNextStep, setFollowUpNextStep] = useState('')
   const [followUpNextStepPic, setFollowUpNextStepPic] = useState('')
   const [followUpNextStepContact, setFollowUpNextStepContact] = useState('')
+  const [followUpAmountCollected, setFollowUpAmountCollected] = useState('')
 
   const handleAddUpdate = async (data: {
     entryDate: string; channel: Channel; notes: string; formattedString: string
@@ -353,6 +375,18 @@ export default function TicketDetailPage() {
     const statusChanged = !!(followUpStatus && followUpStatus !== ticket.status)
     if (statusChanged && followUpStatus === 'Escalated to Admin' && !followUpAdminMessage.trim()) {
       toast('Message is required when escalating to admin', 'error')
+      return
+    }
+
+    // Block resolve when outstanding balance remains
+    const collectedAmount = parseFloat(followUpAmountCollected) || 0
+    const balanceAfterCollection = (ticket.amount_hutang || 0) - collectedAmount
+    if (statusChanged && followUpStatus === 'Resolved' && balanceAfterCollection > 0) {
+      toast(`Cannot resolve — ${formatRM(balanceAfterCollection)} still outstanding after collection`, 'error')
+      return
+    }
+    if (collectedAmount > 0 && collectedAmount > (ticket.amount_hutang || 0)) {
+      toast(`Cannot collect more than outstanding ${formatRM(ticket.amount_hutang || 0)}`, 'error')
       return
     }
 
@@ -383,6 +417,7 @@ export default function TicketDetailPage() {
         status_from: statusChanged ? ticket.status : null,
         status_to: statusChanged ? followUpStatus : null,
         jira_link: trimmedJiraLink || null,
+        amount_collected: collectedAmount > 0 ? collectedAmount : null,
       })
       .select()
       .single()
@@ -464,6 +499,14 @@ export default function TicketDetailPage() {
     if (trimmedInternalTimeline) {
       ticketUpdate.internal_timeline = trimmedInternalTimeline
     }
+    // Amount collected — auto-subtract from outstanding balance
+    if (collectedAmount > 0) {
+      const newBalance = (ticket.amount_hutang || 0) - collectedAmount
+      ticketUpdate.amount_hutang = Math.max(0, newBalance)
+      if (newBalance <= 0) {
+        toast('Fully collected — consider resolving this ticket', 'success')
+      }
+    }
     // Append follow-up images to ticket's attachment_urls
     if (updateAttachments.length > 0) {
       const existing = ticket.attachment_urls || []
@@ -492,6 +535,7 @@ export default function TicketDetailPage() {
     setFollowUpNextStepPic('')
     setFollowUpNextStepContact('')
     setAlsoUpdatePlan(false)
+    setFollowUpAmountCollected('')
     setUpdateAttachments([])
     fetchTicket()
     setSaving(false)
@@ -500,10 +544,16 @@ export default function TicketDetailPage() {
 
   const handleDeleteTimeline = async (entryId: string) => {
     if (!confirm('Delete this timeline entry?')) return
+    const entry = timeline.find(e => e.id === entryId)
     const { error } = await supabase.from('timeline_entries').delete().eq('id', entryId)
     if (error) {
       toast('Failed to delete entry', 'error')
     } else {
+      if (entry?.amount_collected && entry.amount_collected > 0 && ticket) {
+        await supabase.from('tickets').update({
+          amount_hutang: (ticket.amount_hutang || 0) + entry.amount_collected,
+        }).eq('id', ticket.id)
+      }
       fetchTicket()
       toast('Timeline entry deleted')
     }
@@ -820,6 +870,72 @@ export default function TicketDetailPage() {
                   <p className="text-text-primary mt-1">{getDurationLabel(ticket.call_duration)}</p>
                 )}
               </div>
+              <div>
+                <span className="text-text-tertiary text-xs">Outstanding Payment</span>
+                {(ticket.amount_hutang || 0) > 0 ? (
+                  <p className="text-orange-400 font-semibold mt-1">{formatRM(ticket.amount_hutang || 0)}</p>
+                ) : (
+                  <p className="text-text-primary mt-1">-</p>
+                )}
+              </div>
+              {((ticket.invoices && ticket.invoices.length > 0) || editing) && (
+                <div className="sm:col-span-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-tertiary text-xs">Invoices</span>
+                    {editing && (
+                      <button type="button" onClick={() => setEditInvoices(prev => [...prev, { invoice_number: '', amount: '' }])}
+                        className="text-xs text-accent hover:text-accent-hover transition-colors font-medium">+ Add</button>
+                    )}
+                  </div>
+                  {editing ? (
+                    <div className="space-y-2 mt-1">
+                      {editInvoices.length === 0 ? (
+                        <p className="text-xs text-text-muted">No invoices. Click &quot;+ Add&quot; to start.</p>
+                      ) : editInvoices.map((inv, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <Input type="text" value={inv.invoice_number}
+                            onChange={(e) => { const u = [...editInvoices]; u[idx] = { ...u[idx], invoice_number: e.target.value }; setEditInvoices(u) }}
+                            placeholder="INV-2026-001" className="flex-1" />
+                          <div className="relative w-32">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-text-muted font-medium">RM</span>
+                            <Input type="number" min="0" step="0.01" value={inv.amount}
+                              onChange={(e) => { const u = [...editInvoices]; u[idx] = { ...u[idx], amount: e.target.value }; setEditInvoices(u) }}
+                              placeholder="0.00" className="pl-10" />
+                          </div>
+                          <button type="button" onClick={() => setEditInvoices(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-red-400 hover:text-red-300 p-1">
+                            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        </div>
+                      ))}
+                      {editInvoices.length > 0 && (
+                        <p className="text-xs text-orange-400 font-medium">
+                          Invoice Total: RM {editInvoices.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0).toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-1 space-y-1">
+                      {(ticket.invoices || []).map((inv: InvoiceItem, idx: number) => (
+                        <div key={idx} className="flex items-center justify-between text-sm">
+                          <span className="text-text-primary font-mono text-xs">{inv.invoice_number}</span>
+                          <span className="text-text-secondary">{formatRM(inv.amount)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {(ticket.description || editing) && (
+                <div className="sm:col-span-2">
+                  <span className="text-text-tertiary text-xs">Description</span>
+                  {editing ? (
+                    <Textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={2} className="mt-1" />
+                  ) : (
+                    <p className="text-text-primary mt-1 whitespace-pre-wrap">{ticket.description}</p>
+                  )}
+                </div>
+              )}
               <div className="sm:col-span-2">
                 <span className="text-text-tertiary text-xs">Issue</span>
                 {editing ? (
@@ -997,6 +1113,45 @@ export default function TicketDetailPage() {
               size="lg"
             >
               <div className="p-4 space-y-4">
+                {/* Outstanding summary + collection — shown first when balance > 0 */}
+                {ticket && (ticket.amount_hutang || 0) > 0 && (
+                  <div className="p-3 rounded-lg bg-orange-500/5 border border-orange-500/20">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-orange-400">Outstanding: {formatRM(ticket.amount_hutang || 0)}</span>
+                    </div>
+                    {ticket.invoices && ticket.invoices.length > 0 && (
+                      <div className="space-y-1 mb-3">
+                        {(ticket.invoices as InvoiceItem[]).map((inv, idx) => (
+                          <div key={idx} className="flex items-center justify-between text-xs">
+                            <span className="text-text-secondary font-mono">{inv.invoice_number}</span>
+                            <span className="text-text-muted">{formatRM(inv.amount)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <Label>Amount Collected (RM)</Label>
+                    <div className="relative mt-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-muted font-medium">RM</span>
+                      <Input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        max={ticket.amount_hutang || 0}
+                        value={followUpAmountCollected}
+                        onChange={(e) => setFollowUpAmountCollected(e.target.value)}
+                        placeholder="0.00"
+                        className="pl-12"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-text-muted">
+                      <span>Balance: <span className="text-orange-400 font-medium">{formatRM(ticket.amount_hutang || 0)}</span></span>
+                      {(parseFloat(followUpAmountCollected) || 0) > 0 && (
+                        <span>→ After: <span className="font-medium text-text-primary">{formatRM(Math.max(0, (ticket.amount_hutang || 0) - (parseFloat(followUpAmountCollected) || 0)))}</span></span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* The TimelineBuilder already renders its own labelled card */}
                 <TimelineBuilder
                   agentName={userName}
@@ -1338,6 +1493,13 @@ export default function TicketDetailPage() {
                               <a href={entry.jira_link} target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-hover underline break-all">
                                 {entry.jira_link}
                               </a>
+                            </p>
+                          )}
+                          {(entry.amount_collected || 0) > 0 && (
+                            <p className="mt-1 text-xs">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-medium">
+                                Collected {formatRM(entry.amount_collected!)}
+                              </span>
                             </p>
                           )}
                           {planHistory.find(p => p.related_timeline_entry_id === entry.id) && (
@@ -1691,6 +1853,8 @@ export default function TicketDetailPage() {
         onClose={() => setEditingEntry(null)}
         entry={editingEntry}
         onSaved={fetchTicket}
+        ticketId={ticket?.id}
+        currentAmountHutang={ticket?.amount_hutang || 0}
       />
 
       {/* Image lightbox overlay */}

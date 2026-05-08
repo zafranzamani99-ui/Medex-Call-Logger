@@ -33,7 +33,7 @@ export async function POST() {
     .select('role')
     .eq('id', userRes.user.id)
     .single()
-  if (profile?.role !== 'admin') {
+  if (profile?.role !== 'admin' && profile?.role !== 'administrator') {
     return NextResponse.json({ error: 'Admin role required' }, { status: 403 })
   }
 

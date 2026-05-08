@@ -4,11 +4,11 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { format, startOfDay, subDays, startOfWeek, startOfMonth } from 'date-fns'
 import { useRouter } from 'next/navigation'
-import type { Ticket } from '@/lib/types'
+import type { Ticket, UserRole } from '@/lib/types'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
 import { IssueTypeBadge } from '@/components/FlagBadge'
-import { getDurationLabel, JOB_SHEET_STATUS_COLORS } from '@/lib/constants'
+import { getDurationLabel, JOB_SHEET_STATUS_COLORS, formatRM } from '@/lib/constants'
 import EmptyState, { EmptyIcons } from '@/components/ui/EmptyState'
 
 // WHY: Personal work tracker — each staff sees their own call logs, tickets, LK requests.
@@ -29,9 +29,10 @@ export default function MyLogPage() {
   const router = useRouter()
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
+  const [userRole, setUserRole] = useState<UserRole>('support')
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [lkRequests, setLkRequests] = useState<LKRequest[]>([])
-  const [jobSheets, setJobSheets] = useState<{ id: string; js_number: string; clinic_name: string; service_date: string; status: string; service_types: string[]; created_at: string }[]>([])
+  const [jobSheets, setJobSheets] = useState<{ id: string; js_number: string; clinic_name: string; service_date: string; status: string; service_types: string[]; created_at: string; created_by?: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [dateRange, setDateRange] = useState<DateRange>(() => {
     if (typeof window !== 'undefined') {
@@ -68,10 +69,13 @@ export default function MyLogPage() {
         setUserId(session.user.id)
         const { data: profile } = await supabase
           .from('profiles')
-          .select('display_name')
+          .select('display_name, role')
           .eq('id', session.user.id)
           .single()
-        if (profile) setUserName(profile.display_name)
+        if (profile) {
+          setUserName(profile.display_name)
+          setUserRole((profile.role || 'support') as UserRole)
+        }
       }
     }
     loadUser()
@@ -82,7 +86,7 @@ export default function MyLogPage() {
   useEffect(() => {
     if (userName && userId) fetchData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userName, userId, dateRange])
+  }, [userName, userId, dateRange, userRole])
 
   const getDateFilter = (): string | null => {
     const now = new Date()
@@ -95,19 +99,20 @@ export default function MyLogPage() {
     }
   }
 
+  const isAdministrator = userRole === 'administrator'
+
   const fetchData = async () => {
     setLoading(true)
     const dateFrom = getDateFilter()
 
-    // Fetch my tickets/call logs
+    // Fetch tickets — administrators see all staff, others see only own
     let ticketQuery = supabase
       .from('tickets')
       .select('*')
-      .eq('created_by_name', userName)
+    if (!isAdministrator) ticketQuery = ticketQuery.eq('created_by_name', userName)
 
     if (dateFrom) {
       if (dateRange === 'yesterday') {
-        // Yesterday only: from start of yesterday to start of today
         ticketQuery = ticketQuery
           .gte('created_at', dateFrom)
           .lt('created_at', startOfDay(new Date()).toISOString())
@@ -124,8 +129,8 @@ export default function MyLogPage() {
       updatedQuery = supabase
         .from('tickets')
         .select('*')
-        .eq('created_by_name', userName)
-        .lt('created_at', dateFrom) // created BEFORE the date range
+      if (!isAdministrator) updatedQuery = updatedQuery.eq('created_by_name', userName)
+      updatedQuery = updatedQuery.lt('created_at', dateFrom)
       if (dateRange === 'yesterday') {
         updatedQuery = updatedQuery
           .gte('last_activity_at', dateFrom)
@@ -136,11 +141,11 @@ export default function MyLogPage() {
       updatedQuery = updatedQuery.order('last_activity_at', { ascending: false })
     }
 
-    // Fetch my LK requests
+    // Fetch LK requests
     let lkQuery = supabase
       .from('license_key_requests')
       .select('*')
-      .eq('created_by', userName)
+    if (!isAdministrator) lkQuery = lkQuery.eq('created_by', userName)
 
     if (dateFrom) {
       if (dateRange === 'yesterday') {
@@ -154,11 +159,11 @@ export default function MyLogPage() {
 
     lkQuery = lkQuery.order('created_at', { ascending: false })
 
-    // Fetch my job sheets
+    // Fetch job sheets
     let jsQuery = supabase
       .from('job_sheets')
-      .select('id, js_number, clinic_name, service_date, status, service_types, created_at')
-      .or(`service_by_id.eq.${userId},created_by.eq.${userId}`)
+      .select('id, js_number, clinic_name, service_date, status, service_types, created_at, created_by')
+    if (!isAdministrator) jsQuery = jsQuery.or(`service_by_id.eq.${userId},created_by.eq.${userId}`)
 
     if (dateFrom) {
       if (dateRange === 'yesterday') {
@@ -195,6 +200,7 @@ export default function MyLogPage() {
   const resolvedCount = tickets.filter(t => t.status === 'Resolved').length
   const unresolvedTickets = tickets.filter(t => t.status !== 'Resolved')
   const resolutionPct = tickets.length > 0 ? Math.round((resolvedCount / tickets.length) * 100) : 0
+  const outstandingTotal = unresolvedTickets.reduce((sum, t) => sum + (t.amount_hutang || 0), 0)
 
   // Repeat caller detection — count clinic_code occurrences
   const clinicCounts = useMemo(() => {
@@ -236,7 +242,7 @@ export default function MyLogPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-text-primary">My Log</h1>
-            <p className="text-[13px] text-text-tertiary mt-0.5">{userName}&apos;s work overview</p>
+            <p className="text-[13px] text-text-tertiary mt-0.5">{isAdministrator ? 'Team overview' : `${userName}'s work overview`}</p>
           </div>
           {/* Date range pills */}
           <div className="flex gap-1">
@@ -258,7 +264,7 @@ export default function MyLogPage() {
 
         {/* Stats strip */}
         {!loading && tickets.length > 0 && (
-          <div className="mt-4 grid grid-cols-3 gap-3">
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="rounded-xl p-3 border border-border bg-surface-raised">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Total</p>
               <p className="text-xl font-bold text-text-primary tabular-nums mt-0.5">{tickets.length}</p>
@@ -294,6 +300,19 @@ export default function MyLogPage() {
               </p>
               <p className="text-[11px] text-text-tertiary mt-0.5">
                 {unresolvedTickets.length === 0 ? 'All caught up' : 'need attention'}
+              </p>
+            </div>
+            <div className={`rounded-xl p-3 border ${
+              outstandingTotal > 0 ? 'border-orange-500/25 bg-orange-500/[0.04]' : 'border-border bg-surface-raised'
+            }`}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">Outstanding</p>
+              <p className={`text-xl font-bold tabular-nums mt-0.5 ${
+                outstandingTotal > 0 ? 'text-orange-400' : 'text-emerald-400'
+              }`}>
+                {formatRM(outstandingTotal)}
+              </p>
+              <p className="text-[11px] text-text-tertiary mt-0.5">
+                {outstandingTotal === 0 ? 'Fully collected' : 'to chase'}
               </p>
             </div>
           </div>
@@ -334,6 +353,9 @@ export default function MyLogPage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs font-medium text-text-primary">{ticket.clinic_name}</span>
+                          {isAdministrator && ticket.created_by_name && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 font-medium">{ticket.created_by_name}</span>
+                          )}
                           <StatusBadge status={ticket.status} />
                           <span className="text-[11px] text-text-tertiary ml-auto shrink-0">
                             {format(new Date(ticket.created_at), 'HH:mm')}
@@ -343,6 +365,9 @@ export default function MyLogPage() {
                           <p className="text-xs text-violet-400 line-clamp-1">NEXT: {ticket.next_step}{ticket.next_step_pic ? ` — ${ticket.next_step_pic}` : ''}</p>
                         ) : (
                           <p className="text-xs text-zinc-400 line-clamp-1">{ticket.issue}</p>
+                        )}
+                        {(ticket.amount_hutang || 0) > 0 && (
+                          <p className="text-xs text-orange-400 font-medium mt-0.5">Outstanding: {formatRM(ticket.amount_hutang || 0)}</p>
                         )}
                       </div>
                       <div className="shrink-0 mt-1 flex items-center gap-1 text-[11px] font-medium text-amber-400 group-hover:text-amber-300 transition-colors">
@@ -423,6 +448,9 @@ export default function MyLogPage() {
                         <span className="text-sm text-text-primary font-medium truncate">
                           {ticket.clinic_name}
                         </span>
+                        {isAdministrator && ticket.created_by_name && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 font-medium flex-shrink-0">{ticket.created_by_name}</span>
+                        )}
                         {isRepeat && (
                           <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-500/15 text-text-secondary font-medium flex-shrink-0 tabular-nums">
                             {clinicCounts[ticket.clinic_code]}x
@@ -442,6 +470,9 @@ export default function MyLogPage() {
                     {/* Detail fields — only show non-empty */}
                     <div className="mt-1 space-y-0.5 text-xs leading-relaxed">
                       <p className="line-clamp-1"><span className="text-sky-400 font-medium">ISSUE:</span> <span className="text-text-secondary">{ticket.issue || ''}</span></p>
+                      {(ticket.amount_hutang || 0) > 0 && (
+                        <p className="line-clamp-1"><span className="text-orange-400 font-medium">OUTSTANDING:</span> <span className="text-orange-300">{formatRM(ticket.amount_hutang || 0)}</span></p>
+                      )}
                       {ticket.my_response && (
                         <p className="line-clamp-1"><span className="text-emerald-400 font-medium">RESPONSE:</span> <span className="text-text-secondary">{ticket.my_response}</span></p>
                       )}
@@ -483,6 +514,9 @@ export default function MyLogPage() {
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs text-indigo-400 flex-shrink-0">{lk.clinic_code}</span>
                         <span className="text-sm text-text-primary">{lk.clinic_name}</span>
+                        {isAdministrator && lk.created_by && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 font-medium">{lk.created_by}</span>
+                        )}
                       </div>
                       <span className="text-xs text-text-tertiary tabular-nums">
                         {format(new Date(lk.created_at), 'HH:mm')}
@@ -515,6 +549,9 @@ export default function MyLogPage() {
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="font-mono text-xs text-accent flex-shrink-0">{js.js_number}</span>
                           <span className="text-sm text-text-primary truncate">{js.clinic_name}</span>
+                          {isAdministrator && js.created_by && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-400 font-medium flex-shrink-0">{js.created_by}</span>
+                          )}
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${sc.bg} ${sc.text}`}>

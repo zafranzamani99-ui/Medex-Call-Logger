@@ -6,7 +6,7 @@ import Button from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/Toast'
 import type { UserRole } from '@/lib/types'
-import { toProperCase } from '@/lib/constants'
+import { toProperCase, isAdminOrAbove } from '@/lib/constants'
 import HolidaysSection from '@/components/settings/HolidaysSection'
 import KBMaintenanceSection from '@/components/settings/KBMaintenanceSection'
 
@@ -418,7 +418,7 @@ export default function SettingsPage() {
                 )}
               </div>
               <div className="shrink-0 flex items-center gap-2">
-                {userRole === 'admin' && member.id !== userId ? (
+                {isAdminOrAbove(userRole) && member.id !== userId ? (
                   <>
                     <select
                       value={member.role}
@@ -427,6 +427,7 @@ export default function SettingsPage() {
                       className="text-[12px] px-2 py-1 rounded-md border border-border bg-surface-inset text-text-primary
                                  focus:outline-none focus:ring-1 focus:ring-accent cursor-pointer disabled:opacity-50"
                     >
+                      {userRole === 'administrator' && <option value="administrator">Administrator</option>}
                       <option value="admin">Admin</option>
                       <option value="support">Support</option>
                     </select>
@@ -445,11 +446,13 @@ export default function SettingsPage() {
                   </>
                 ) : (
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium ${
-                    member.role === 'admin'
-                      ? 'bg-indigo-500/15 text-indigo-400'
-                      : 'bg-slate-500/15 text-slate-400'
+                    member.role === 'administrator'
+                      ? 'bg-amber-500/15 text-amber-400'
+                      : member.role === 'admin'
+                        ? 'bg-indigo-500/15 text-indigo-400'
+                        : 'bg-slate-500/15 text-slate-400'
                   }`}>
-                    {member.role === 'admin' ? 'Admin' : 'Support'}
+                    {member.role === 'administrator' ? 'Administrator' : member.role === 'admin' ? 'Admin' : 'Support'}
                   </span>
                 )}
               </div>
@@ -461,11 +464,11 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Public Holidays — admin only */}
-      {userRole === 'admin' && <HolidaysSection />}
+      {/* Public Holidays — admin/administrator only */}
+      {isAdminOrAbove(userRole) && <HolidaysSection />}
 
-      {/* KB Maintenance — admin only */}
-      {userRole === 'admin' && <KBMaintenanceSection />}
+      {/* KB Maintenance — admin/administrator only */}
+      {isAdminOrAbove(userRole) && <KBMaintenanceSection />}
 
       {/* Feedback */}
       <div className="bg-surface border border-border rounded-lg p-4 mt-4">

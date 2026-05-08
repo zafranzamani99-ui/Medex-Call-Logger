@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Resource, ResourceCategory, UserRole } from '@/lib/types'
-import { RESOURCE_CATEGORIES, getResourceCategoryColor, toProperCase } from '@/lib/constants'
+import { RESOURCE_CATEGORIES, getResourceCategoryColor, toProperCase, isAdminOrAbove } from '@/lib/constants'
 import { ResourcesSkeleton } from '@/components/Skeleton'
 import { ModalDialog } from '@/components/Modal'
 import Button from '@/components/ui/Button'
@@ -185,7 +185,7 @@ export default function ResourcesPage() {
     setTimeout(() => setCopied(null), 2000)
   }
 
-  const isAdmin = userRole === 'admin'
+  const isAdmin = isAdminOrAbove(userRole)
 
   const inputClasses = `w-full px-3 py-2.5 bg-surface-inset border border-border rounded-lg text-text-primary text-[13px]
     placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-[var(--ring)]

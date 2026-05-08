@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format, isToday, isYesterday, formatDistanceToNow } from 'date-fns'
 import type { Ticket, TicketStatus, RecordType, Channel } from '@/lib/types'
-import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor, toProperCase, CHANNEL_COLORS } from '@/lib/constants'
+import { STATUSES, ISSUE_TYPES, STATUS_COLORS, getIssueTypeColor, RECORD_TYPE_COLORS, getDurationLabel, ISSUE_CATEGORIES, getIssueCategoryColor, toProperCase, CHANNEL_COLORS, formatRM } from '@/lib/constants'
 import { isStale } from '@/lib/staleDetection'
 import StatusBadge from '@/components/StatusBadge'
 import RecordTypeBadge from '@/components/RecordTypeBadge'
@@ -23,7 +23,7 @@ import { HorizontalDndProvider, SortableHeader, reorderColumns, PlainResizeProvi
 
 const PAGE_SIZE = 25
 
-type SortKey = 'created_at' | 'updated_at' | 'clinic_name' | 'issue_type' | 'status' | 'created_by_name'
+type SortKey = 'created_at' | 'updated_at' | 'clinic_name' | 'issue_type' | 'status' | 'created_by_name' | 'amount_hutang'
 type SortDir = 'asc' | 'desc'
 
 export default function HistoryPage() {
@@ -87,6 +87,11 @@ export default function HistoryPage() {
         if (f.sortKey) setSortKey(f.sortKey)
         if (f.sortDir) setSortDir(f.sortDir)
         if (f.page) setPage(f.page)
+        if (f.colClinic?.length) setColClinic(new Set(f.colClinic))
+        if (f.colType?.length) setColType(new Set(f.colType))
+        if (f.colStatus?.length) setColStatus(new Set(f.colStatus))
+        if (f.colStaff?.length) setColStaff(new Set(f.colStaff))
+        if (f.colJira?.length) setColJira(new Set(f.colJira))
       }
     } catch { /* ignore */ }
 
@@ -107,10 +112,15 @@ export default function HistoryPage() {
       search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter,
       loggedByFilter, recordTypeFilter, flaggedOnly, staleOnly,
       sortKey, sortDir, page,
+      colClinic: Array.from(colClinic),
+      colType: Array.from(colType),
+      colStatus: Array.from(colStatus),
+      colStaff: Array.from(colStaff),
+      colJira: Array.from(colJira),
     }))
   }, [search, dateFrom, dateTo, statusFilter, issueTypeFilter, issueCategoryFilter,
       loggedByFilter, recordTypeFilter, flaggedOnly, staleOnly,
-      sortKey, sortDir, page])
+      sortKey, sortDir, page, colClinic, colType, colStatus, colStaff, colJira])
 
   // Save filters whenever they change
   useEffect(() => { saveFilters() }, [saveFilters])
@@ -136,15 +146,15 @@ export default function HistoryPage() {
   // ─── Column resize / visibility / order (persisted to localStorage) ───
   const STORAGE_KEY = 'history-col-widths-v2'
   const VIS_KEY = 'history-col-visibility'
-  const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'jira', 'next', 'staff', 'actions'] as const
+  const COL_KEYS = ['ref', 'phone', 'clinic', 'issue', 'type', 'status', 'outstanding', 'jira', 'next', 'staff', 'actions'] as const
   const COL_LABELS: Record<string, string> = {
     ref: 'Ref / Date', phone: 'Phone', clinic: 'Clinic', issue: 'Details',
-    type: 'Type', status: 'Status', jira: 'Jira', next: 'Latest Activity',
+    type: 'Type', status: 'Status', outstanding: 'Outstanding', jira: 'Jira', next: 'Latest Activity',
     staff: 'Staff', actions: 'Actions',
   }
   const ALWAYS_VISIBLE = new Set(['ref', 'actions'])
   const DEFAULT_WIDTHS: Record<string, number> = {
-    ref: 155, phone: 120, clinic: 200, issue: 320, type: 105, status: 150, jira: 90, next: 150, staff: 80, actions: 50,
+    ref: 155, phone: 120, clinic: 200, issue: 320, type: 105, status: 150, outstanding: 100, jira: 90, next: 150, staff: 80, actions: 50,
   }
   const [colVisibility, setColVisibility] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') return Object.fromEntries(COL_KEYS.map(k => [k, true]))
@@ -322,6 +332,9 @@ export default function HistoryPage() {
         case 'created_by_name':
           cmp = a.created_by_name.localeCompare(b.created_by_name)
           break
+        case 'amount_hutang':
+          cmp = (a.amount_hutang || 0) - (b.amount_hutang || 0)
+          break
       }
       return sortDir === 'asc' ? cmp : -cmp
     })
@@ -412,6 +425,7 @@ export default function HistoryPage() {
       } },
       type:  { header: 'Type',        value: (t) => `${t.record_type === 'ticket' ? 'Ticket' : 'Call Log'} — ${t.issue_type}` },
       status:{ header: 'Status',      value: (t) => `${t.status}${t.need_team_check ? ' (Needs Attention)' : ''}` },
+      outstanding: { header: 'Outstanding', value: (t) => (t.amount_hutang || 0) > 0 ? formatRM(t.amount_hutang || 0) : '' },
       jira:  { header: 'Jira',        value: (t) => t.jira_link || '' },
       next:  { header: 'Latest Activity', value: (t) => {
         if (!t.last_timeline_at) return ''
@@ -464,6 +478,7 @@ export default function HistoryPage() {
   const clearAllFilters = () => {
     setStatusFilter([]); setIssueTypeFilter([]); setIssueCategoryFilter([]); setDateFrom(''); setDateTo('')
     setLoggedByFilter(''); setFlaggedOnly(false); setStaleOnly(false)
+    setColClinic(new Set()); setColType(new Set()); setColStatus(new Set()); setColStaff(new Set()); setColJira(new Set())
   }
 
   // Pagination range
@@ -889,6 +904,14 @@ export default function HistoryPage() {
                       {resizeHandle}
                     </SortableHeader>
                   )
+                  if (k === 'outstanding') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      <span className="inline-flex items-center gap-1 cursor-pointer hover:text-text-primary transition-colors" onClick={() => handleSort('amount_hutang')} onPointerDown={(e) => e.stopPropagation()}>
+                        Outstanding <SortIcon column="amount_hutang" />
+                      </span>
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
                   if (k === 'jira') return (
                     <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
                       <span>Jira</span>
@@ -1025,6 +1048,15 @@ export default function HistoryPage() {
                                 </span>
                               )}
                             </div>
+                          </td>
+                        )
+                        if (k === 'outstanding') return (
+                          <td key={k} className="px-4 py-3 align-top">
+                            {(ticket.amount_hutang || 0) > 0 ? (
+                              <span className="text-xs font-semibold text-orange-400">{formatRM(ticket.amount_hutang || 0)}</span>
+                            ) : (
+                              <span className="text-xs text-text-muted">-</span>
+                            )}
                           </td>
                         )
                         if (k === 'jira') return (

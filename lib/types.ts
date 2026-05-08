@@ -1,7 +1,12 @@
 // WHY: Central type definitions mirroring the Supabase database schema.
 // All components import from here — single source of truth prevents mismatches.
 
-export type UserRole = 'admin' | 'support'
+export type UserRole = 'administrator' | 'admin' | 'support'
+
+export interface InvoiceItem {
+  invoice_number: string
+  amount: number
+}
 
 export interface Profile {
   id: string
@@ -172,6 +177,8 @@ export interface Ticket {
   issue_type: IssueType
   issue: string
   my_response: string | null
+  invoice_number: string | null
+  description: string | null
   next_step: string | null
   next_step_pic: string | null
   next_step_contact: string | null
@@ -205,6 +212,10 @@ export interface Ticket {
   last_timeline_channel: string | null
   last_timeline_notes: string | null
   last_timeline_by_name: string | null
+
+  // Outstanding payment — invoices array + running balance
+  invoices: InvoiceItem[]
+  amount_hutang: number | null
 
   // Attachments
   attachment_urls: string[]
@@ -240,6 +251,7 @@ export interface TimelineEntry {
   status_from?: string | null
   status_to?: string | null
   jira_link?: string | null
+  amount_collected?: number | null
   created_at: string
 }
 
@@ -321,6 +333,7 @@ export interface DashboardStats {
   needsAttention: number
   stale: number
   resolvedToday: number
+  outstandingAmount: number
 }
 
 // For the new ticket form submission

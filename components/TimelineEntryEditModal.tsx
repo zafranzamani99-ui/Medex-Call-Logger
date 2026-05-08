@@ -7,7 +7,7 @@ import Button from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import { createClient } from '@/lib/supabase/client'
 import type { TimelineEntry, Channel } from '@/lib/types'
-import { CHANNEL_COLORS } from '@/lib/constants'
+import { CHANNEL_COLORS, formatRM } from '@/lib/constants'
 
 // WHY: The Add Update form collects ~6 fields per follow-up. Today the inline
 // edit only shows the notes textarea, so the response addition, customer/
@@ -28,9 +28,11 @@ interface TimelineEntryEditModalProps {
   onClose: () => void
   entry: TimelineEntry | null
   onSaved: () => void
+  ticketId?: string
+  currentAmountHutang?: number
 }
 
-export default function TimelineEntryEditModal({ open, onClose, entry, onSaved }: TimelineEntryEditModalProps) {
+export default function TimelineEntryEditModal({ open, onClose, entry, onSaved, ticketId, currentAmountHutang }: TimelineEntryEditModalProps) {
   const supabase = createClient()
   const { toast } = useToast()
   const [entryDate, setEntryDate] = useState('')
@@ -40,6 +42,7 @@ export default function TimelineEntryEditModal({ open, onClose, entry, onSaved }
   const [customerTimeline, setCustomerTimeline] = useState('')
   const [internalTimeline, setInternalTimeline] = useState('')
   const [jiraLink, setJiraLink] = useState('')
+  const [amountCollected, setAmountCollected] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -51,6 +54,7 @@ export default function TimelineEntryEditModal({ open, onClose, entry, onSaved }
       setCustomerTimeline(entry.customer_timeline_update || '')
       setInternalTimeline(entry.internal_timeline_update || '')
       setJiraLink(entry.jira_link || '')
+      setAmountCollected(entry.amount_collected ? String(entry.amount_collected) : '')
     }
   }, [open, entry])
 
@@ -62,6 +66,8 @@ export default function TimelineEntryEditModal({ open, onClose, entry, onSaved }
       toast('Notes cannot be empty', 'error')
       return
     }
+    const newCollected = parseFloat(amountCollected) || 0
+    const oldCollected = entry.amount_collected || 0
     setSaving(true)
     const { error } = await supabase
       .from('timeline_entries')
@@ -73,13 +79,21 @@ export default function TimelineEntryEditModal({ open, onClose, entry, onSaved }
         customer_timeline_update: customerTimeline.trim() || null,
         internal_timeline_update: internalTimeline.trim() || null,
         jira_link: jiraLink.trim() || null,
+        amount_collected: newCollected > 0 ? newCollected : null,
       })
       .eq('id', entry.id)
-    setSaving(false)
     if (error) {
+      setSaving(false)
       toast('Failed to update entry: ' + error.message, 'error')
       return
     }
+    if (newCollected !== oldCollected && ticketId && currentAmountHutang !== undefined) {
+      const diff = oldCollected - newCollected
+      await supabase.from('tickets').update({
+        amount_hutang: Math.max(0, currentAmountHutang + diff),
+      }).eq('id', ticketId)
+    }
+    setSaving(false)
     toast('Entry updated', 'success')
     onSaved()
     onClose()
@@ -170,6 +184,29 @@ export default function TimelineEntryEditModal({ open, onClose, entry, onSaved }
             placeholder="https://medex.atlassian.net/browse/..."
           />
         </div>
+
+        {(entry.amount_collected || parseFloat(amountCollected) > 0 || (currentAmountHutang || 0) > 0) && (
+          <div>
+            <Label>Amount Collected (RM)</Label>
+            <div className="relative mt-1">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-muted font-medium">RM</span>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={amountCollected}
+                onChange={(e) => setAmountCollected(e.target.value)}
+                placeholder="0.00"
+                className="pl-12"
+              />
+            </div>
+            {currentAmountHutang !== undefined && (
+              <p className="text-[11px] text-text-muted mt-1">
+                Ticket balance: {formatRM(currentAmountHutang)}
+              </p>
+            )}
+          </div>
+        )}
 
         {showStatusBlock && (
           <div className="rounded-lg bg-surface-inset border border-border px-3 py-2">

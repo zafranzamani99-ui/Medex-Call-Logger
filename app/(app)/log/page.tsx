@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic, OpenTicketWarning, IssueType, TicketStatus, Channel, KnowledgeBaseEntry, UserRole } from '@/lib/types'
-import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor, ISSUE_TYPES, toProperCase, ADMIN_PRIORITY_CATEGORIES } from '@/lib/constants'
+import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor, ISSUE_TYPES, toProperCase, ADMIN_PRIORITY_CATEGORIES, ADMIN_ONLY_CATEGORIES, isAdminOrAbove, ADMIN_CUSTOMER_STATUS_TYPES } from '@/lib/constants'
 import ClinicSearch from '@/components/ClinicSearch'
 import OpenTicketBanner from '@/components/OpenTicketBanner'
 import TimelineBuilder from '@/components/TimelineBuilder'
@@ -44,6 +44,8 @@ interface CallLogDraft {
   status: TicketStatus | null
   jiraLink: string
   adminMessage: string
+  invoices: { invoice_number: string; amount: string }[]
+  description: string
   callDate?: string
 }
 
@@ -82,6 +84,8 @@ export default function LogCallPage() {
   const [status, setStatus] = useState<TicketStatus | null>('Resolved')
   const [jiraLink, setJiraLink] = useState('')
   const [adminMessage, setAdminMessage] = useState('')
+  const [invoices, setInvoices] = useState<{ invoice_number: string; amount: string }[]>([])
+  const [description, setDescription] = useState('')
   const [attachments, setAttachments] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null)
@@ -244,6 +248,8 @@ export default function LogCallPage() {
       setStatus(draft.status)
       setJiraLink(draft.jiraLink)
       setAdminMessage(draft.adminMessage || '')
+      setInvoices(draft.invoices || [])
+      setDescription(draft.description || '')
       if (draft.callDate) setCallDate(draft.callDate)
       toast('Form restored')
     }
@@ -267,10 +273,10 @@ export default function LogCallPage() {
       selectedClinic, callerTel, pic, clinicWa,
       callDuration, issueCategory, issueType, issue, myResponse,
       nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline,
-      needTeamCheck, status, jiraLink, adminMessage, callDate,
+      needTeamCheck, status, jiraLink, adminMessage, invoices, description, callDate,
     }
   }, [selectedClinic, callerTel, pic, clinicWa, callDuration, issueCategory, issueType, issue,
-      myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink, adminMessage, callDate])
+      myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink, adminMessage, invoices, description, callDate])
 
   useEffect(() => {
     if (autoSaveRef.current) clearTimeout(autoSaveRef.current)
@@ -353,10 +359,13 @@ export default function LogCallPage() {
   // WHY: Admin (clerk) uses AR & MTN categories most — put them first.
   // Support agents see them at the end (normal order).
   const orderedCategories = useMemo(() => {
-    if (userRole !== 'admin') return ISSUE_CATEGORIES
-    const priority = ADMIN_PRIORITY_CATEGORIES
-    const rest = ISSUE_CATEGORIES.filter(c => !priority.includes(c))
-    return [...priority, ...rest]
+    if (userRole === 'admin') return ADMIN_ONLY_CATEGORIES
+    if (userRole === 'administrator') {
+      const priority = ADMIN_PRIORITY_CATEGORIES
+      const rest = ISSUE_CATEGORIES.filter(c => !priority.includes(c))
+      return [...priority, ...rest]
+    }
+    return ISSUE_CATEGORIES
   }, [userRole])
 
   const uploadFile = useCallback(async (file: File) => {
@@ -417,11 +426,12 @@ export default function LogCallPage() {
     setError('')
     const errors: Record<string, boolean> = {}
 
+    const isAdmin = isAdminOrAbove(userRole)
     if (!selectedClinic && !pic) errors.clinic = true
     if (!issueCategory) errors.issueCategory = true
     if (!issueType) errors.issueType = true
-    if (!issue.trim()) errors.issue = true
-    if (!myResponse.trim()) errors.myResponse = true
+    if (!isAdmin && !issue.trim()) errors.issue = true
+    if (!isAdmin && !myResponse.trim()) errors.myResponse = true
     if (!callDuration) errors.duration = true
     if (!status) errors.status = true
     if (status === 'Escalated to Admin' && !adminMessage.trim()) errors.adminMessage = true
@@ -486,8 +496,10 @@ export default function LogCallPage() {
       call_duration: callDuration,
       issue_category: issueCategory,
       issue_type: issueType,
-      issue: issue.trim(),
+      issue: issue.trim() || null,
       my_response: myResponse.trim() || null,
+      invoices: invoices.filter(inv => inv.invoice_number.trim()).map(inv => ({ invoice_number: inv.invoice_number.trim(), amount: parseFloat(inv.amount) || 0 })),
+      description: description.trim() || null,
       next_step: nextStep.trim() || null,
       next_step_pic: nextStepPic.trim() || null,
       next_step_contact: nextStepContact.trim() || null,
@@ -498,6 +510,7 @@ export default function LogCallPage() {
       need_team_check: status === 'Resolved' ? false : needTeamCheck,
       jira_link: status === 'Escalated' ? (jiraLink.trim() || null) : null,
       admin_message: status === 'Escalated to Admin' ? adminMessage.trim() : null,
+      amount_hutang: invoices.reduce((sum, inv) => sum + (parseFloat(inv.amount) || 0), 0),
       attachment_urls: attachments.length > 0 ? attachments : [],
       created_at: createdAt,
       created_by: userId,
@@ -589,7 +602,7 @@ export default function LogCallPage() {
   }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, adminMessage, callerTel, callDuration,
       myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck,
       timelineData, userId, userName, router, supabase, activeDraftId,
-      scheduleDate, scheduleTime, scheduleType, customScheduleType, attachments, callDate])
+      scheduleDate, scheduleTime, scheduleType, customScheduleType, attachments, callDate, invoices, description, userRole])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -625,6 +638,8 @@ export default function LogCallPage() {
     setStatus('Resolved')
     setJiraLink('')
     setAdminMessage('')
+    setInvoices([])
+    setDescription('')
     setAttachments([])
     setScheduleDate('')
     setScheduleTime('')
@@ -662,6 +677,8 @@ export default function LogCallPage() {
     setStatus('Resolved')
     setJiraLink('')
     setAdminMessage('')
+    setInvoices([])
+    setDescription('')
     setAttachments([])
     setScheduleDate('')
     setScheduleTime('')
@@ -689,7 +706,7 @@ export default function LogCallPage() {
       selectedClinic, callerTel, pic, clinicWa, callDuration,
       issueCategory, issueType, issue, myResponse, nextStep, nextStepPic, nextStepContact,
       timelineFromCustomer, internalTimeline, needTeamCheck,
-      status, jiraLink, adminMessage, callDate,
+      status, jiraLink, adminMessage, invoices, description, callDate,
     }
 
     // If a draft was loaded, update that row instead of creating a duplicate.
@@ -752,6 +769,8 @@ export default function LogCallPage() {
     setStatus(draft.status)
     setJiraLink(draft.jiraLink)
     setAdminMessage(draft.adminMessage || '')
+    setInvoices(draft.invoices || [])
+    setDescription(draft.description || '')
     if (draft.callDate) setCallDate(draft.callDate)
     setActiveDraftId(draftId)
     setError('')
@@ -1044,18 +1063,129 @@ export default function LogCallPage() {
               />
             </div>
 
+            {/* Customer Status — admin-only pills (Active / Expired Customer) */}
+            {isAdminOrAbove(userRole) && (
+              <div>
+                <label className="block text-sm text-text-secondary mb-1">Customer Status</label>
+                <div className="flex gap-2">
+                  {ADMIN_CUSTOMER_STATUS_TYPES.map((t) => {
+                    const isActive = issueType === t
+                    const color = t === 'Active Customer'
+                      ? { bg: 'bg-green-500/20', text: 'text-green-400' }
+                      : { bg: 'bg-red-400/20', text: 'text-red-300' }
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => {
+                          setIssueType(isActive ? null : t)
+                          setFieldErrors(prev => ({ ...prev, issueType: false }))
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
+                          isActive
+                            ? `${color.bg} ${color.text} border-current/30`
+                            : 'bg-surface-inset border-border text-text-secondary hover:text-text-primary'
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Issue Type */}
             <div ref={issueTypeRef} className={fieldErrors.issueType ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
               <IssueTypeSelect
-                value={issueType}
+                value={issueType && !ADMIN_CUSTOMER_STATUS_TYPES.includes(issueType) ? issueType : null}
                 onChange={(v) => {
                   setIssueType(v)
                   setFieldErrors(prev => ({ ...prev, issueType: false }))
                 }}
-                required
+                required={!issueType}
                 userRole={userRole}
+                hideTypes={isAdminOrAbove(userRole) ? ADMIN_CUSTOMER_STATUS_TYPES : undefined}
               />
             </div>
+
+            {/* Invoices + Description — admin only */}
+            {isAdminOrAbove(userRole) && (
+              <>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <Label>Invoices</Label>
+                    <button
+                      type="button"
+                      onClick={() => setInvoices(prev => [...prev, { invoice_number: '', amount: '' }])}
+                      className="text-xs text-accent hover:text-accent-hover transition-colors font-medium"
+                    >
+                      + Add Invoice
+                    </button>
+                  </div>
+                  {invoices.length === 0 ? (
+                    <p className="text-xs text-text-muted">No invoices added. Click &quot;+ Add Invoice&quot; to start.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {invoices.map((inv, idx) => (
+                        <div key={idx} className="flex items-center gap-2">
+                          <Input
+                            type="text"
+                            value={inv.invoice_number}
+                            onChange={(e) => {
+                              const updated = [...invoices]
+                              updated[idx] = { ...updated[idx], invoice_number: e.target.value }
+                              setInvoices(updated)
+                            }}
+                            placeholder="INV-2026-001"
+                            className="flex-1"
+                          />
+                          <div className="relative w-36">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-text-muted font-medium">RM</span>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={inv.amount}
+                              onChange={(e) => {
+                                const updated = [...invoices]
+                                updated[idx] = { ...updated[idx], amount: e.target.value }
+                                setInvoices(updated)
+                              }}
+                              placeholder="0.00"
+                              className="pl-12"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setInvoices(prev => prev.filter((_, i) => i !== idx))}
+                            className="text-red-400 hover:text-red-300 transition-colors p-1"
+                          >
+                            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                      {invoices.some(inv => parseFloat(inv.amount) > 0) && (
+                        <div className="text-sm font-medium text-orange-400 pt-1">
+                          Total Outstanding: RM {invoices.reduce((sum, inv) => sum + (parseFloat(inv.amount) || 0), 0).toLocaleString('en-MY', { minimumFractionDigits: 2 })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Label>Description</Label>
+                  <Textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    rows={2}
+                    placeholder="Brief description of the payment or task..."
+                  />
+                </div>
+              </>
+            )}
 
             {/* Schedule fields */}
             {issueType === 'Schedule' && (
@@ -1144,9 +1274,9 @@ export default function LogCallPage() {
               </div>
             )}
 
-            {/* Issue — required */}
+            {/* Issue */}
             <div ref={issueRef}>
-              <Label required>Issue</Label>
+              <Label required={!isAdminOrAbove(userRole)}>Issue</Label>
               <Textarea
                 value={issue}
                 onChange={(e) => {
@@ -1221,7 +1351,7 @@ export default function LogCallPage() {
 
             {/* My Response */}
             <div ref={myResponseRef} className={fieldErrors.myResponse ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
-              <Label required>My Response</Label>
+              <Label required={!isAdminOrAbove(userRole)}>My Response</Label>
               <Textarea
                 ref={responseRef}
                 value={myResponse}
@@ -1240,6 +1370,7 @@ export default function LogCallPage() {
                 error={fieldErrors.myResponse}
               />
             </div>
+
           </div>
 
           {/* ─── ZONE 3: Logistics + Resolution (elevated) ─── */}

@@ -7,6 +7,8 @@ import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import NewClinicModal from '@/components/crm/NewClinicModal'
 import ReportsView from '@/components/reports/ReportsView'
 import Button from '@/components/ui/Button'
+import { isAdminOrAbove } from '@/lib/constants'
+import type { UserRole } from '@/lib/types'
 
 type MainTab = 'clinics' | 'reports'
 
@@ -54,7 +56,7 @@ export default function CrmPage() {
       .select('role')
       .eq('id', session.user.id)
       .single()
-    setIsAdmin(profile?.role === 'admin')
+    setIsAdmin(isAdminOrAbove((profile?.role || 'support') as UserRole))
   }
 
   return (

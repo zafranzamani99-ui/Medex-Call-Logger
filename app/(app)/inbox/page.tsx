@@ -141,7 +141,7 @@ export default function InboxPage() {
     }
   }, [chatReplies, chatOpenFor])
 
-  const roleLabel = userRole === 'admin' ? 'Admin' : 'Support'
+  const roleLabel = userRole === 'administrator' ? 'Administrator' : userRole === 'admin' ? 'Admin' : 'Support'
   const nameWithRole = `${toProperCase(userName)} (${roleLabel})`
 
   const openChat = async (msgId: string) => {

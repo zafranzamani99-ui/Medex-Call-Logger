@@ -2,6 +2,8 @@
 
 import { useState } from 'react'
 import { format } from 'date-fns'
+import type { InvoiceItem } from '@/lib/types'
+import { formatRM } from '@/lib/constants'
 
 // WHY: WhatsApp Draft Generator — spec Section 11.
 // Builds the formatted WA message from ticket data and provides one-tap copy.
@@ -20,6 +22,8 @@ interface WADraftModalProps {
     my_response?: string | null
     next_step?: string | null
     status: string
+    amount_hutang?: number | null
+    invoices?: InvoiceItem[]
   }
   agentName: string
   onClose: () => void
@@ -69,8 +73,9 @@ export default function WADraftModal({ ticket, agentName, onClose, scheduleData 
 
 ✅  Action  :
 ${ticket.my_response || '-'}
-
-➡️  Next    : ${ticket.next_step || '-'}
+${(ticket.amount_hutang || 0) > 0 ? `
+💰  Outstanding : ${formatRM(ticket.amount_hutang || 0)}${ticket.invoices && ticket.invoices.length > 0 ? '\n' + ticket.invoices.map(inv => `    • ${inv.invoice_number}: ${formatRM(inv.amount)}`).join('\n') : ''}
+` : ''}➡️  Next    : ${ticket.next_step || '-'}
 📋  Status  : ${ticket.status}
 
 — ${agentName} · Medex Support`
