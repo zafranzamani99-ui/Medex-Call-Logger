@@ -335,7 +335,8 @@ export default function DashboardPage() {
                   const elapsedSec = s.started_at
                     ? Math.max(0, Math.round((Date.now() - new Date(s.started_at).getTime()) / 1000))
                     : 0
-                  const initial = s.agent_name?.charAt(0)?.toUpperCase() || '?'
+                  const workerName = s.pic_support || s.agent_name
+                  const initial = workerName?.charAt(0)?.toUpperCase() || '?'
                   return (
                     <button
                       key={s.id}
@@ -347,7 +348,7 @@ export default function DashboardPage() {
                       </div>
                       <div className="text-left">
                         <div className="text-[13px] text-text-primary font-medium group-hover:text-amber-300 transition-colors">
-                          {toProperCase(s.agent_name)} <span className="text-text-muted font-normal">·</span> <span className="font-normal text-text-secondary">{s.schedule_type}</span> <span className="text-text-muted font-normal">@</span> <span className="font-normal text-text-secondary truncate">{s.clinic_name}</span>
+                          {toProperCase(workerName)} <span className="text-text-muted font-normal">·</span> <span className="font-normal text-text-secondary">{s.schedule_type}</span> <span className="text-text-muted font-normal">@</span> <span className="font-normal text-text-secondary truncate">{s.clinic_name}</span>
                         </div>
                         <div className="text-[11px] font-semibold text-amber-400 tabular-nums">{formatWorkDurationLive(elapsedSec)}</div>
                       </div>
