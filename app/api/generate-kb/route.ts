@@ -201,12 +201,22 @@ OUTPUT (JSON ONLY, no fences):
     const parts = geminiData.candidates?.[0]?.content?.parts || []
     const rawText = parts.filter((p: { text?: string }) => p.text).pop()?.text || ''
 
-    const jsonStr = rawText.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim()
+    // Strip markdown fences + extract JSON object even if surrounded by prose
+    let jsonStr = rawText.replace(/```(?:json)?\s*/gi, '').trim()
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/)
+    if (jsonMatch) jsonStr = jsonMatch[0]
+
     let parsed: { issue: string; fix: string }
     try {
       parsed = JSON.parse(jsonStr)
     } catch {
-      parsed = { issue: issue.slice(0, 80), fix: rawText.trim() }
+      // Last resort: extract issue/fix from raw text via regex
+      const issueMatch = rawText.match(/"issue"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+      const fixMatch = rawText.match(/"fix"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+      parsed = {
+        issue: issueMatch ? issueMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : issue.slice(0, 80),
+        fix: fixMatch ? fixMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : rawText.replace(/```(?:json)?/gi, '').replace(/[{}]/g, '').trim(),
+      }
     }
 
     // Embed the new article so future tickets can dedupe against it.
