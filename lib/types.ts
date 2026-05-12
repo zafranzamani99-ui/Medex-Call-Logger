@@ -585,6 +585,7 @@ export type ResourceCategory =
   | 'Tools & Utilities'
   | 'SQL Scripts'
   | 'Support Scripts'
+  | 'Batch Scripts'
 
 export interface Resource {
   id: string

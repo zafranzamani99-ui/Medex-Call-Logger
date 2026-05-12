@@ -45,6 +45,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setTheme(next)
     localStorage.setItem('medex-ws-theme', next)
     document.documentElement.setAttribute('data-theme', next)
+    const m = document.querySelector('meta[name="theme-color"]:not([media])')
+    if (m) m.setAttribute('content', next === 'light' ? '#f6f7fb' : '#0b0d14')
   }
 
   const toggleTheme = () => {

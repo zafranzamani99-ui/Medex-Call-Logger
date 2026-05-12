@@ -455,10 +455,69 @@ ${r('28', 'Email Password', emailPassword)}
     else toast('Copied & CRM updated', 'success')
   }
 
-  // Open in Outlook: build an RFC 822 .eml with To/Cc/Subject + HTML body and
-  // download it. Double-clicking the file opens Outlook in compose mode (X-Unsent: 1)
-  // with the formatted table already in the body — no copy/paste, no formatting loss.
+  // Open in Outlook via mailto: (To/Cc/Subject) + clipboard (HTML body).
+  // Outlook opens ready to send — user just presses Ctrl+V to paste the table.
   const handleOpenInOutlook = async () => {
+    if (recipients.length === 0) {
+      toast('Pick at least one recipient (To)', 'error')
+      return
+    }
+    const html = generateHTML()
+
+    // 1. Copy HTML body to clipboard
+    try {
+      const htmlBlob = new Blob([html], { type: 'text/html' })
+      const textBlob = new Blob([html], { type: 'text/plain' })
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': htmlBlob,
+          'text/plain': textBlob,
+        })
+      ])
+    } catch {
+      const container = document.createElement('div')
+      container.style.position = 'fixed'
+      container.style.left = '0'
+      container.style.top = '0'
+      container.style.background = '#fff'
+      container.style.opacity = '0.01'
+      container.innerHTML = html
+      document.body.appendChild(container)
+      const range = document.createRange()
+      range.selectNodeContents(container)
+      const sel = window.getSelection()
+      sel?.removeAllRanges()
+      sel?.addRange(range)
+      document.execCommand('copy')
+      sel?.removeAllRanges()
+      document.body.removeChild(container)
+    }
+
+    // 2. Build mailto: with To/Cc/Subject only (no body — HTML can't go in mailto)
+    const toEmails = recipients
+      .map(id => RECIPIENT_OPTIONS.find(o => o.id === id))
+      .filter((o): o is { id: string; name: string; email: string } => !!o)
+      .map(o => o.email)
+      .join(',')
+    const ccLine = ccList.trim()
+    const ccBracketMatches = ccLine.match(/<([^>]+)>/g)
+    const ccEmails = ccBracketMatches
+      ? ccBracketMatches.map(m => m.slice(1, -1)).join(',')
+      : ccLine
+
+    let mailto = `mailto:${toEmails}?subject=${encodeURIComponent(currentSubject)}`
+    if (ccEmails) mailto += `&cc=${encodeURIComponent(ccEmails)}`
+
+    // 3. Fire mailto: — opens Outlook compose with recipients + subject pre-filled
+    window.location.href = mailto
+
+    const err = await syncToCRM()
+    if (err) toast(`Outlook opened · CRM not updated: ${err}`, 'error')
+    else toast('Outlook opened — press Ctrl+V to paste the email body', 'success')
+  }
+
+  // Fallback: download .eml file for cases where mailto doesn't work
+  const handleDownloadEml = () => {
     if (recipients.length === 0) {
       toast('Pick at least one recipient (To)', 'error')
       return
@@ -475,7 +534,6 @@ ${r('28', 'Email Password', emailPassword)}
       `To: ${toLine}`,
       ...(ccLine ? [`Cc: ${ccLine}`] : []),
       `Subject: ${encodeMimeSubject(currentSubject)}`,
-      // X-Unsent tells Outlook to open this as a new draft, not an inbox item.
       `X-Unsent: 1`,
       `MIME-Version: 1.0`,
       `Content-Type: text/html; charset=utf-8`,
@@ -492,10 +550,6 @@ ${r('28', 'Email Password', emailPassword)}
     a.click()
     document.body.removeChild(a)
     setTimeout(() => URL.revokeObjectURL(url), 1000)
-
-    const err = await syncToCRM()
-    if (err) toast(`Email file ready · CRM not updated: ${err}`, 'error')
-    else toast('Email file downloaded — double-click to open in Outlook', 'success')
   }
 
   const inputClass = 'w-full px-2 py-1.5 bg-background border border-border rounded text-white text-xs focus:outline-none focus:ring-1 focus:ring-blue-500/50'
@@ -629,9 +683,9 @@ ${r('28', 'Email Password', emailPassword)}
                 </div>
               </div>
 
-              {/* License Key Information */}
-              <div>
-                <h4 className={sh}>License Key Information</h4>
+              {/* License Key — action fields (card) */}
+              <div className="bg-surface-raised border border-border rounded-lg p-3">
+                <h4 className={sh}>License Key</h4>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <div className={labelClass}>1. Program Type</div>
@@ -652,6 +706,29 @@ ${r('28', 'Email Password', emailPassword)}
                     <div className={labelClass}>3. MTN End Date</div>
                     <input value={mtnEnd} onChange={(e) => setMtnEnd(e.target.value)} className={inputClass} placeholder="D/M/YYYY" />
                   </div>
+                  <div>
+                    <div className={labelClass}>Registration No</div>
+                    <input value={registrationNo} onChange={(e) => setRegistrationNo(e.target.value)} className={inputClass} />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Start Date</div>
+                    <input value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Submission</div>
+                    <input value={submission} onChange={(e) => setSubmission(e.target.value)} className={inputClass} />
+                  </div>
+                  <div>
+                    <div className={labelClass}>Frequency (1 or 2 months)</div>
+                    <input value={frequency} onChange={(e) => setFrequency(e.target.value)} className={inputClass} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Clinic Details — flat, pre-filled from CRM */}
+              <div>
+                <h4 className={sh}>Clinic Details</h4>
+                <div className="grid grid-cols-2 gap-2">
                   <div className="col-span-2">
                     <div className={labelClass}>3. Clinic Name</div>
                     <input value={clinicName} onChange={(e) => setClinicName(e.target.value)} className={inputClass} />
@@ -672,26 +749,10 @@ ${r('28', 'Email Password', emailPassword)}
                     <div className={labelClass}>8. Tel: (TEL & FAX)</div>
                     <input value={tel} onChange={(e) => setTel(e.target.value)} className={inputClass} />
                   </div>
-                  <div>
-                    <div className={labelClass}>Registration No</div>
-                    <input value={registrationNo} onChange={(e) => setRegistrationNo(e.target.value)} className={inputClass} />
-                  </div>
-                  <div>
-                    <div className={labelClass}>Start Date</div>
-                    <input value={startDate} onChange={(e) => setStartDate(e.target.value)} className={inputClass} />
-                  </div>
-                  <div>
-                    <div className={labelClass}>Submission</div>
-                    <input value={submission} onChange={(e) => setSubmission(e.target.value)} className={inputClass} />
-                  </div>
-                  <div>
-                    <div className={labelClass}>Frequency (1 or 2 months)</div>
-                    <input value={frequency} onChange={(e) => setFrequency(e.target.value)} className={inputClass} />
-                  </div>
                 </div>
               </div>
 
-              {/* Additional Customer Information */}
+              {/* Additional Customer Information — flat */}
               <div>
                 <h4 className={sh}>Additional Customer Information (New Client only)</h4>
                 <div className="grid grid-cols-2 gap-2">
@@ -714,7 +775,7 @@ ${r('28', 'Email Password', emailPassword)}
                 </div>
               </div>
 
-              {/* Contact Information */}
+              {/* Contact Information — flat */}
               <div>
                 <h4 className={sh}>Contact Information</h4>
                 <div className="grid grid-cols-2 gap-2">
@@ -757,9 +818,9 @@ ${r('28', 'Email Password', emailPassword)}
                 </div>
               </div>
 
-              {/* System Environment */}
-              <div>
-                <h4 className={sh}>System Environment Information</h4>
+              {/* System Environment (card) */}
+              <div className="bg-surface-raised border border-border rounded-lg p-3">
+                <h4 className={sh}>System Environment</h4>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <div className={labelClass}>21. Environment (TEST / LIVE)</div>
@@ -786,9 +847,10 @@ ${r('28', 'Email Password', emailPassword)}
                 </div>
               </div>
 
-              {/* e-Invoice */}
-              <div>
-                <h4 className={sh}>e-Invoice Activation</h4>
+              {/* Activations (card) */}
+              <div className="bg-surface-raised border border-border rounded-lg p-3 space-y-3">
+                <h4 className={sh}>Activations</h4>
+                {/* e-Invoice */}
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <div className={labelClass}>e-Invoice (Yes / No)</div>
@@ -802,12 +864,8 @@ ${r('28', 'Email Password', emailPassword)}
                     <input value={eInvoicePort} onChange={(e) => setEInvoicePort(e.target.value)} className={inputClass} placeholder="e.g. 60001" />
                   </div>
                 </div>
-              </div>
-
-              {/* WhatsApp */}
-              <div>
-                <h4 className={sh}>WhatsApp Activation</h4>
-                <div className="grid grid-cols-2 gap-2">
+                {/* WhatsApp */}
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
                   <div>
                     <div className={labelClass}>WhatsApp API (Yes / No)</div>
                     <select value={waActive} onChange={(e) => setWaActive(e.target.value)} className={selectClass}>
@@ -824,12 +882,8 @@ ${r('28', 'Email Password', emailPassword)}
                     <input value={waApiKey} onChange={(e) => setWaApiKey(e.target.value)} className={inputClass} />
                   </div>
                 </div>
-              </div>
-
-              {/* Email */}
-              <div>
-                <h4 className={sh}>Email Activation</h4>
-                <div className="grid grid-cols-2 gap-2">
+                {/* Email */}
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
                   <div>
                     <div className={labelClass}>Email API (Yes / No)</div>
                     <select value={emailActive} onChange={(e) => setEmailActive(e.target.value)} className={selectClass}>
@@ -892,9 +946,17 @@ ${r('28', 'Email Password', emailPassword)}
             onClick={handleOpenInOutlook}
             disabled={recipients.length === 0}
             className="flex-1 py-2 rounded-lg text-sm font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white disabled:bg-zinc-700 disabled:text-zinc-400 disabled:cursor-not-allowed"
-            title="Download an .eml file — double-click to open Outlook with To, Cc, Subject and Body filled"
+            title="Opens Outlook with To/Cc/Subject filled — press Ctrl+V to paste the body"
           >
-            {recipients.length === 0 ? 'Pick a recipient above ↑' : 'Open in Outlook (.eml)'}
+            {recipients.length === 0 ? 'Pick a recipient above ↑' : 'Open in Outlook'}
+          </button>
+          <button
+            onClick={handleDownloadEml}
+            disabled={recipients.length === 0}
+            className="px-3 py-2 rounded-lg text-sm font-medium border border-border text-zinc-400 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Download .eml file as fallback — double-click to open in Outlook"
+          >
+            .eml
           </button>
         </div>
       </div>

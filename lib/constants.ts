@@ -297,6 +297,7 @@ export const RESOURCE_CATEGORIES = [
   'Tools & Utilities',
   'SQL Scripts',
   'Support Scripts',
+  'Batch Scripts',
 ] as const
 
 export const RESOURCE_CATEGORY_COLORS: Record<string, { bg: string; text: string }> = {
@@ -308,6 +309,7 @@ export const RESOURCE_CATEGORY_COLORS: Record<string, { bg: string; text: string
   'Tools & Utilities':  { bg: 'bg-rose-500/10',     text: 'text-rose-400' },
   'SQL Scripts':        { bg: 'bg-orange-500/10',   text: 'text-orange-400' },
   'Support Scripts':    { bg: 'bg-green-500/10',    text: 'text-green-400' },
+  'Batch Scripts':      { bg: 'bg-sky-500/10',      text: 'text-sky-400' },
 }
 
 export function getResourceCategoryColor(category: string) {

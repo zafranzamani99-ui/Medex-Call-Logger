@@ -23,6 +23,7 @@ export default function ResourcesPage() {
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
 
   // Form state
   const [formTitle, setFormTitle] = useState('')
@@ -208,14 +209,12 @@ export default function ResourcesPage() {
             <h1 className="text-xl font-bold text-text-primary">Resources</h1>
             <p className="text-[13px] text-text-tertiary mt-0.5">Central hub for team files and links</p>
           </div>
-          {isAdmin && (
-            <Button size="sm" onClick={openAddModal}>
-              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Resource
-            </Button>
-          )}
+          <Button size="sm" onClick={openAddModal}>
+            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Add Resource
+          </Button>
         </div>
 
         {/* Search */}
@@ -272,9 +271,7 @@ export default function ResourcesPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H2.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
             </svg>
             <p className="text-text-secondary font-medium">No resources yet</p>
-            <p className="text-[13px] text-text-muted mt-1">
-              {isAdmin ? 'Add your first resource to get started' : 'Resources will appear here once added by an admin'}
-            </p>
+            <p className="text-[13px] text-text-muted mt-1">Add your first resource to get started</p>
           </div>
         ) : (
           <div className="space-y-6">
@@ -363,13 +360,24 @@ export default function ResourcesPage() {
 
                         {/* Bottom row: meta + actions */}
                         <div className="flex items-center justify-between">
-                          <span className="text-[11px] text-text-muted">
-                            {r.updated_by_name
-                              ? `Updated by ${toProperCase(r.updated_by_name)}`
-                              : `Added by ${toProperCase(r.created_by_name)}`}
-                            {' · '}
-                            {new Date(r.updated_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </span>
+                          <div className="text-[11px] text-text-muted space-y-0.5">
+                            <div>
+                              Added by <span className="text-text-secondary">{toProperCase(r.created_by_name)}</span>
+                              {' · '}
+                              {new Date(r.created_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              {', '}
+                              {new Date(r.created_at).toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                            </div>
+                            {r.updated_by_name && r.updated_at !== r.created_at && (
+                              <div>
+                                Updated by <span className="text-text-secondary">{toProperCase(r.updated_by_name)}</span>
+                                {' · '}
+                                {new Date(r.updated_at).toLocaleDateString('en-MY', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {', '}
+                                {new Date(r.updated_at).toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                              </div>
+                            )}
+                          </div>
 
                           <div className="flex items-center gap-1">
                             {/* Copy link or SQL — hidden for Support Scripts (has inline Copy button) */}
@@ -389,8 +397,27 @@ export default function ResourcesPage() {
                               )}
                             </button>}
 
-                            {/* Open link — only for URL-based resources */}
-                            {r.url && (
+                            {/* Batch Scripts: download .bat | Others: open link */}
+                            {r.url && r.category === 'Batch Scripts' ? (
+                              <button
+                                onClick={async () => {
+                                  const res = await fetch(r.url!)
+                                  const blob = await res.blob()
+                                  const url = URL.createObjectURL(blob)
+                                  const a = document.createElement('a')
+                                  a.href = url
+                                  a.download = `${r.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.bat`
+                                  a.click()
+                                  URL.revokeObjectURL(url)
+                                }}
+                                className="p-1.5 rounded-md text-sky-400 hover:bg-sky-500/10 transition-all"
+                                title="Download .bat"
+                              >
+                                <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                </svg>
+                              </button>
+                            ) : r.url ? (
                               <a
                                 href={r.url}
                                 target="_blank"
@@ -402,9 +429,19 @@ export default function ResourcesPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                                 </svg>
                               </a>
-                            )}
+                            ) : null}
 
-                            {/* Admin actions */}
+                            {/* Edit — everyone */}
+                            <button
+                              onClick={() => openEditModal(r)}
+                              className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-inset transition-all opacity-0 group-hover:opacity-100"
+                              title="Edit"
+                            >
+                              <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                              </svg>
+                            </button>
+                            {/* Admin-only: pin + delete */}
                             {isAdmin && (
                               <>
                                 <button
@@ -418,15 +455,6 @@ export default function ResourcesPage() {
                                 >
                                   <svg className="size-3.5" fill={r.is_pinned ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
-                                  </svg>
-                                </button>
-                                <button
-                                  onClick={() => openEditModal(r)}
-                                  className="p-1.5 rounded-md text-text-muted hover:text-text-primary hover:bg-surface-inset transition-all opacity-0 group-hover:opacity-100"
-                                  title="Edit"
-                                >
-                                  <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
                                   </svg>
                                 </button>
                                 <button
@@ -496,12 +524,55 @@ export default function ResourcesPage() {
               </div>
             ) : (
               <div>
-                <label className="block text-[12px] font-medium text-text-tertiary mb-1.5">URL *</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[12px] font-medium text-text-tertiary">
+                    {formCategory === 'Batch Scripts' ? 'File or URL *' : 'URL *'}
+                  </label>
+                  {formCategory === 'Batch Scripts' && (
+                    <label className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors ${
+                      uploading
+                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/30 cursor-wait'
+                        : 'bg-sky-500/10 text-sky-400 border-sky-500/30 hover:bg-sky-500/20 cursor-pointer'
+                    }`}>
+                      <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      {uploading ? 'Uploading...' : 'Upload .bat'}
+                      <input
+                        type="file"
+                        accept=".bat,.cmd,.ps1,.sh,.txt"
+                        className="hidden"
+                        disabled={uploading}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          setUploading(true)
+                          try {
+                            const fd = new FormData()
+                            fd.append('file', file)
+                            const res = await fetch('/api/upload-resource', { method: 'POST', body: fd })
+                            const json = await res.json()
+                            if (res.ok && json.url) {
+                              setFormUrl(json.url)
+                              if (!formTitle.trim()) setFormTitle(file.name.replace(/\.(bat|cmd|ps1|sh|txt)$/i, ''))
+                            } else {
+                              alert(json.error || 'Upload failed')
+                            }
+                          } catch {
+                            alert('Upload failed')
+                          }
+                          setUploading(false)
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
                 <input
                   type="url"
                   value={formUrl}
                   onChange={(e) => setFormUrl(e.target.value)}
-                  placeholder="https://1drv.ms/..."
+                  placeholder={formCategory === 'Batch Scripts' ? 'Upload a file or paste a link...' : 'https://1drv.ms/...'}
                   className={inputClasses}
                 />
               </div>

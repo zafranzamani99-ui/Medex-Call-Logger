@@ -113,9 +113,9 @@ export default function LKPage() {
       </div>
 
       {/* Selected clinic info */}
-      {selectedClinic && (
+      {selectedClinic && !showModal && (
         <div className="space-y-3">
-          <div className="relative grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-surface-raised border border-border rounded-lg text-sm">
+          <div className="relative grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-surface-raised border border-border rounded-lg text-sm overflow-hidden">
             <button
               onClick={() => setSelectedClinic(null)}
               className="absolute -top-2 -right-2 size-6 rounded-full bg-zinc-700 hover:bg-zinc-600 text-text-tertiary hover:text-text-primary flex items-center justify-center transition-colors"
@@ -155,13 +155,13 @@ export default function LKPage() {
               <span className="text-text-tertiary text-xs">Location</span>
               <p className="text-text-primary">{[selectedClinic.city, selectedClinic.state].filter(Boolean).join(', ') || '-'}</p>
             </div>
-            <div>
+            <div className="min-w-0 overflow-hidden">
               <span className="text-text-tertiary text-xs">Server Name</span>
-              <p className="text-text-primary font-mono">{selectedClinic.main_pc_name || '-'}</p>
+              <p className="text-text-primary font-mono truncate">{selectedClinic.main_pc_name || '-'}</p>
             </div>
-            <div>
+            <div className="col-span-2 sm:col-span-1 min-w-0 overflow-hidden">
               <span className="text-text-tertiary text-xs">Device ID</span>
-              <p className="text-text-primary font-mono">{selectedClinic.device_id || '-'}</p>
+              <p className="text-text-primary font-mono text-[11px] break-all line-clamp-1" title={selectedClinic.device_id || ''}>{selectedClinic.device_id || '-'}</p>
             </div>
           </div>
 

@@ -36,11 +36,18 @@ export default function RootLayout({
   return (
     <html lang="en" data-theme="dark" suppressHydrationWarning className={`${ibmPlexSans.variable} ${jetbrainsMono.variable}`}>
       <head>
+        <meta name="theme-color" content="#0b0d14" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#f6f7fb" media="(prefers-color-scheme: light)" />
         <script dangerouslySetInnerHTML={{ __html: `
           try {
             let t = localStorage.getItem('medex-ws-theme');
             if (!t) { t = localStorage.getItem('medex-theme'); if (t) { localStorage.setItem('medex-ws-theme', t); localStorage.removeItem('medex-theme'); } }
-            if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+            if (t === 'light' || t === 'dark') {
+              document.documentElement.setAttribute('data-theme', t);
+              var m = document.querySelector('meta[name="theme-color"]:not([media])');
+              if (!m) { m = document.createElement('meta'); m.setAttribute('name','theme-color'); document.head.appendChild(m); }
+              m.setAttribute('content', t === 'light' ? '#f6f7fb' : '#0b0d14');
+            }
           } catch {}
         `}} />
       </head>

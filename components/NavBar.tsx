@@ -115,6 +115,12 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
       collapsed ? '60px' : '220px'
     )
   }, [collapsed])
+
+  const handleCollapse = () => {
+    document.documentElement.setAttribute('data-sidebar-animating', '')
+    setCollapsed(!collapsed)
+    setTimeout(() => document.documentElement.removeAttribute('data-sidebar-animating'), 220)
+  }
   const { theme: currentTheme, toggleTheme } = useTheme()
 
   const handleLogout = async () => {
@@ -172,7 +178,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
     <>
       {/* ===== Desktop Sidebar ===== */}
       <aside
-        className={`hidden md:flex flex-col fixed top-0 left-0 h-dvh z-40 transition-[width] duration-200 will-change-[width] bg-surface border-r border-border ${
+        className={`hidden md:flex flex-col fixed top-0 left-0 h-dvh z-40 bg-surface border-r border-border ${
           collapsed ? 'w-[60px]' : 'w-[220px]'
         }`}
       >
@@ -184,7 +190,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
             </Link>
           )}
           <button
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={handleCollapse}
             className="text-text-muted hover:text-text-secondary transition-colors p-1 rounded-md"
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
@@ -302,7 +308,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
       </aside>
 
       {/* ===== Mobile Top Bar ===== */}
-      <header className="md:hidden sticky top-0 z-40 safe-top bg-surface/85 backdrop-blur-xl border-b border-border">
+      <header className="md:hidden sticky top-0 z-40 bg-surface border-b border-border">
         <div className="flex items-center justify-between h-12 px-4">
           <Link href="/" className="flex items-center">
             <img src="/medexone-logo.png" alt="MedexOne" className="h-5 object-contain" />

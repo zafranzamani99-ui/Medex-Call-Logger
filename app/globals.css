@@ -82,9 +82,14 @@
 }
 
 /* Fonts — loaded via next/font in layout.tsx */
+html, body {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--background);
+}
 body {
   color: var(--foreground);
-  background: var(--background);
   font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 
@@ -344,6 +349,15 @@ input[type="date"]:hover, input[type="date"]:focus, input[type="date"]:active {
 [data-theme="light"] .bg-zinc-500\/10 { background-color: rgba(113, 113, 122, 0.12); }
 [data-theme="light"] .bg-teal-500\/10 { background-color: rgba(20, 184, 166, 0.12); }
 [data-theme="light"] .bg-amber-500\/10 { background-color: rgba(245, 158, 11, 0.12); }
+
+/* Sidebar collapse/expand transition — only active during animation to avoid
+   permanent compositor layers that cause subpixel artifacts at viewport edges */
+[data-sidebar-animating] aside {
+  transition: width 200ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+[data-sidebar-animating] main {
+  transition: padding-left 200ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
 
 /* Safe area insets */
 .safe-top { padding-top: env(safe-area-inset-top); }

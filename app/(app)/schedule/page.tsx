@@ -8,10 +8,10 @@ import {
   eachDayOfInterval, format, addMonths, subMonths,
   isSameMonth, isToday,
 } from 'date-fns'
-import type { Schedule, PublicHoliday, StaffLeave } from '@/lib/types'
+import type { Schedule, PublicHoliday, StaffLeave, Resource } from '@/lib/types'
 import MarkLeaveModal from '@/components/schedule/MarkLeaveModal'
 import MarkHolidayModal from '@/components/schedule/MarkHolidayModal'
-import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, formatWorkDuration, formatTimeDisplay, toProperCase } from '@/lib/constants'
+import { SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, RESOURCE_CATEGORIES, formatWorkDuration, formatTimeDisplay, toProperCase, getResourceCategoryColor } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 import { Input, Label, Textarea } from '@/components/ui/Input'
 import ClinicSearch from '@/components/ClinicSearch'
@@ -115,6 +115,15 @@ export default function SchedulePage() {
   const workNotesValueRef = useRef('')
   const [elapsedMinutes, setElapsedMinutes] = useState(0)
   const [existingJobSheetId, setExistingJobSheetId] = useState<string | null>(null)
+
+  // Resources panel (right slide-in, like CRM)
+  const [showResources, setShowResources] = useState(false)
+  const [wpResources, setWpResources] = useState<Resource[]>([])
+  const [wpResourcesLoaded, setWpResourcesLoaded] = useState(false)
+  const [resourceSearch, setResourceSearch] = useState('')
+  const [resourceFilter, setResourceFilter] = useState<string>('all')
+  const [resourceCopied, setResourceCopied] = useState<string | null>(null)
+  const resourcesPanelRef = useRef<HTMLDivElement>(null)
 
   // Clinic phone lookup (clinic_code → phone)
   const [clinicPhones, setClinicPhones] = useState<Record<string, string>>({})
@@ -694,6 +703,44 @@ export default function SchedulePage() {
       saveWorkNotes(workNotesValueRef.current)
     }
   }, [saveWorkNotes])
+
+  const loadResources = useCallback(async () => {
+    if (wpResourcesLoaded) return
+    const { data } = await supabase
+      .from('resources')
+      .select('*')
+      .order('is_pinned', { ascending: false })
+      .order('updated_at', { ascending: false })
+    if (data) setWpResources(data as Resource[])
+    setWpResourcesLoaded(true)
+  }, [wpResourcesLoaded, supabase])
+
+  const toggleResources = () => {
+    if (!showResources) loadResources()
+    setShowResources(!showResources)
+  }
+
+  const handleResourceCopy = async (text: string, id: string) => {
+    await navigator.clipboard.writeText(text)
+    setResourceCopied(id)
+    setTimeout(() => setResourceCopied(null), 2000)
+  }
+
+  const filteredResources = useMemo(() => {
+    let list = wpResources
+    if (resourceFilter === 'pinned') list = list.filter(r => r.is_pinned)
+    else if (resourceFilter !== 'all') list = list.filter(r => r.category === resourceFilter)
+    if (resourceSearch.trim()) {
+      const q = resourceSearch.toLowerCase()
+      list = list.filter(r =>
+        r.title.toLowerCase().includes(q) ||
+        r.description?.toLowerCase().includes(q) ||
+        r.content?.toLowerCase().includes(q) ||
+        r.tags.some(t => t.toLowerCase().includes(q))
+      )
+    }
+    return list
+  }, [wpResources, resourceSearch, resourceFilter])
 
   // Format phone for WhatsApp link (strip non-digits, add 60 if needed)
   const formatWALink = (phone: string) => {
@@ -1913,6 +1960,16 @@ export default function SchedulePage() {
                           </a>
                         )
                       })()}
+                      {/* Resources */}
+                      <button
+                        onClick={toggleResources}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors bg-rose-500/10 text-rose-400 border-rose-500/30 hover:bg-rose-500/20"
+                      >
+                        <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H2.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                        </svg>
+                        Resources
+                      </button>
                     </div>
 
                     {/* Live Notes */}
@@ -2457,6 +2514,200 @@ export default function SchedulePage() {
             refetch()
           }}
         />
+      )}
+
+      {/* Resources Panel — right slide-in, same pattern as CRM */}
+      {showResources && (
+        <div
+          ref={resourcesPanelRef}
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm"
+          onClick={e => { if (e.target === resourcesPanelRef.current) setShowResources(false) }}
+        >
+          <div className="absolute inset-y-0 right-0 w-full max-w-xl bg-surface border-l border-border shadow-theme-lg flex flex-col animate-fadeIn">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <svg className="size-4 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H2.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                </svg>
+                <h3 className="font-semibold text-text-primary text-sm">Resources</h3>
+                <span className="text-xs text-text-muted">{wpResources.length}</span>
+              </div>
+              <button
+                onClick={() => setShowResources(false)}
+                className="text-text-secondary hover:text-text-primary p-1 rounded-md hover:bg-surface-raised transition-colors"
+              >
+                <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Search */}
+            <div className="px-4 py-3 border-b border-border flex-shrink-0 space-y-2">
+              <div className="relative">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                </svg>
+                <input
+                  type="text"
+                  value={resourceSearch}
+                  onChange={(e) => setResourceSearch(e.target.value)}
+                  placeholder="Search scripts, links, SQL..."
+                  className="w-full pl-9 pr-3 py-2 bg-surface-inset border border-border rounded-lg text-text-primary text-[13px] placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-[var(--ring)] focus:border-transparent transition-all"
+                  autoFocus
+                />
+              </div>
+              {/* Category pills */}
+              <div className="flex flex-wrap gap-1">
+                {(['all', 'pinned', ...RESOURCE_CATEGORIES] as string[]).map((f) => {
+                  const active = resourceFilter === f
+                  const label = f === 'all' ? 'All' : f === 'pinned' ? 'Pinned' : f
+                  const count = f === 'all'
+                    ? wpResources.length
+                    : f === 'pinned'
+                      ? wpResources.filter(r => r.is_pinned).length
+                      : wpResources.filter(r => r.category === f).length
+                  if (f === 'pinned' && count === 0) return null
+                  return (
+                    <button
+                      key={f}
+                      onClick={() => setResourceFilter(f)}
+                      className={`px-2 py-1 text-[11px] font-medium rounded-md transition-all border ${
+                        active
+                          ? 'bg-indigo-500/15 border-indigo-500/30 text-indigo-400'
+                          : 'bg-surface border-border text-text-tertiary hover:text-text-secondary hover:bg-surface-raised'
+                      }`}
+                    >
+                      {label}
+                      <span className="ml-1 text-text-muted">{count}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Resource list */}
+            <div className="flex-1 overflow-y-auto">
+              {filteredResources.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <svg className="size-10 mb-3 text-text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H2.25c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                  </svg>
+                  <p className="text-sm text-text-secondary">
+                    {wpResourcesLoaded ? 'No resources found' : 'Loading...'}
+                  </p>
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {filteredResources.map((r) => {
+                    const catColor = getResourceCategoryColor(r.category)
+                    const copyText = r.content || r.url || ''
+                    return (
+                      <div key={r.id} className="group px-4 py-3 hover:bg-surface-raised/50 transition-colors">
+                        {/* Title row */}
+                        <div className="flex items-start gap-2 mb-1">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${catColor.bg} ${catColor.text}`}>
+                                {r.category}
+                              </span>
+                              <span className="text-[13px] font-medium text-text-primary truncate">{r.title}</span>
+                              {r.version && (
+                                <span className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-surface-inset text-text-secondary border border-border">
+                                  v{r.version}
+                                </span>
+                              )}
+                              {r.is_pinned && (
+                                <svg className="size-3 text-amber-400 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                                  <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z" />
+                                </svg>
+                              )}
+                            </div>
+                            {r.description && (
+                              <p className="text-[12px] text-text-tertiary mt-0.5 line-clamp-2">{r.description}</p>
+                            )}
+                            {r.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {r.tags.map((tag) => (
+                                  <span
+                                    key={tag}
+                                    onClick={() => setResourceSearch(tag)}
+                                    className="px-1.5 py-0.5 rounded text-[10px] text-text-muted bg-surface-inset cursor-pointer hover:text-text-secondary transition-colors"
+                                  >
+                                    #{tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          {/* Actions */}
+                          <div className="flex items-center gap-1 shrink-0">
+                            {copyText && (
+                              <button
+                                onClick={() => handleResourceCopy(copyText, r.id)}
+                                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
+                                  resourceCopied === r.id
+                                    ? 'bg-emerald-500/20 text-emerald-400'
+                                    : 'bg-surface-inset text-text-muted hover:text-text-primary hover:bg-surface-raised border border-border'
+                                }`}
+                              >
+                                {resourceCopied === r.id ? 'Copied!' : 'Copy'}
+                              </button>
+                            )}
+                            {r.url && r.category === 'Batch Scripts' ? (
+                              <button
+                                onClick={async () => {
+                                  const res = await fetch(r.url!)
+                                  const blob = await res.blob()
+                                  const url = URL.createObjectURL(blob)
+                                  const a = document.createElement('a')
+                                  a.href = url
+                                  a.download = `${r.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.bat`
+                                  a.click()
+                                  URL.revokeObjectURL(url)
+                                }}
+                                className="p-1.5 rounded-md text-sky-400 hover:bg-sky-500/10 transition-all"
+                                title="Download .bat"
+                              >
+                                <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                                </svg>
+                              </button>
+                            ) : r.url ? (
+                              <a
+                                href={r.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 rounded-md text-text-muted hover:text-indigo-400 hover:bg-indigo-500/10 transition-all"
+                                title="Open link"
+                              >
+                                <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                </svg>
+                              </a>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {/* Script/SQL inline preview */}
+                        {r.content && (r.category === 'Support Scripts' || r.category === 'SQL Scripts') && (
+                          <div className="relative mt-1.5">
+                            <pre className={`text-[11px] text-text-secondary rounded-lg px-3 py-2 max-h-32 overflow-auto whitespace-pre-wrap leading-relaxed ${
+                              r.category === 'Support Scripts'
+                                ? 'bg-green-500/5 border border-green-500/15'
+                                : 'bg-surface-inset border border-border font-mono'
+                            }`}>{r.content}</pre>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Mark Leave modal */}

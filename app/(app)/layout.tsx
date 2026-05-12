@@ -103,7 +103,7 @@ export default async function AppLayout({
         kbDrafts={kbDrafts}
         inboxUnread={inboxUnread}
       />
-      <main className="flex-1 md:pl-[var(--sidebar-width)] w-full transition-[padding-left] duration-200">
+      <main className="flex-1 md:pl-[var(--sidebar-width)] w-full">
         <div className="relative mx-auto max-w-[1440px] px-4 py-6 pb-24 sm:px-6 md:px-10 md:py-8">
           <ThemeToggle />
           <ToastProvider>
