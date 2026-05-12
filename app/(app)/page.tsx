@@ -332,9 +332,26 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 {activeWork.map((s) => {
+                  let schedPaused = false
+                  let pausedTotalMs = 0
+                  let pausedAtMs = 0
+                  let pauseReason = ''
+                  try {
+                    const raw = sessionStorage.getItem(`pause-${s.id}`)
+                    if (raw) {
+                      const p = JSON.parse(raw)
+                      pausedTotalMs = p.totalPausedMs || 0
+                      pausedAtMs = p.pausedAt || 0
+                      pauseReason = p.pauseReason || ''
+                      schedPaused = !!pausedAtMs
+                    }
+                  } catch { /* ignore */ }
                   const elapsedSec = s.started_at
-                    ? Math.max(0, Math.round((Date.now() - new Date(s.started_at).getTime()) / 1000))
+                    ? schedPaused
+                      ? Math.max(0, Math.round((pausedAtMs - new Date(s.started_at).getTime() - pausedTotalMs) / 1000))
+                      : Math.max(0, Math.round((Date.now() - new Date(s.started_at).getTime() - pausedTotalMs) / 1000))
                     : 0
+                  const pauseDurationSec = schedPaused ? Math.max(0, Math.round((Date.now() - pausedAtMs) / 1000)) : 0
                   const workerName = s.pic_support || s.agent_name
                   const initial = workerName?.charAt(0)?.toUpperCase() || '?'
                   return (
@@ -343,14 +360,21 @@ export default function DashboardPage() {
                       onClick={() => router.push('/schedule')}
                       className="flex items-center gap-2.5 group"
                     >
-                      <div className="size-7 rounded-full bg-amber-500/15 text-amber-400 flex items-center justify-center text-[11px] font-bold">
+                      <div className={`size-7 rounded-full flex items-center justify-center text-[11px] font-bold ${schedPaused ? 'bg-zinc-500/15 text-zinc-400' : 'bg-amber-500/15 text-amber-400'}`}>
                         {initial}
                       </div>
                       <div className="text-left">
                         <div className="text-[13px] text-text-primary font-medium group-hover:text-amber-300 transition-colors">
                           {toProperCase(workerName)} <span className="text-text-muted font-normal">·</span> <span className="font-normal text-text-secondary">{s.schedule_type}</span> <span className="text-text-muted font-normal">@</span> <span className="font-normal text-text-secondary truncate">{s.clinic_name}</span>
                         </div>
-                        <div className="text-[11px] font-semibold text-amber-400 tabular-nums">{formatWorkDurationLive(elapsedSec)}</div>
+                        {schedPaused ? (
+                          <div className="text-[11px] font-semibold text-zinc-400 tabular-nums flex items-center gap-1">
+                            <svg className="size-3" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                            Paused {pauseReason ? `(${pauseReason})` : ''} · {Math.floor(pauseDurationSec / 60)}:{String(pauseDurationSec % 60).padStart(2, '0')} · Active: {formatWorkDurationLive(elapsedSec)}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] font-semibold text-amber-400 tabular-nums">{formatWorkDurationLive(elapsedSec)}</div>
+                        )}
                       </div>
                     </button>
                   )

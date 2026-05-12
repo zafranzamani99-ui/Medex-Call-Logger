@@ -115,13 +115,31 @@ export default function SchedulePage() {
   const workNotesValueRef = useRef('')
   const [elapsedMinutes, setElapsedMinutes] = useState(0)
 
-  // Pause state
+  // Pause state (persisted via sessionStorage so it survives page navigation)
   const [isPaused, setIsPaused] = useState(false)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
   const [totalPausedMs, setTotalPausedMs] = useState(0)
   const [pausedElapsed, setPausedElapsed] = useState(0)
   const [pauseReason, setPauseReason] = useState('')
+  const [showPauseModal, setShowPauseModal] = useState(false)
+  const [pauseLog, setPauseLog] = useState<{ reason: string; startedAt: number; endedAt: number; durationSec: number }[]>([])
   const pauseNudge = isPaused && pausedAt && (Date.now() - pausedAt) > 15 * 60 * 1000
+
+  const restorePauseState = useCallback((scheduleId: string) => {
+    try {
+      const raw = sessionStorage.getItem(`pause-${scheduleId}`)
+      if (raw) {
+        const saved = JSON.parse(raw)
+        setPauseLog(saved.pauseLog || [])
+        setTotalPausedMs(saved.totalPausedMs || 0)
+        if (saved.pausedAt) {
+          setIsPaused(true)
+          setPausedAt(saved.pausedAt)
+          setPauseReason(saved.pauseReason || '')
+        }
+      }
+    } catch { /* ignore */ }
+  }, [])
   const [existingJobSheetId, setExistingJobSheetId] = useState<string | null>(null)
 
   // Resources panel (right slide-in, like CRM)
@@ -297,11 +315,36 @@ export default function SchedulePage() {
     }
   }, [currentMonth, scrollToToday])
 
+  // Track whether auto-resume has already fired this mount
+  const autoResumedRef = useRef(false)
+
   // Fetch schedules for current month (wait until filter is initialized)
   useEffect(() => {
     if (filterReady) fetchSchedules()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentMonth, filterPic, filterReady])
+
+  // Auto-resume: separate effect that runs when userId + schedules are ready
+  useEffect(() => {
+    if (!userId || !schedules.length || autoResumedRef.current) return
+    const activeWork = schedules.find(s =>
+      s.status === 'in_progress' &&
+      (s.pic_support_id ? s.pic_support_id === userId : s.agent_id === userId)
+    )
+    if (activeWork) {
+      autoResumedRef.current = true
+      setSelectedSchedule(activeWork)
+      setShowDetailModal(true)
+      setShowWorkPanel(true)
+      setWorkNotes(activeWork.notes || '')
+      restorePauseState(activeWork.id)
+      if (activeWork.clinic_code && activeWork.clinic_code !== 'MANUAL') {
+        supabase.from('clinics').select('*').eq('clinic_code', activeWork.clinic_code).single()
+          .then(({ data }: { data: Clinic | null }) => setWorkClinic(data))
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, schedules])
 
   const fetchSchedules = async () => {
     const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd')
@@ -323,24 +366,7 @@ export default function SchedulePage() {
     const scheduleList = (data || []) as Schedule[]
     setSchedules(scheduleList)
 
-    // Auto-resume: if current user has an in_progress schedule, open its work panel.
-    // Match assigned PIC first; fall back to logger for legacy unassigned rows.
-    if (!showDetailModal && userId) {
-      const activeWork = scheduleList.find(s =>
-        s.status === 'in_progress' &&
-        (s.pic_support_id ? s.pic_support_id === userId : s.agent_id === userId)
-      )
-      if (activeWork) {
-        setSelectedSchedule(activeWork)
-        setShowDetailModal(true)
-        setShowWorkPanel(true)
-        setWorkNotes(activeWork.notes || '')
-        if (activeWork.clinic_code && activeWork.clinic_code !== 'MANUAL') {
-          const { data: clinic } = await supabase.from('clinics').select('*').eq('clinic_code', activeWork.clinic_code).single()
-          setWorkClinic(clinic as Clinic | null)
-        }
-      }
-    }
+    // Auto-resume is handled by the separate useEffect watching [userId, schedules]
 
     // Look up clinic phones from CRM
     const codeSet = new Set<string>()
@@ -454,6 +480,7 @@ export default function SchedulePage() {
     setShowWorkPanel(schedule.status === 'in_progress')
     setExistingJobSheetId(null)
     if (schedule.status === 'in_progress') {
+      restorePauseState(schedule.id)
       setWorkNotes(schedule.notes || '')
       if (schedule.clinic_code && schedule.clinic_code !== 'MANUAL') {
         const { data } = await supabase.from('clinics').select('*').eq('clinic_code', schedule.clinic_code).single()
@@ -518,14 +545,22 @@ export default function SchedulePage() {
   // Status update
   const handleStatusChange = async (id: string, newStatus: string) => {
     const now = new Date().toISOString()
-    // Calculate actual duration if completing from in_progress
+    // Calculate actual duration if completing from in_progress (subtract paused time)
     const updatePayload: Record<string, unknown> = { status: newStatus, updated_at: now }
     if (newStatus === 'completed' && selectedSchedule?.started_at) {
       updatePayload.completed_at = now
-      updatePayload.actual_duration_minutes = Math.round(
-        (new Date(now).getTime() - new Date(selectedSchedule.started_at).getTime()) / 60000
-      )
+      const totalMs = new Date(now).getTime() - new Date(selectedSchedule.started_at).getTime()
+      const currentPauseMs = isPaused && pausedAt ? Date.now() - pausedAt : 0
+      updatePayload.actual_duration_minutes = Math.round((totalMs - totalPausedMs - currentPauseMs) / 60000)
     }
+    // Clear pause state
+    setIsPaused(false)
+    setPausedAt(null)
+    setTotalPausedMs(0)
+    setPauseReason('')
+    setPauseLog([])
+    setShowPauseModal(false)
+    sessionStorage.removeItem(`pause-${id}`)
     const { error } = await supabase.from('schedules').update(updatePayload).eq('id', id)
     if (error) {
       // Fallback without time tracking columns
@@ -678,6 +713,9 @@ export default function SchedulePage() {
     setPausedAt(null)
     setTotalPausedMs(0)
     setPauseReason('')
+    setPauseLog([])
+    setShowPauseModal(false)
+    sessionStorage.removeItem(`pause-${s.id}`)
     // Update local state immediately — don't wait for fetchSchedules
     const updated = { ...s, status: 'in_progress' as const, started_at: now, updated_at: now }
     setSelectedSchedule(updated)
@@ -753,6 +791,19 @@ export default function SchedulePage() {
     }
     return list
   }, [wpResources, resourceSearch, resourceFilter])
+
+  // Memoized set of paused schedule IDs — avoids sessionStorage reads inside .map() loops
+  const pausedScheduleIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const s of schedules) {
+      if (s.status !== 'in_progress') continue
+      try {
+        const raw = sessionStorage.getItem(`pause-${s.id}`)
+        if (raw) { const p = JSON.parse(raw); if (p.pausedAt) ids.add(s.id) }
+      } catch { /* ignore */ }
+    }
+    return ids
+  }, [schedules, isPaused])
 
   // Format phone for WhatsApp link (strip non-digits, add 60 if needed)
   const formatWALink = (phone: string) => {
@@ -1187,6 +1238,7 @@ export default function SchedulePage() {
                     const isRescheduled = s.status === 'rescheduled'
                     const isNoAnswer = s.status === 'no_answer'
                     const isInProgress = s.status === 'in_progress'
+                    const isChipPaused = isInProgress && pausedScheduleIds.has(s.id)
                     const isStruck = isCancelled || isCompleted || isRescheduled
                     const now = new Date()
                     const isPastTime = today && s.status === 'scheduled' && parseTimeToMinutes(s.schedule_time) < (now.getHours() * 60 + now.getMinutes())
@@ -1197,7 +1249,8 @@ export default function SchedulePage() {
                         key={s.id}
                         title={isRescheduled && s.reschedule_reason ? `Rescheduled: ${s.reschedule_reason}` : undefined}
                         className={`w-full text-left px-1.5 py-0.5 rounded text-[10px] sm:text-xs transition-opacity ${
-                          isInProgress ? 'bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40'
+                          isChipPaused ? 'bg-orange-500/30 text-orange-700 dark:text-orange-300 ring-1 ring-orange-500/50'
+                            : isInProgress ? 'bg-amber-500/25 text-amber-300 ring-1 ring-amber-500/40'
                             : isNoAnswer ? 'bg-orange-500/20 text-orange-400'
                             : isRescheduled ? 'bg-red-500/20 text-red-400'
                             : `${colors.bg} ${colors.text}`
@@ -1205,7 +1258,8 @@ export default function SchedulePage() {
                           isSearchHit ? 'ring-2 ring-blue-500 !opacity-100' : ''
                         } ${isSearchDimmed ? '!opacity-20' : ''}`}
                       >
-                        {isInProgress && <span className="inline-block size-1.5 rounded-full bg-amber-400 animate-pulse mr-0.5 align-middle" />}
+                        {isChipPaused && <svg className="inline-block size-2.5 text-orange-600 dark:text-orange-400 mr-0.5 align-middle" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>}
+                        {isInProgress && !isChipPaused && <span className="inline-block size-1.5 rounded-full bg-amber-400 animate-pulse mr-0.5 align-middle" />}
                         {isPastTime && <span className="text-amber-400 mr-0.5">!</span>}
                         {isNoAnswer && <span className="text-orange-400 mr-0.5">!</span>}
                         {isRescheduled && <span className="text-red-400 mr-0.5 no-underline" style={{ textDecoration: 'none' }}>↻</span>}
@@ -1344,6 +1398,7 @@ export default function SchedulePage() {
                     const isRescheduled = s.status === 'rescheduled'
                     const isNoAnswer = s.status === 'no_answer'
                     const isInProgress = s.status === 'in_progress'
+                    const isListPaused = isInProgress && pausedScheduleIds.has(s.id)
                     const isStruck = isCancelled || isCompleted || isRescheduled
                     const now = new Date()
                     const isDayToday = isToday(dateObj)
@@ -1356,7 +1411,7 @@ export default function SchedulePage() {
                         onClick={() => handleChipClick(s)}
                         className={`w-full text-left px-5 py-3 hover:bg-surface-raised/60 transition-all ${
                           isCancelled ? 'opacity-40' : ''
-                        } ${isCompleted ? 'opacity-60' : ''} ${isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${isNoAnswer ? 'bg-orange-500/5 border-l-2 border-l-orange-400' : ''} ${isRescheduled ? 'bg-red-500/5 border-l-2 border-l-red-400' : ''} ${
+                        } ${isCompleted ? 'opacity-60' : ''} ${isListPaused ? 'bg-orange-600/5 border-l-2 border-l-orange-500' : isInProgress ? 'bg-amber-500/5 border-l-2 border-l-amber-400' : ''} ${isNoAnswer ? 'bg-orange-500/5 border-l-2 border-l-orange-400' : ''} ${isRescheduled ? 'bg-red-500/5 border-l-2 border-l-red-400' : ''} ${
                           isSearchHitDay ? 'bg-blue-500/10 !opacity-100' : ''
                         } ${isSearchDimmedDay ? '!opacity-20' : ''}`}
                       >
@@ -1364,7 +1419,9 @@ export default function SchedulePage() {
                           <div className="flex-1 min-w-0">
                             {/* Time + Clinic */}
                             <div className="flex items-center gap-2">
-                              {isInProgress && (
+                              {isListPaused ? (
+                                <svg className="size-3 text-orange-400 flex-shrink-0" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                              ) : isInProgress && (
                                 <span className="inline-block size-2 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
                               )}
                               {isPastTime && (
@@ -1415,10 +1472,17 @@ export default function SchedulePage() {
                               )}
                             </div>
                           </div>
-                          {/* Type badge */}
-                          <span className={`text-[10px] px-2 py-0.5 rounded-lg leading-relaxed max-w-[160px] mt-0.5 ${colors.bg} ${colors.text}`}>
-                            {s.schedule_type}{s.custom_type ? `: ${s.custom_type}` : ''}
-                          </span>
+                          {/* Type badge + Paused badge */}
+                          <div className="flex flex-col items-end gap-1 mt-0.5">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-lg leading-relaxed max-w-[160px] ${colors.bg} ${colors.text}`}>
+                              {s.schedule_type}{s.custom_type ? `: ${s.custom_type}` : ''}
+                            </span>
+                            {isListPaused && (
+                              <span className="text-[10px] px-2 py-0.5 rounded-lg bg-orange-500/20 text-orange-400 font-medium">
+                                Paused
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </button>
                     )
@@ -1480,7 +1544,7 @@ export default function SchedulePage() {
           <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-2 pb-20 sm:p-4 sm:pb-4 pointer-events-none">
             <div className={`bg-surface border border-border rounded-xl w-full ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'max-w-2xl' : 'max-w-lg'} max-h-[90vh] flex flex-col pointer-events-auto shadow-xl transition-all`}>
               {/* Header */}
-              <div className={`flex items-center justify-between px-4 py-3 border-b flex-shrink-0 ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? (isPaused ? 'border-zinc-500/30 bg-zinc-500/5' : 'border-amber-500/30 bg-amber-500/5') : 'border-border'}`}>
+              <div className={`flex items-center justify-between px-4 py-3 border-b flex-shrink-0 ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? (isPaused ? 'border-orange-500/30 bg-orange-500/5' : 'border-amber-500/30 bg-amber-500/5') : 'border-border'}`}>
                 <div className="flex items-center gap-2">
                   {/* Back arrow when in work panel */}
                   {(selectedSchedule.status === 'in_progress' && showWorkPanel && !isEditing) && (
@@ -1704,7 +1768,7 @@ export default function SchedulePage() {
                           {selectedSchedule.schedule_type}{selectedSchedule.custom_type ? ` — ${selectedSchedule.custom_type}` : ''}
                         </span>
                       })()}
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${isPaused ? 'bg-zinc-500/20 text-zinc-400' : 'bg-amber-500/20 text-amber-400 animate-pulse'}`}>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${isPaused ? 'bg-orange-500/20 text-orange-500' : 'bg-amber-500/20 text-amber-400 animate-pulse'}`}>
                         {isPaused ? 'Paused' : 'In Progress'}
                       </span>
                       <span className={`text-xs ${selectedSchedule.mode === 'Remote' ? 'text-purple-400' : 'text-emerald-400'}`}>
@@ -1718,7 +1782,7 @@ export default function SchedulePage() {
                       <span>{selectedSchedule.schedule_date.split('-').reverse().join('/')}</span>
                       <span>{agentDisplayName(selectedSchedule)}</span>
                       {selectedSchedule.started_at && (
-                        <span className={`ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium tabular-nums ${isPaused ? 'bg-zinc-500/15 text-zinc-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                        <span className={`ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium tabular-nums ${isPaused ? 'bg-orange-500/15 text-orange-500' : 'bg-amber-500/15 text-amber-400'}`}>
                           {isPaused ? (
                             <svg className="size-3" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
                           ) : (
@@ -1998,62 +2062,45 @@ export default function SchedulePage() {
                       </button>
                     </div>
 
-                    {/* Pause/Resume */}
-                    {isPaused ? (
-                      <div className={`border rounded-lg p-3 space-y-2 ${pauseNudge ? 'border-amber-500/40 bg-amber-500/5 animate-pulse' : 'border-zinc-500/30 bg-zinc-500/5'}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <svg className="size-4 text-zinc-400" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-                            <span className="text-sm font-medium text-zinc-400">Paused</span>
-                            <span className="text-sm font-mono text-zinc-500 tabular-nums">
-                              {Math.floor(pausedElapsed / 60)}:{String(pausedElapsed % 60).padStart(2, '0')}
-                            </span>
-                          </div>
-                          <button
-                            onClick={() => {
-                              setTotalPausedMs(prev => prev + (Date.now() - (pausedAt || Date.now())))
-                              setIsPaused(false)
-                              setPausedAt(null)
-                              setPauseReason('')
-                              toast('Work resumed')
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500 hover:bg-amber-600 text-black transition-colors"
-                          >
-                            <svg className="size-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                            Resume
-                          </button>
+                    {/* Pause banner (when paused) */}
+                    {isPaused && (
+                      <div className={`border rounded-lg p-3 space-y-1 ${pauseNudge ? 'border-red-500/40 bg-red-500/5 animate-pulse' : 'border-orange-500/30 bg-orange-500/5'}`}>
+                        <div className="flex items-center gap-2">
+                          <svg className="size-4 text-orange-500" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                          <span className="text-sm font-medium text-orange-500">Paused</span>
+                          <span className="text-sm font-mono text-orange-400 tabular-nums">
+                            {Math.floor(pausedElapsed / 60)}:{String(pausedElapsed % 60).padStart(2, '0')}
+                          </span>
                         </div>
                         {pauseNudge && (
-                          <p className="text-[11px] text-amber-400">You&apos;ve been paused for over 15 minutes</p>
+                          <p className="text-[11px] text-red-500">You&apos;ve been paused for over 15 minutes</p>
                         )}
                         {pauseReason && (
-                          <p className="text-[11px] text-zinc-500">Reason: {pauseReason}</p>
+                          <p className="text-[11px] text-orange-400">Reason: {pauseReason}</p>
                         )}
                       </div>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setIsPaused(true)
-                            setPausedAt(Date.now())
-                            toast('Work paused')
-                          }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors bg-zinc-500/10 text-zinc-400 border-zinc-500/30 hover:bg-zinc-500/20"
-                        >
-                          <svg className="size-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-                          Pause
-                        </button>
-                        <select
-                          value={pauseReason}
-                          onChange={(e) => { setPauseReason(e.target.value) }}
-                          className="text-xs bg-transparent border border-border rounded-lg px-2 py-1.5 text-text-muted focus:outline-none focus:border-zinc-500"
-                        >
-                          <option value="">Reason (optional)</option>
-                          <option value="Break">Break</option>
-                          <option value="Waiting Callback">Waiting Callback</option>
-                          <option value="Other Task">Other Task</option>
-                          <option value="System Issue">System Issue</option>
-                        </select>
+                    )}
+
+                    {/* Pause log — shows history of pauses */}
+                    {pauseLog.length > 0 && (
+                      <div className="border border-zinc-500/20 rounded-lg p-2 space-y-1">
+                        <p className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">Pause History</p>
+                        {pauseLog.map((entry, i) => {
+                          const mins = Math.floor(entry.durationSec / 60)
+                          const secs = entry.durationSec % 60
+                          const time = new Date(entry.startedAt).toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit', hour12: true })
+                          return (
+                            <div key={i} className="flex items-center gap-2 text-[11px]">
+                              <span className="text-zinc-500">{time}</span>
+                              <span className="text-zinc-400">{entry.reason}</span>
+                              <span className="ml-auto font-mono text-zinc-500 tabular-nums">{mins}m {String(secs).padStart(2, '0')}s</span>
+                            </div>
+                          )
+                        })}
+                        <div className="flex items-center justify-between pt-1 border-t border-zinc-500/15 text-[11px]">
+                          <span className="text-zinc-400 font-medium">Total paused</span>
+                          <span className="font-mono text-zinc-400 tabular-nums">{Math.floor(totalPausedMs / 60000)}m {String(Math.floor((totalPausedMs % 60000) / 1000)).padStart(2, '0')}s</span>
+                        </div>
                       </div>
                     )}
 
@@ -2196,16 +2243,57 @@ export default function SchedulePage() {
                       </Button>
                     )}
                     {selectedSchedule.status === 'in_progress' && (
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="success" onClick={() => handleStatusChange(selectedSchedule.id, 'completed')} className="flex-1">
-                          Complete
-                        </Button>
-                        {!showWorkPanel && (
-                          <Button size="sm" onClick={() => setShowWorkPanel(true)} className="flex-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30">
-                            Open Work Panel
+                      isPaused ? (
+                        <div className="space-y-2">
+                          <Button
+                            size="sm"
+                            onClick={() => {
+                              const now = Date.now()
+                              const added = now - (pausedAt || now)
+                              const newTotal = totalPausedMs + added
+                              const entry = { reason: pauseReason || 'No reason', startedAt: pausedAt || now, endedAt: now, durationSec: Math.round(added / 1000) }
+                              const newLog = [...pauseLog, entry]
+                              setTotalPausedMs(newTotal)
+                              setIsPaused(false)
+                              setPausedAt(null)
+                              setPauseReason('')
+                              setPauseLog(newLog)
+                              sessionStorage.setItem(`pause-${selectedSchedule.id}`, JSON.stringify({ pausedAt: null, totalPausedMs: newTotal, pauseReason: '', pauseLog: newLog }))
+                              toast('Work resumed')
+                            }}
+                            className="w-full bg-amber-500 hover:bg-amber-600 text-black"
+                          >
+                            <svg className="size-3.5 mr-1.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                            Resume
                           </Button>
-                        )}
-                      </div>
+                          <Button size="sm" variant="success" onClick={() => handleStatusChange(selectedSchedule.id, 'completed')} className="w-full">
+                            Complete
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {showWorkPanel && (
+                            <Button
+                              size="sm"
+                              onClick={() => { setPauseReason(''); setShowPauseModal(true) }}
+                              className="w-full bg-orange-500 hover:bg-orange-600 text-white"
+                            >
+                              <svg className="size-3.5 mr-1.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                              Pause
+                            </Button>
+                          )}
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="success" onClick={() => handleStatusChange(selectedSchedule.id, 'completed')} className="flex-1">
+                              Complete
+                            </Button>
+                            {!showWorkPanel && (
+                              <Button size="sm" onClick={() => setShowWorkPanel(true)} className="flex-1 bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30">
+                                Open Work Panel
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )
                     )}
 
                     {/* Secondary actions row */}
@@ -2313,6 +2401,57 @@ export default function SchedulePage() {
                     </div>
                   </>
                 )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ===== Pause Reason Modal ===== */}
+      {showPauseModal && selectedSchedule && (
+        <>
+          <div className="fixed inset-0 bg-black/60 z-[70]" onClick={() => setShowPauseModal(false)} />
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
+            <div className="bg-surface border border-border rounded-xl w-full max-w-xs pointer-events-auto shadow-xl">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <h3 className="font-semibold text-text-primary text-sm">Pause Work</h3>
+                <button onClick={() => setShowPauseModal(false)} className="text-text-tertiary hover:text-text-primary p-1 -mr-1">
+                  <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                <p className="text-xs text-text-secondary">Select a reason (optional):</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {['Break', 'Waiting Callback', 'Other Task', 'System Issue'].map((reason) => (
+                    <button
+                      key={reason}
+                      onClick={() => setPauseReason(pauseReason === reason ? '' : reason)}
+                      className={`px-3 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                        pauseReason === reason
+                          ? 'bg-zinc-500/20 text-zinc-300 border-zinc-500/40'
+                          : 'bg-surface border-border text-text-secondary hover:bg-white/[0.03]'
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    const now = Date.now()
+                    setIsPaused(true)
+                    setPausedAt(now)
+                    setShowPauseModal(false)
+                    sessionStorage.setItem(`pause-${selectedSchedule.id}`, JSON.stringify({ pausedAt: now, totalPausedMs, pauseReason, pauseLog }))
+                    toast(`Work paused${pauseReason ? ` — ${pauseReason}` : ''}`)
+                  }}
+                  className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-600 text-white transition-colors"
+                >
+                  <svg className="size-4" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                  {pauseReason ? `Pause — ${pauseReason}` : 'Pause Now'}
+                </button>
               </div>
             </div>
           </div>
