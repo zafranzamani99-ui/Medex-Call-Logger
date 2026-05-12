@@ -114,6 +114,14 @@ export default function SchedulePage() {
   const workNotesRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const workNotesValueRef = useRef('')
   const [elapsedMinutes, setElapsedMinutes] = useState(0)
+
+  // Pause state
+  const [isPaused, setIsPaused] = useState(false)
+  const [pausedAt, setPausedAt] = useState<number | null>(null)
+  const [totalPausedMs, setTotalPausedMs] = useState(0)
+  const [pausedElapsed, setPausedElapsed] = useState(0)
+  const [pauseReason, setPauseReason] = useState('')
+  const pauseNudge = isPaused && pausedAt && (Date.now() - pausedAt) > 15 * 60 * 1000
   const [existingJobSheetId, setExistingJobSheetId] = useState<string | null>(null)
 
   // Resources panel (right slide-in, like CRM)
@@ -666,6 +674,10 @@ export default function SchedulePage() {
       setWorkClinic(null)
     }
     setWorkNotes(s.notes || '')
+    setIsPaused(false)
+    setPausedAt(null)
+    setTotalPausedMs(0)
+    setPauseReason('')
     // Update local state immediately — don't wait for fetchSchedules
     const updated = { ...s, status: 'in_progress' as const, started_at: now, updated_at: now }
     setSelectedSchedule(updated)
@@ -749,16 +761,26 @@ export default function SchedulePage() {
     return `https://wa.me/${number}`
   }
 
-  // Live work timer — ticks every 30s while work panel is open
+  // Live work timer — ticks every 30s while work panel is open, stops when paused
   useEffect(() => {
     if (!selectedSchedule?.started_at || selectedSchedule.status !== 'in_progress' || !showWorkPanel) {
       return
     }
-    const calc = () => Math.max(0, Math.round((Date.now() - new Date(selectedSchedule.started_at!).getTime()) / 60000))
+    if (isPaused) return
+    const calc = () => Math.max(0, Math.round((Date.now() - new Date(selectedSchedule.started_at!).getTime() - totalPausedMs) / 60000))
     setElapsedMinutes(calc())
     const interval = setInterval(() => setElapsedMinutes(calc()), 30000)
     return () => clearInterval(interval)
-  }, [selectedSchedule?.started_at, selectedSchedule?.status, showWorkPanel])
+  }, [selectedSchedule?.started_at, selectedSchedule?.status, showWorkPanel, isPaused, totalPausedMs])
+
+  // Paused duration counter — ticks every second while paused
+  useEffect(() => {
+    if (!isPaused || !pausedAt) { setPausedElapsed(0); return }
+    const tick = () => setPausedElapsed(Math.floor((Date.now() - pausedAt) / 1000))
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [isPaused, pausedAt])
 
   // Start editing a schedule
   const startEditing = async (s: Schedule) => {
@@ -1458,7 +1480,7 @@ export default function SchedulePage() {
           <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center p-2 pb-20 sm:p-4 sm:pb-4 pointer-events-none">
             <div className={`bg-surface border border-border rounded-xl w-full ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'max-w-2xl' : 'max-w-lg'} max-h-[90vh] flex flex-col pointer-events-auto shadow-xl transition-all`}>
               {/* Header */}
-              <div className={`flex items-center justify-between px-4 py-3 border-b flex-shrink-0 ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'border-amber-500/30 bg-amber-500/5' : 'border-border'}`}>
+              <div className={`flex items-center justify-between px-4 py-3 border-b flex-shrink-0 ${(selectedSchedule.status === 'in_progress' && showWorkPanel) ? (isPaused ? 'border-zinc-500/30 bg-zinc-500/5' : 'border-amber-500/30 bg-amber-500/5') : 'border-border'}`}>
                 <div className="flex items-center gap-2">
                   {/* Back arrow when in work panel */}
                   {(selectedSchedule.status === 'in_progress' && showWorkPanel && !isEditing) && (
@@ -1469,7 +1491,7 @@ export default function SchedulePage() {
                     </button>
                   )}
                   <h3 className="font-semibold text-text-primary">
-                    {isEditing ? 'Edit Schedule' : (selectedSchedule.status === 'in_progress' && showWorkPanel) ? 'Work Panel' : 'Schedule Detail'}
+                    {isEditing ? 'Edit Schedule' : (selectedSchedule.status === 'in_progress' && showWorkPanel) ? (isPaused ? 'Work Panel — Paused' : 'Work Panel') : 'Schedule Detail'}
                   </h3>
                 </div>
                 <button onClick={() => { flushWorkNotes(); setShowDetailModal(false); setIsEditing(false); setShowWorkPanel(false) }} className="text-text-tertiary hover:text-text-primary p-2 -mr-2 transition-colors">
@@ -1682,8 +1704,8 @@ export default function SchedulePage() {
                           {selectedSchedule.schedule_type}{selectedSchedule.custom_type ? ` — ${selectedSchedule.custom_type}` : ''}
                         </span>
                       })()}
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 animate-pulse">
-                        In Progress
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${isPaused ? 'bg-zinc-500/20 text-zinc-400' : 'bg-amber-500/20 text-amber-400 animate-pulse'}`}>
+                        {isPaused ? 'Paused' : 'In Progress'}
                       </span>
                       <span className={`text-xs ${selectedSchedule.mode === 'Remote' ? 'text-purple-400' : 'text-emerald-400'}`}>
                         {selectedSchedule.mode || 'Onsite'}
@@ -1696,8 +1718,12 @@ export default function SchedulePage() {
                       <span>{selectedSchedule.schedule_date.split('-').reverse().join('/')}</span>
                       <span>{agentDisplayName(selectedSchedule)}</span>
                       {selectedSchedule.started_at && (
-                        <span className="ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-xs font-medium tabular-nums">
-                          <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        <span className={`ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium tabular-nums ${isPaused ? 'bg-zinc-500/15 text-zinc-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                          {isPaused ? (
+                            <svg className="size-3" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                          ) : (
+                            <span className="size-1.5 rounded-full bg-amber-400 animate-pulse" />
+                          )}
                           {formatWorkDuration(elapsedMinutes)}
                         </span>
                       )}
@@ -1707,7 +1733,7 @@ export default function SchedulePage() {
                     )}
 
                     {/* Full Clinic Details Card */}
-                    <div className="border border-amber-500/20 bg-amber-500/5 rounded-lg p-3 space-y-2">
+                    <div className={`border border-amber-500/20 bg-amber-500/5 rounded-lg p-3 space-y-2 transition-opacity ${isPaused ? 'opacity-40' : ''}`}>
                       <h4 className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Clinic Details</h4>
                       <div className="grid grid-cols-2 gap-2 text-sm">
                         <div>
@@ -1783,7 +1809,7 @@ export default function SchedulePage() {
 
                     {/* System Info (CRM operational data) */}
                     {selectedSchedule.clinic_code !== 'MANUAL' && workClinic && (
-                      <div className="border border-indigo-500/20 bg-indigo-500/5 rounded-lg p-3">
+                      <div className={`border border-indigo-500/20 bg-indigo-500/5 rounded-lg p-3 transition-opacity ${isPaused ? 'opacity-40' : ''}`}>
                         <div className="flex items-center justify-between mb-2">
                           <h4 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">System Info</h4>
                           <button
@@ -1832,7 +1858,7 @@ export default function SchedulePage() {
                     )}
 
                     {/* Quick Action Buttons */}
-                    <div className="flex flex-wrap gap-2">
+                    <div className={`flex flex-wrap gap-2 transition-opacity ${isPaused ? 'opacity-40' : ''}`}>
                       {/* CRM */}
                       {selectedSchedule.clinic_code !== 'MANUAL' && (
                         <button
@@ -1972,8 +1998,67 @@ export default function SchedulePage() {
                       </button>
                     </div>
 
+                    {/* Pause/Resume */}
+                    {isPaused ? (
+                      <div className={`border rounded-lg p-3 space-y-2 ${pauseNudge ? 'border-amber-500/40 bg-amber-500/5 animate-pulse' : 'border-zinc-500/30 bg-zinc-500/5'}`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <svg className="size-4 text-zinc-400" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                            <span className="text-sm font-medium text-zinc-400">Paused</span>
+                            <span className="text-sm font-mono text-zinc-500 tabular-nums">
+                              {Math.floor(pausedElapsed / 60)}:{String(pausedElapsed % 60).padStart(2, '0')}
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setTotalPausedMs(prev => prev + (Date.now() - (pausedAt || Date.now())))
+                              setIsPaused(false)
+                              setPausedAt(null)
+                              setPauseReason('')
+                              toast('Work resumed')
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500 hover:bg-amber-600 text-black transition-colors"
+                          >
+                            <svg className="size-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                            Resume
+                          </button>
+                        </div>
+                        {pauseNudge && (
+                          <p className="text-[11px] text-amber-400">You&apos;ve been paused for over 15 minutes</p>
+                        )}
+                        {pauseReason && (
+                          <p className="text-[11px] text-zinc-500">Reason: {pauseReason}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setIsPaused(true)
+                            setPausedAt(Date.now())
+                            toast('Work paused')
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors bg-zinc-500/10 text-zinc-400 border-zinc-500/30 hover:bg-zinc-500/20"
+                        >
+                          <svg className="size-3.5" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+                          Pause
+                        </button>
+                        <select
+                          value={pauseReason}
+                          onChange={(e) => { setPauseReason(e.target.value) }}
+                          className="text-xs bg-transparent border border-border rounded-lg px-2 py-1.5 text-text-muted focus:outline-none focus:border-zinc-500"
+                        >
+                          <option value="">Reason (optional)</option>
+                          <option value="Break">Break</option>
+                          <option value="Waiting Callback">Waiting Callback</option>
+                          <option value="Other Task">Other Task</option>
+                          <option value="System Issue">System Issue</option>
+                        </select>
+                      </div>
+                    )}
+
                     {/* Live Notes */}
-                    <div>
+                    <div className={isPaused ? 'opacity-40 pointer-events-none' : ''}>
                       <span className="text-text-tertiary text-xs">Notes</span>
                       <Textarea
                         value={workNotes}
