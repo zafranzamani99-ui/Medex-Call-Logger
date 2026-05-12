@@ -2625,7 +2625,7 @@ export default function SchedulePage() {
                               )}
                             </div>
                             {r.description && (
-                              <p className="text-[12px] text-text-tertiary mt-0.5 line-clamp-2">{r.description}</p>
+                              <p className="text-[12px] text-text-tertiary mt-0.5">{r.description}</p>
                             )}
                             {r.tags.length > 0 && (
                               <div className="flex flex-wrap gap-1 mt-1">
