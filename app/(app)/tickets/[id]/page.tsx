@@ -917,7 +917,7 @@ export default function TicketDetailPage() {
                   ) : (
                     <div className="mt-1 space-y-1">
                       {(ticket.invoices || []).map((inv: InvoiceItem, idx: number) => (
-                        <div key={idx} className="flex items-center justify-between text-sm">
+                        <div key={idx} className="flex items-center gap-3 text-sm">
                           <span className="text-text-primary font-mono text-xs">{inv.invoice_number}</span>
                           <span className="text-text-secondary">{formatRM(inv.amount)}</span>
                         </div>
