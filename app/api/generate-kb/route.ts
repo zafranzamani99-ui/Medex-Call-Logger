@@ -23,7 +23,7 @@ const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
 const HIGH_SIMILARITY = 0.92  // skip generation outright
 const MID_SIMILARITY  = 0.80  // generate-as-improvement
 const MAX_IMAGES      = 2     // was 5
-const MAX_OUTPUT_TOK  = 1024  // was 8192
+const MAX_OUTPUT_TOK  = 2048
 const FEWSHOT_LIMIT   = 2     // was 3
 
 export async function POST(req: NextRequest) {
@@ -210,12 +210,32 @@ OUTPUT (JSON ONLY, no fences):
     try {
       parsed = JSON.parse(jsonStr)
     } catch {
-      // Last resort: extract issue/fix from raw text via regex
-      const issueMatch = rawText.match(/"issue"\s*:\s*"((?:[^"\\]|\\.)*)"/)
-      const fixMatch = rawText.match(/"fix"\s*:\s*"((?:[^"\\]|\\.)*)"/)
+      // Manually extract values — handles truncated JSON where closing quote/brace is missing
+      const extractValue = (text: string, key: string): string => {
+        const keyPos = text.indexOf(`"${key}"`)
+        if (keyPos === -1) return ''
+        const colon = text.indexOf(':', keyPos + key.length + 2)
+        if (colon === -1) return ''
+        const openQuote = text.indexOf('"', colon + 1)
+        if (openQuote === -1) return ''
+        let result = ''
+        for (let i = openQuote + 1; i < text.length; i++) {
+          const ch = text[i]
+          if (ch === '\\' && i + 1 < text.length) {
+            const next = text[i + 1]
+            if (next === 'n') { result += '\n'; i++; continue }
+            if (next === '"') { result += '"'; i++; continue }
+            if (next === '\\') { result += '\\'; i++; continue }
+            result += next; i++; continue
+          }
+          if (ch === '"') break
+          result += ch
+        }
+        return result
+      }
       parsed = {
-        issue: issueMatch ? issueMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : issue.slice(0, 80),
-        fix: fixMatch ? fixMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"') : rawText.replace(/```(?:json)?/gi, '').replace(/[{}]/g, '').trim(),
+        issue: extractValue(rawText, 'issue') || issue.slice(0, 80),
+        fix: extractValue(rawText, 'fix') || rawText.replace(/```(?:json)?/gi, '').replace(/[{}]/g, '').trim(),
       }
     }
 

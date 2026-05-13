@@ -133,8 +133,19 @@ function formatInline(text: string): React.ReactNode {
 // Handles truncated/malformed JSON where the entire Gemini response was saved as fix.
 function extractFix(raw: string): string {
   const trimmed = raw.trim()
-  if (!trimmed.startsWith('{')) return raw
 
+  // Not JSON-like — return as-is
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('"')) return raw
+
+  // Looks like bare `"issue": "...", "fix": "..."` without outer braces
+  if (trimmed.startsWith('"issue"') || trimmed.startsWith('"fix"')) {
+    return extractFixFromJson(`{${trimmed}}`)
+  }
+
+  return extractFixFromJson(trimmed)
+}
+
+function extractFixFromJson(trimmed: string): string {
   // Try clean JSON.parse first
   try {
     const parsed = JSON.parse(trimmed)
@@ -143,30 +154,38 @@ function extractFix(raw: string): string {
 
   // Manually walk the string to find "fix": "..." and extract the value
   const fixKey = trimmed.indexOf('"fix"')
-  if (fixKey === -1) return raw
+  if (fixKey === -1) {
+    // No "fix" key — try to extract everything after first colon as content
+    const issueKey = trimmed.indexOf('"issue"')
+    if (issueKey !== -1) return extractValueAt(trimmed, issueKey, '"issue"')
+    return trimmed.replace(/^[{\s"]+|[}\s"]+$/g, '')
+  }
 
-  const colon = trimmed.indexOf(':', fixKey + 5)
-  if (colon === -1) return raw
+  return extractValueAt(trimmed, fixKey, '"fix"') || trimmed
+}
 
-  const openQuote = trimmed.indexOf('"', colon + 1)
-  if (openQuote === -1) return raw
+function extractValueAt(str: string, keyPos: number, key: string): string {
+  const colon = str.indexOf(':', keyPos + key.length)
+  if (colon === -1) return ''
 
-  // Walk char-by-char from the opening quote, handling escape sequences
+  const openQuote = str.indexOf('"', colon + 1)
+  if (openQuote === -1) return ''
+
   let result = ''
-  for (let i = openQuote + 1; i < trimmed.length; i++) {
-    const ch = trimmed[i]
-    if (ch === '\\' && i + 1 < trimmed.length) {
-      const next = trimmed[i + 1]
+  for (let i = openQuote + 1; i < str.length; i++) {
+    const ch = str[i]
+    if (ch === '\\' && i + 1 < str.length) {
+      const next = str[i + 1]
       if (next === 'n') { result += '\n'; i++; continue }
       if (next === '"') { result += '"'; i++; continue }
       if (next === '\\') { result += '\\'; i++; continue }
       result += next; i++; continue
     }
-    if (ch === '"') break // closing quote — done
+    if (ch === '"') break
     result += ch
   }
 
-  return result || raw
+  return result
 }
 
 export default function KBArticle({ fix, imageUrls }: { fix: string; imageUrls?: string[] }) {
