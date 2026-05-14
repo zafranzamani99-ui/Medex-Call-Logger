@@ -50,6 +50,13 @@ export default function SettingsPage() {
   const [lastUpload, setLastUpload] = useState<string | null>(null)
   const [clinicCount, setClinicCount] = useState<number>(0)
 
+  // CRM sync state
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<{
+    success: boolean
+    message: string
+  } | null>(null)
+
   useEffect(() => {
     loadPageData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -261,6 +268,37 @@ export default function SettingsPage() {
     }
   }
 
+  // CRM sync — pull fresh data from manager's CRM database
+  const handleCrmSync = async () => {
+    setSyncing(true)
+    setSyncResult(null)
+    try {
+      const resp = await fetch('/api/crm-sync', { method: 'POST' })
+      const text = await resp.text()
+      let data: Record<string, unknown>
+      try { data = JSON.parse(text) } catch { data = { error: `${resp.status}: ${text.slice(0, 200)}` } }
+
+      if (!resp.ok) throw new Error((data.error as string) || `HTTP ${resp.status}`)
+
+      const mapped = (data.mapped as number) || 0
+      const skipped = (data.skipped as number) || 0
+      const total = (data.totalContacts as number) || 0
+      setSyncResult({
+        success: true,
+        message: `Synced ${mapped.toLocaleString()} clinics from CRM (${total.toLocaleString()} contacts read, ${skipped} skipped)`,
+      })
+      setClinicCount(mapped)
+      setLastUpload(new Date().toISOString())
+      toast(`Synced ${mapped.toLocaleString()} clinics from CRM`)
+    } catch (err) {
+      const msg = (err as Error).message || 'Unknown error'
+      setSyncResult({ success: false, message: 'Sync failed: ' + msg })
+      toast('CRM sync failed: ' + msg, 'error')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   return (
     <div className="max-w-xl mx-auto">
       <div className="mb-8">
@@ -294,6 +332,60 @@ export default function SettingsPage() {
           </p>
         </div>
       </div>
+
+      {/* CRM Sync */}
+      {isAdminOrAbove(userRole) && (
+        <div className="bg-surface border border-border rounded-lg p-4 mb-4">
+          <h2 className="text-sm font-medium text-text-secondary mb-3">CRM Sync</h2>
+          <p className="text-xs text-text-tertiary mb-3">
+            Pull latest clinic data from the CRM database. This replaces the Excel upload for keeping clinic data fresh.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4 text-sm">
+            <div>
+              <span className="text-text-tertiary text-xs">Clinics in Database</span>
+              <p className="text-text-primary font-mono">{clinicCount.toLocaleString()}</p>
+            </div>
+            <div>
+              <span className="text-text-tertiary text-xs">Last Sync / Upload</span>
+              <p className="text-text-primary">
+                {lastUpload
+                  ? new Date(lastUpload).toLocaleDateString('en-GB', {
+                      day: '2-digit',
+                      month: '2-digit',
+                      year: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    })
+                  : 'Never'}
+              </p>
+            </div>
+          </div>
+
+          <Button
+            onClick={handleCrmSync}
+            disabled={syncing}
+            loading={syncing}
+            size="md"
+          >
+            {syncing ? 'Syncing from CRM...' : 'Sync from CRM'}
+          </Button>
+
+          {syncResult && (
+            <div
+              className={`mt-3 p-3 rounded-lg border ${
+                syncResult.success
+                  ? 'bg-green-500/10 border-green-500/20'
+                  : 'bg-red-500/10 border-red-500/20'
+              }`}
+            >
+              <p className={`text-sm ${syncResult.success ? 'text-green-400' : 'text-red-400'}`}>
+                {syncResult.message}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* CRM Upload */}
       <div className="bg-surface border border-border rounded-lg p-4">

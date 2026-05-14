@@ -102,7 +102,16 @@ export function fixDate(val: unknown): string | null {
   if (!str) return null
   if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.slice(0, 10)
   const match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/)
-  if (match) return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
+  if (match) {
+    let day = parseInt(match[1])
+    let month = parseInt(match[2])
+    // If month > 12, the date is MM/DD/YYYY — swap
+    if (month > 12 && day <= 12) {
+      const tmp = day; day = month; month = tmp
+    }
+    if (month > 12 || day > 31) return null
+    return `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  }
   return null
 }
 
