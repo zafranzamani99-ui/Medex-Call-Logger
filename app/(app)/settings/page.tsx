@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Button from '@/components/ui/Button'
 import { Input, Label } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/Toast'
+import { ModalDialog } from '@/components/Modal'
 import type { UserRole } from '@/lib/types'
 import { toProperCase, isAdminOrAbove } from '@/lib/constants'
 import HolidaysSection from '@/components/settings/HolidaysSection'
@@ -24,6 +25,112 @@ interface TeamMember {
   deactivated_at: string | null
   deactivated_by_name: string | null
   created_at: string
+}
+
+interface SyncChange {
+  type: 'added' | 'updated' | 'removed'
+  clinic_code: string
+  clinic_name: string
+  fields?: string[]
+}
+
+interface SyncLog {
+  id: string
+  synced_at: string
+  trigger: string
+  duration_ms: number | null
+  total_contacts: number | null
+  mapped: number | null
+  upserted: number | null
+  skipped: number | null
+  errors: number | null
+  changes: SyncChange[]
+  stale_cleanup: boolean
+}
+
+function formatSyncDuration(ms: number): string {
+  const seconds = Math.round(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}m ${secs}s`
+}
+
+function formatSyncDate(iso: string): string {
+  const d = new Date(iso)
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const year = d.getFullYear()
+  const hours = String(d.getHours()).padStart(2, '0')
+  const minutes = String(d.getMinutes()).padStart(2, '0')
+  return `${day}/${month}/${year} ${hours}:${minutes}`
+}
+
+function SyncChangeRow({ change }: { change: SyncChange }) {
+  const borderColor =
+    change.type === 'added'
+      ? 'border-l-green-500'
+      : change.type === 'updated'
+        ? 'border-l-amber-500'
+        : 'border-l-red-500'
+
+  const typeLabel =
+    change.type === 'added' ? 'Added' : change.type === 'updated' ? 'Updated' : 'Removed'
+
+  return (
+    <div className={`border-l-2 ${borderColor} pl-2.5 py-1`}>
+      <p className="text-xs text-text-primary">
+        <span className="text-text-secondary">{typeLabel}</span>{' '}
+        {change.clinic_code} — {change.clinic_name}
+      </p>
+      {change.type === 'updated' && change.fields && change.fields.length > 0 && (
+        <p className="text-[11px] text-text-muted mt-0.5">{change.fields.join(', ')}</p>
+      )}
+    </div>
+  )
+}
+
+function SyncChangesModal({
+  open,
+  onClose,
+  syncDate,
+  changes,
+}: {
+  open: boolean
+  onClose: () => void
+  syncDate: string
+  changes: SyncChange[]
+}) {
+  const added = changes.filter(c => c.type === 'added')
+  const updated = changes.filter(c => c.type === 'updated')
+  const removed = changes.filter(c => c.type === 'removed')
+
+  const sections: { label: string; items: SyncChange[] }[] = [
+    { label: 'Added', items: added },
+    { label: 'Updated', items: updated },
+    { label: 'Removed', items: removed },
+  ]
+
+  return (
+    <ModalDialog open={open} onClose={onClose} title={`Sync Changes — ${syncDate}`} size="md">
+      <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
+        {sections.map(section =>
+          section.items.length > 0 ? (
+            <div key={section.label}>
+              <h4 className="text-xs font-medium text-text-secondary mb-2">
+                {section.label} ({section.items.length})
+              </h4>
+              <div className="space-y-1.5">
+                {section.items.map((change, i) => (
+                  <SyncChangeRow key={i} change={change} />
+                ))}
+              </div>
+            </div>
+          ) : null,
+        )}
+      </div>
+    </ModalDialog>
+  )
 }
 
 export default function SettingsPage() {
@@ -56,9 +163,22 @@ export default function SettingsPage() {
     success: boolean
     message: string
   } | null>(null)
+  const [latestSync, setLatestSync] = useState<SyncLog | null>(null)
+  const [showChangesModal, setShowChangesModal] = useState(false)
+
+  const fetchLatestSync = useCallback(async () => {
+    const { data } = await supabase
+      .from('sync_logs')
+      .select('*')
+      .order('synced_at', { ascending: false })
+      .limit(1)
+      .single()
+    if (data) setLatestSync(data as SyncLog)
+  }, [supabase])
 
   useEffect(() => {
     loadPageData()
+    fetchLatestSync()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -290,6 +410,8 @@ export default function SettingsPage() {
       setClinicCount(mapped)
       setLastUpload(new Date().toISOString())
       toast(`Synced ${mapped.toLocaleString()} clinics from CRM`)
+      // Refresh sync log to show latest changes
+      await fetchLatestSync()
     } catch (err) {
       const msg = (err as Error).message || 'Unknown error'
       setSyncResult({ success: false, message: 'Sync failed: ' + msg })
@@ -362,14 +484,17 @@ export default function SettingsPage() {
             </div>
           </div>
 
-          <Button
-            onClick={handleCrmSync}
-            disabled={syncing}
-            loading={syncing}
-            size="md"
-          >
-            {syncing ? 'Syncing from CRM...' : 'Sync from CRM'}
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={handleCrmSync}
+              disabled={syncing}
+              loading={syncing}
+              size="md"
+            >
+              {syncing ? 'Syncing from CRM...' : 'Sync from CRM'}
+            </Button>
+            <span className="text-[11px] text-text-muted">Auto-syncs daily at 8:00 AM</span>
+          </div>
 
           {syncResult && (
             <div
@@ -384,7 +509,58 @@ export default function SettingsPage() {
               </p>
             </div>
           )}
+
+          {/* Latest sync result */}
+          {latestSync ? (
+            <div className="mt-4 pt-4 border-t border-border">
+              <p className="text-xs text-text-secondary">
+                Last synced: {formatSyncDate(latestSync.synced_at)}
+                {latestSync.trigger === 'cron' ? ' (auto)' : ''}
+                {latestSync.duration_ms != null ? ` (${formatSyncDuration(latestSync.duration_ms)})` : ''}
+                {latestSync.mapped != null ? ` — ${latestSync.mapped.toLocaleString()} clinics synced` : ''}
+              </p>
+
+              {/* Changes list */}
+              {latestSync.changes && latestSync.changes.length > 0 ? (
+                <div className="mt-3">
+                  <h3 className="text-xs font-medium text-text-secondary flex items-center gap-1.5">
+                    Changes
+                    <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-accent/15 text-accent">
+                      {latestSync.changes.length}
+                    </span>
+                  </h3>
+                  <div className="mt-2 space-y-1.5">
+                    {latestSync.changes.slice(0, 5).map((change, i) => (
+                      <SyncChangeRow key={i} change={change} />
+                    ))}
+                  </div>
+                  {latestSync.changes.length > 5 && (
+                    <button
+                      onClick={() => setShowChangesModal(true)}
+                      className="mt-2 text-xs text-accent hover:text-accent/80 transition-colors"
+                    >
+                      See all {latestSync.changes.length} changes
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-3 text-xs text-text-muted">No changes detected</p>
+              )}
+            </div>
+          ) : (
+            <p className="mt-4 pt-4 border-t border-border text-xs text-text-muted">No sync history yet</p>
+          )}
         </div>
+      )}
+
+      {/* Sync Changes Modal */}
+      {latestSync && latestSync.changes && latestSync.changes.length > 0 && (
+        <SyncChangesModal
+          open={showChangesModal}
+          onClose={() => setShowChangesModal(false)}
+          syncDate={formatSyncDate(latestSync.synced_at)}
+          changes={latestSync.changes}
+        />
       )}
 
       {/* CRM Upload */}

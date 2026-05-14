@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { createClient as createServerClient } from '@/lib/supabase/server'
 import { embedText, vectorLiteral } from '@/lib/embeddings'
 
 // WHY: Server-side AI KB generation. Phase-1 dedupe upgrade:
@@ -27,6 +28,12 @@ const MAX_OUTPUT_TOK  = 2048
 const FEWSHOT_LIMIT   = 2     // was 3
 
 export async function POST(req: NextRequest) {
+  const userClient = createServerClient()
+  const { data: userRes } = await userClient.auth.getUser()
+  if (!userRes?.user) {
+    return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
+  }
+
   if (!GEMINI_API_KEY) {
     return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 })
   }

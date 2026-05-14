@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
+import { createClient as createServerClient } from '@/lib/supabase/server'
 
 const BUCKET = 'ticket-attachments'
 const MAX_SIZE = 5 * 1024 * 1024 // 5MB
 const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg']
 
 export async function POST(req: NextRequest) {
+  const userClient = createServerClient()
+  const { data: userRes } = await userClient.auth.getUser()
+  if (!userRes?.user) {
+    return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
+  }
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!url || !serviceKey) {

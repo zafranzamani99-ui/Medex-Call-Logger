@@ -293,6 +293,15 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
   // Wrapped in Office XML namespace document so Outlook treats it like Excel output.
   // Copy via DOM selection (not ClipboardItem API) so browser sends rendered format.
 
+  // XSS prevention: escape user-controlled data before interpolating into HTML.
+  function escHtml(s: unknown): string {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
   const generateHTML = () => {
     // Cell style helpers — BOTH bgcolor attr AND background-color CSS for maximum compatibility
     const cell = (bg: string, extra = '') =>
@@ -302,17 +311,17 @@ export default function LicenseKeyModal({ clinic, agentName, onClose }: LicenseK
     const lc = (bg: string) => cell(bg, 'width:200px;')                     // label cell
     const vc = (bg: string) => cell(bg)                                      // value cell
 
-    // Regular row — white bg
+    // Regular row — white bg (value is escaped to prevent XSS)
     const r = (num: string, label: string, value: string) =>
-      `<tr><td ${nc('#FFFFFF')}><font color="#000000">${num}</font></td><td ${lc('#FFFFFF')}><font color="#000000">${label}</font></td><td ${vc('#FFFFFF')}><font color="#000000">${value}</font></td></tr>`
+      `<tr><td ${nc('#FFFFFF')}><font color="#000000">${num}</font></td><td ${lc('#FFFFFF')}><font color="#000000">${label}</font></td><td ${vc('#FFFFFF')}><font color="#000000">${escHtml(value)}</font></td></tr>`
 
     // Section header — merged across all 3 columns
     const hdr = (text: string) =>
       `<tr><td colspan="3" ${cell('#404040', 'width:100%;')}><b><font color="#FFFFFF">${text}</font></b></td></tr>`
 
-    // Activation header — first 2 cols merged (dark), value col also dark
+    // Activation header — first 2 cols merged (dark), value col also dark (val escaped)
     const actHdr = (text: string, val: string, extra = '') =>
-      `<tr><td colspan="2" ${cell('#404040', 'width:225px;')}><b><font color="#FFFFFF">${text}</font></b></td><td ${cell('#404040', 'text-align:center;')}><b><font color="#FFFFFF">${val}</font></b>${extra}</td></tr>`
+      `<tr><td colspan="2" ${cell('#404040', 'width:225px;')}><b><font color="#FFFFFF">${text}</font></b></td><td ${cell('#404040', 'text-align:center;')}><b><font color="#FFFFFF">${escHtml(val)}</font></b>${extra}</td></tr>`
 
     const red = (text: string) => `<font color="#FF0000"><b>${text}</b></font>`
 
@@ -366,9 +375,9 @@ ${r('27', 'Email Address (suggest use Google email)', emailAddress)}
 ${r('28', 'Email Password', emailPassword)}
 </table>`
 
-    // Convert newlines to <br> for header/footer
-    const headerHTML = emailHeader ? `<p style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;">${emailHeader.replace(/\n/g, '<br>')}</p>` : ''
-    const footerHTML = emailFooter ? `<p style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;white-space:pre-wrap;">${emailFooter.replace(/\n/g, '<br>')}</p>` : ''
+    // Convert newlines to <br> for header/footer (escape first to prevent XSS)
+    const headerHTML = emailHeader ? `<p style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;">${escHtml(emailHeader).replace(/\n/g, '<br>')}</p>` : ''
+    const footerHTML = emailFooter ? `<p style="font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#000;white-space:pre-wrap;">${escHtml(emailFooter).replace(/\n/g, '<br>')}</p>` : ''
 
     return `${headerHTML}<br>${tableHTML}${footerHTML}`
   }

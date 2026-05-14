@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient as createServerClient } from '@/lib/supabase/server'
 
 // WHY: Takes an agent's rough edit (broken English, informal notes) and polishes it
 // into a clean KB article. Keeps all technical content (table names, SQL, paths) intact —
@@ -7,6 +8,12 @@ import { NextRequest, NextResponse } from 'next/server'
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 
 export async function POST(req: NextRequest) {
+  const userClient = createServerClient()
+  const { data: userRes } = await userClient.auth.getUser()
+  if (!userRes?.user) {
+    return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
+  }
+
   if (!GEMINI_API_KEY) {
     return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 })
   }

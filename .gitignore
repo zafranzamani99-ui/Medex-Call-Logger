@@ -34,3 +34,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Security — prevent accidental secret/data commits
+.env
+.env.production
+.env.development
+*.xlsx
+*.docx
+*.csv
