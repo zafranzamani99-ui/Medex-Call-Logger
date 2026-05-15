@@ -344,7 +344,7 @@ export default function JobSheetPrintLayout({
                     <td style={{ fontSize: '9px' }}>After: <span className="v" style={{ fontSize: '9px' }}>{importantDetails.service_db_size_after}</span></td>
                   </tr>
                   <tr>
-                    <td style={{ fontSize: '9px' }}>Ultraviewer/Anydesk :</td>
+                    <td style={{ fontSize: '9px' }}>Ultraviewer/Anydesk : <span className="v" style={{ fontSize: '9px' }}>{importantDetails.ultraviewer_id || importantDetails.anydesk_id}</span></td>
                     <td style={{ fontSize: '9px' }}>PW- <span className="v" style={{ fontSize: '9px' }}>{importantDetails.ultraviewer_pw || importantDetails.anydesk_pw}</span></td>
                   </tr>
                   <tr><td colSpan={2} style={{ fontSize: '9px' }}><span className="ck"></span> RAM: <span className="v" style={{ fontSize: '9px' }}>{importantDetails.ram}</span></td></tr>
