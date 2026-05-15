@@ -434,6 +434,7 @@ export interface Schedule {
   pic_support: string | null
   pic_support_id: string | null
   reschedule_reason: string | null
+  edit_history: { by: string; at: string; fields: string[] }[] | null
   created_at: string
   updated_at: string
 }

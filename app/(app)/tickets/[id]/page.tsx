@@ -507,11 +507,6 @@ export default function TicketDetailPage() {
         toast('Fully collected — consider resolving this ticket', 'success')
       }
     }
-    // Append follow-up images to ticket's attachment_urls
-    if (updateAttachments.length > 0) {
-      const existing = ticket.attachment_urls || []
-      ticketUpdate.attachment_urls = [...existing, ...updateAttachments]
-    }
     await supabase.from('tickets').update(ticketUpdate).eq('id', ticket.id)
     // Insert inbox message when escalating to admin via follow-up
     if (followUpStatus === 'Escalated to Admin' && followUpAdminMessage.trim()) {

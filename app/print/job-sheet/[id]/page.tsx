@@ -171,7 +171,7 @@ export default function PrintJobSheetPage() {
       // Open mailto
       const year = new Date().getFullYear()
       const to = clinicEmail || ''
-      const cc = 'allsupport@medexoneglobal.com; celine.gan@medexoneglobal.com'
+      const cc = 'allsupport@medexoneglobal.com; admin@medexoneglobal.com'
       const subject = `JOBSHEET ${svcType.toUpperCase()} for ${clinicName} (${clinicCode})`
       const header = emailHeader
         .replace('{{SERVICE_TYPE}}', svcType.toUpperCase())

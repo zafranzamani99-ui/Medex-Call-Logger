@@ -869,9 +869,28 @@ export default function SchedulePage() {
     setEditSaving(true)
     const duration = SCHEDULE_TYPES.find(t => t.value === editType)?.duration || ''
 
+    const changedFields: string[] = []
+    const newClinicCode = editClinic ? editClinic.clinic_code : selectedSchedule.clinic_code
+    const newClinicName = editClinic ? editClinic.clinic_name : editClinicNameManual
+    if (newClinicCode !== selectedSchedule.clinic_code || newClinicName !== selectedSchedule.clinic_name) changedFields.push('clinic')
+    if (editDate !== selectedSchedule.schedule_date) changedFields.push('date')
+    if (editTime !== selectedSchedule.schedule_time) changedFields.push('time')
+    if (editType !== selectedSchedule.schedule_type) changedFields.push('type')
+    if (editMode !== selectedSchedule.mode) changedFields.push('mode')
+    if ((editPic || '') !== (selectedSchedule.pic || '')) changedFields.push('pic')
+    if ((editPicSupport || '') !== (selectedSchedule.pic_support || '')) changedFields.push('pic support')
+    if ((editClinicWa || '') !== (selectedSchedule.clinic_wa || '')) changedFields.push('whatsapp')
+    if ((editNotes || '') !== (selectedSchedule.notes || '')) changedFields.push('notes')
+
+    const now = new Date()
+    const prevHistory = selectedSchedule.edit_history || []
+    const newHistory = changedFields.length > 0
+      ? [...prevHistory, { by: userName || 'Unknown', at: now.toISOString(), fields: changedFields }]
+      : prevHistory
+
     const { error } = await supabase.from('schedules').update({
-      clinic_code: editClinic ? editClinic.clinic_code : selectedSchedule.clinic_code,
-      clinic_name: editClinic ? editClinic.clinic_name : editClinicNameManual,
+      clinic_code: newClinicCode,
+      clinic_name: newClinicName,
       schedule_date: editDate,
       schedule_time: editTime,
       schedule_type: editType,
@@ -879,11 +898,12 @@ export default function SchedulePage() {
       duration_estimate: duration || null,
       mode: editMode,
       notes: editNotes || null,
+      edit_history: newHistory,
       pic: editPic || null,
       pic_support: editPicSupport || null,
       pic_support_id: editPicSupportId,
       clinic_wa: editClinicWa || null,
-      updated_at: new Date().toISOString(),
+      updated_at: now.toISOString(),
     }).eq('id', selectedSchedule.id)
 
     if (error) {
@@ -1871,56 +1891,6 @@ export default function SchedulePage() {
                       </div>
                     </div>
 
-                    {/* System Info (CRM operational data) */}
-                    {selectedSchedule.clinic_code !== 'MANUAL' && workClinic && (
-                      <div className={`border border-indigo-500/20 bg-indigo-500/5 rounded-lg p-3 transition-opacity ${isPaused ? 'opacity-40' : ''}`}>
-                        <div className="flex items-center justify-between mb-2">
-                          <h4 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">System Info</h4>
-                          <button
-                            onClick={() => setShowCrmPanel(true)}
-                            className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
-                          >
-                            Edit Full CRM →
-                          </button>
-                        </div>
-                        {(workClinic.workstation_count || workClinic.main_pc_name || workClinic.ultraviewer_id || workClinic.anydesk_id || workClinic.current_program_version || workClinic.ram) ? (
-                          <div className="flex flex-wrap gap-1.5">
-                            {workClinic.workstation_count && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.workstation_count}</span>
-                            )}
-                            {workClinic.main_pc_name && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.main_pc_name}</span>
-                            )}
-                            {workClinic.ram && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.ram} RAM</span>
-                            )}
-                            {workClinic.ultraviewer_id && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">UV: {workClinic.ultraviewer_id}</span>
-                            )}
-                            {workClinic.anydesk_id && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">AD: {workClinic.anydesk_id}</span>
-                            )}
-                            {workClinic.current_program_version && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">v{workClinic.current_program_version}</span>
-                            )}
-                            {workClinic.current_db_version && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">DB {workClinic.current_db_version}</span>
-                            )}
-                            {workClinic.db_size && (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.db_size}</span>
-                            )}
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setShowCrmPanel(true)}
-                            className="w-full py-2 text-xs text-text-muted hover:text-indigo-400 border border-dashed border-border rounded-lg transition-colors"
-                          >
-                            + Add system info (workstations, UV/AD, versions)
-                          </button>
-                        )}
-                      </div>
-                    )}
-
                     {/* Quick Action Buttons */}
                     <div className={`flex flex-wrap gap-2 transition-opacity ${isPaused ? 'opacity-40' : ''}`}>
                       {/* CRM */}
@@ -1935,23 +1905,6 @@ export default function SchedulePage() {
                           CRM
                         </button>
                       )}
-                      {/* Call */}
-                      {(() => {
-                        const phone = workClinic?.clinic_phone || clinicPhones[selectedSchedule.clinic_code]
-                        return (
-                          <a
-                            href={phone ? `tel:${phone}` : undefined}
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                              phone ? 'bg-green-500/10 text-green-400 border-green-500/30 hover:bg-green-500/20' : 'bg-surface border-border text-text-muted cursor-not-allowed'
-                            }`}
-                          >
-                            <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                            </svg>
-                            Call
-                          </a>
-                        )
-                      })()}
                       {/* WhatsApp */}
                       {(() => {
                         const wa = selectedSchedule.clinic_wa
@@ -1975,11 +1928,7 @@ export default function SchedulePage() {
                       <button
                         onClick={() => {
                           if (selectedSchedule.clinic_code === 'MANUAL') return
-                          sessionStorage.setItem('lk-prefill', JSON.stringify({
-                            clinic_code: selectedSchedule.clinic_code,
-                            clinic_name: selectedSchedule.clinic_name,
-                          }))
-                          router.push('/lk')
+                          window.open(`/lk?prefill=${encodeURIComponent(selectedSchedule.clinic_code)}`, '_blank')
                         }}
                         disabled={selectedSchedule.clinic_code === 'MANUAL'}
                         className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
@@ -2062,6 +2011,56 @@ export default function SchedulePage() {
                       </button>
                     </div>
 
+                    {/* System Info (CRM operational data) */}
+                    {selectedSchedule.clinic_code !== 'MANUAL' && workClinic && (
+                      <div className={`border border-indigo-500/20 bg-indigo-500/5 rounded-lg p-3 transition-opacity ${isPaused ? 'opacity-40' : ''}`}>
+                        <div className="flex items-center justify-between mb-2">
+                          <h4 className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">System Info</h4>
+                          <button
+                            onClick={() => setShowCrmPanel(true)}
+                            className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors"
+                          >
+                            Edit Full CRM →
+                          </button>
+                        </div>
+                        {(workClinic.workstation_count || workClinic.main_pc_name || workClinic.ultraviewer_id || workClinic.anydesk_id || workClinic.current_program_version || workClinic.ram) ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {workClinic.workstation_count && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.workstation_count}</span>
+                            )}
+                            {workClinic.main_pc_name && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.main_pc_name}</span>
+                            )}
+                            {workClinic.ram && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.ram} RAM</span>
+                            )}
+                            {workClinic.ultraviewer_id && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">UV: {workClinic.ultraviewer_id}</span>
+                            )}
+                            {workClinic.anydesk_id && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">AD: {workClinic.anydesk_id}</span>
+                            )}
+                            {workClinic.current_program_version && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">v{workClinic.current_program_version}</span>
+                            )}
+                            {workClinic.current_db_version && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">DB {workClinic.current_db_version}</span>
+                            )}
+                            {workClinic.db_size && (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded bg-zinc-700/50 text-text-secondary text-[11px] font-mono">{workClinic.db_size}</span>
+                            )}
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setShowCrmPanel(true)}
+                            className="w-full py-2 text-xs text-text-muted hover:text-indigo-400 border border-dashed border-border rounded-lg transition-colors"
+                          >
+                            + Add system info (workstations, UV/AD, versions)
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {/* Pause banner (when paused) */}
                     {isPaused && (
                       <div className={`border rounded-lg p-3 space-y-1 ${pauseNudge ? 'border-red-500/40 bg-red-500/5 animate-pulse' : 'border-orange-500/30 bg-orange-500/5'}`}>
@@ -2110,7 +2109,7 @@ export default function SchedulePage() {
                       <Textarea
                         value={workNotes}
                         onChange={(e) => handleWorkNotesChange(e.target.value)}
-                        rows={3}
+                        rows={10}
                         placeholder="Working notes — auto-saves..."
                       />
                     </div>
@@ -2215,8 +2214,11 @@ export default function SchedulePage() {
               </div>
 
               {/* Audit line */}
-              <div className="px-4 py-1.5 text-[11px] text-text-muted">
-                Logged by {agentDisplayName(selectedSchedule)} · {new Date(selectedSchedule.created_at).toLocaleDateString('en-GB')} at {new Date(selectedSchedule.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+              <div className="px-4 py-1.5 text-[11px] text-text-muted space-y-0.5">
+                <div>Logged by {agentDisplayName(selectedSchedule)} · {new Date(selectedSchedule.created_at).toLocaleDateString('en-GB')} at {new Date(selectedSchedule.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
+                {[...(selectedSchedule.edit_history || [])].reverse().map((e, i) => (
+                  <div key={i}>Edited by {e.by} · {new Date(e.at).toLocaleDateString('en-GB')} at {new Date(e.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} — changed: {e.fields.join(', ')}</div>
+                ))}
               </div>
 
               {/* Actions */}

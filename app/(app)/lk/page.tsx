@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic } from '@/lib/types'
 import ClinicSearch from '@/components/ClinicSearch'
@@ -21,7 +22,12 @@ interface LKRecord {
 }
 
 export default function LKPage() {
+  return <Suspense><LKPageInner /></Suspense>
+}
+
+function LKPageInner() {
   const supabase = createClient()
+  const searchParams = useSearchParams()
   const [userName, setUserName] = useState('')
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null)
   const [showModal, setShowModal] = useState(false)
@@ -48,24 +54,22 @@ export default function LKPage() {
         .limit(20)
       if (data) setHistory(data)
 
-      // Check for pre-fill from Schedule Work Panel
-      const prefill = sessionStorage.getItem('lk-prefill')
-      if (prefill) {
-        sessionStorage.removeItem('lk-prefill')
-        try {
-          const { clinic_code } = JSON.parse(prefill)
-          if (clinic_code) {
-            const { data: clinic } = await supabase
-              .from('clinics')
-              .select('*')
-              .eq('clinic_code', clinic_code)
-              .single()
-            if (clinic) {
-              setSelectedClinic(clinic as Clinic)
-              setShowModal(true)
-            }
-          }
-        } catch { /* ignore bad prefill */ }
+      // Check for pre-fill from Schedule Work Panel (URL param or sessionStorage)
+      const prefillCode = searchParams.get('prefill') || (() => {
+        const s = sessionStorage.getItem('lk-prefill')
+        if (s) { sessionStorage.removeItem('lk-prefill'); try { return JSON.parse(s).clinic_code } catch { return null } }
+        return null
+      })()
+      if (prefillCode) {
+        const { data: clinic } = await supabase
+          .from('clinics')
+          .select('*')
+          .eq('clinic_code', prefillCode)
+          .single()
+        if (clinic) {
+          setSelectedClinic(clinic as Clinic)
+          setShowModal(true)
+        }
       }
     }
     init()
