@@ -2216,7 +2216,7 @@ export default function SchedulePage() {
               {/* Audit line */}
               <div className="px-4 py-1.5 text-[11px] text-text-muted space-y-0.5">
                 <div>Logged by {agentDisplayName(selectedSchedule)} · {new Date(selectedSchedule.created_at).toLocaleDateString('en-GB')} at {new Date(selectedSchedule.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</div>
-                {[...(selectedSchedule.edit_history || [])].reverse().map((e, i) => (
+                {!showWorkPanel && [...(selectedSchedule.edit_history || [])].reverse().map((e, i) => (
                   <div key={i}>Edited by {e.by} · {new Date(e.at).toLocaleDateString('en-GB')} at {new Date(e.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} — changed: {e.fields.join(', ')}</div>
                 ))}
               </div>
