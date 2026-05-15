@@ -27,7 +27,6 @@ export default function JobSheetsPage() {
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
-
   // Create modal
   const [showCreate, setShowCreate] = useState(false)
   const [formClinic, setFormClinic] = useState<Clinic | null>(null)
@@ -425,6 +424,7 @@ export default function JobSheetsPage() {
                   <th className="text-left px-4 py-3 font-medium">Service By</th>
                   <th className="text-left px-4 py-3 font-medium">Types</th>
                   <th className="text-left px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium w-10"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -452,6 +452,22 @@ export default function JobSheetsPage() {
                       <td className="px-4 py-3">
                         <Badge bg={sc.bg} text={sc.text}>{js.status}</Badge>
                       </td>
+                      <td className="px-4 py-3">
+                        {js.status === 'completed' && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              window.open(`/print/job-sheet/${js.id}`, 'js-email', 'width=850,height=1100,scrollbars=yes')
+                            }}
+                            className="p-1.5 rounded-lg hover:bg-surface-raised text-text-tertiary hover:text-accent transition-colors"
+                            title="Send email"
+                          >
+                            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                            </svg>
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   )
                 })}
@@ -471,7 +487,23 @@ export default function JobSheetsPage() {
                 >
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-mono text-xs text-accent">{js.js_number}</span>
-                    <Badge bg={sc.bg} text={sc.text}>{js.status}</Badge>
+                    <div className="flex items-center gap-2">
+                      {js.status === 'completed' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            window.open(`/print/job-sheet/${js.id}`, 'js-email', 'width=850,height=1100,scrollbars=yes')
+                          }}
+                          className="p-1 rounded-lg hover:bg-surface-raised text-text-tertiary hover:text-accent transition-colors"
+                          title="Send email"
+                        >
+                          <svg className="size-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                          </svg>
+                        </button>
+                      )}
+                      <Badge bg={sc.bg} text={sc.text}>{js.status}</Badge>
+                    </div>
                   </div>
                   <p className="text-sm text-text-primary font-medium">{js.clinic_name}</p>
                   <div className="flex items-center gap-2 mt-1 text-xs text-text-tertiary">
