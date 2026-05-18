@@ -332,20 +332,10 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center gap-3 flex-wrap">
                 {activeWork.map((s) => {
-                  let schedPaused = false
-                  let pausedTotalMs = 0
-                  let pausedAtMs = 0
-                  let pauseReason = ''
-                  try {
-                    const raw = sessionStorage.getItem(`pause-${s.id}`)
-                    if (raw) {
-                      const p = JSON.parse(raw)
-                      pausedTotalMs = p.totalPausedMs || 0
-                      pausedAtMs = p.pausedAt || 0
-                      pauseReason = p.pauseReason || ''
-                      schedPaused = !!pausedAtMs
-                    }
-                  } catch { /* ignore */ }
+                  const schedPaused = !!s.is_paused
+                  const pausedTotalMs = s.total_paused_ms || 0
+                  const pausedAtMs = s.paused_at ? new Date(s.paused_at).getTime() : 0
+                  const pauseReason = s.pause_reason || ''
                   const elapsedSec = s.started_at
                     ? schedPaused
                       ? Math.max(0, Math.round((pausedAtMs - new Date(s.started_at).getTime() - pausedTotalMs) / 1000))

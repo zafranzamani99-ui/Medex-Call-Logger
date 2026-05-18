@@ -154,7 +154,7 @@ export default function SettingsPage() {
     count?: number
     timestamp?: string
   } | null>(null)
-  const [lastUpload, setLastUpload] = useState<string | null>(null)
+
   const [clinicCount, setClinicCount] = useState<number>(0)
 
   // CRM sync state
@@ -204,9 +204,6 @@ export default function SettingsPage() {
       setUserRole((profileRes.data.role as UserRole) || 'support')
     }
     setClinicCount(countRes.count || 0)
-    if (latestRes.data && latestRes.data.length > 0) {
-      setLastUpload(latestRes.data[0].updated_at)
-    }
     if (teamRes.data) {
       setTeamMembers(teamRes.data as TeamMember[])
     }
@@ -330,7 +327,7 @@ export default function SettingsPage() {
         const count = (data.count as number) || 0
         const timestamp = (data.timestamp as string) || new Date().toISOString()
         setUploadResult({ success: true, message: `Successfully imported ${count} clinics`, count, timestamp })
-        setLastUpload(timestamp)
+
         setClinicCount(count)
         toast(`Successfully imported ${count} clinics`)
         return
@@ -375,7 +372,6 @@ export default function SettingsPage() {
         count: total,
         timestamp,
       })
-      setLastUpload(timestamp)
       setClinicCount(total)
       toast(`Successfully imported ${total} clinics`)
     } catch (err) {
@@ -408,7 +404,6 @@ export default function SettingsPage() {
         message: `Synced ${mapped.toLocaleString()} clinics from CRM (${total.toLocaleString()} contacts read, ${skipped} skipped)`,
       })
       setClinicCount(mapped)
-      setLastUpload(new Date().toISOString())
       toast(`Synced ${mapped.toLocaleString()} clinics from CRM`)
       // Refresh sync log to show latest changes
       await fetchLatestSync()
@@ -469,10 +464,10 @@ export default function SettingsPage() {
               <p className="text-text-primary font-mono">{clinicCount.toLocaleString()}</p>
             </div>
             <div>
-              <span className="text-text-tertiary text-xs">Last Sync / Upload</span>
+              <span className="text-text-tertiary text-xs">Last Sync</span>
               <p className="text-text-primary">
-                {lastUpload
-                  ? new Date(lastUpload).toLocaleDateString('en-GB', {
+                {latestSync?.synced_at
+                  ? new Date(latestSync.synced_at).toLocaleDateString('en-GB', {
                       day: '2-digit',
                       month: '2-digit',
                       year: 'numeric',
@@ -576,15 +571,15 @@ export default function SettingsPage() {
           <div>
             <span className="text-text-tertiary text-xs">Last Upload</span>
             <p className="text-text-primary">
-              {lastUpload
-                ? new Date(lastUpload).toLocaleDateString('en-GB', {
+              {uploadResult?.timestamp
+                ? new Date(uploadResult.timestamp).toLocaleDateString('en-GB', {
                     day: '2-digit',
                     month: '2-digit',
                     year: 'numeric',
                     hour: '2-digit',
                     minute: '2-digit',
                   })
-                : 'Never'}
+                : '—'}
             </p>
           </div>
         </div>

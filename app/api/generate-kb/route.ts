@@ -38,14 +38,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Gemini API key not configured' }, { status: 500 })
   }
 
+  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+  // Admin tickets (invoices, payments, collections) aren't useful as KB articles.
+  const { data: profile } = await supabase
+    .from('profiles')
+    .select('role')
+    .eq('id', userRes.user.id)
+    .single()
+
+  if (profile?.role === 'admin') {
+    return NextResponse.json({ success: true, skipped: true, reason: 'admin_ticket' })
+  }
+
   const body = await req.json()
   const { ticket_id, issue_type, issue, my_response, next_step, agent_name } = body
 
   if (!ticket_id || !issue_type || !issue) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
   }
-
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
   // ─── Phase 1 dedupe gate ────────────────────────────────────────────
   const ticketEmbeddingText = `${issue}\n\n${my_response || ''}`.slice(0, 8000)

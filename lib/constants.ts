@@ -206,23 +206,37 @@ export function formatWorkDurationLive(totalSeconds: number): string {
 
 // Schedule type options with duration estimates
 export const SCHEDULE_TYPES: { value: string; label: string; duration: string }[] = [
-  { value: 'ISP', label: 'ISP', duration: 'Varies' },
   { value: 'MTN', label: 'MTN (Maintenance)', duration: '~1 hour' },
+  { value: 'ISP', label: 'ISP', duration: 'Varies' },
   { value: 'Server Migration', label: 'Server Migration', duration: '~1.5 to 2 hours' },
-  { value: 'E-INV + SST', label: 'E-INV + SST', duration: '~1 hour' },
-  { value: 'WhatsApp', label: 'WhatsApp Setup', duration: '~30 minutes' },
-  { value: 'Training', label: 'Training', duration: 'Varies' },
+  { value: 'EINV Only', label: 'EINV Only', duration: '~1 hour' },
+  { value: 'EINV + WS', label: 'EINV + WS', duration: '~1 - 1.5 hours' },
+  { value: 'EINV + SST', label: 'EINV + SST', duration: '~1 - 1.5 hours' },
+  { value: 'WS Only', label: 'WS Only', duration: '~30 minutes' },
+  { value: 'SST', label: 'SST', duration: '~30 minutes' },
+  { value: 'Training EINV', label: 'Training EINV', duration: '~0.5 - 1 hour' },
+  { value: 'Training Inventory', label: 'Training Inventory', duration: '~0.5 - 1 hour' },
+  { value: 'Training SST', label: 'Training SST', duration: '~0.5 - 1 hour' },
   { value: 'Others', label: 'Others', duration: '' },
 ]
 
 export const SCHEDULE_TYPE_COLORS: Record<string, { bg: string; text: string }> = {
-  'ISP':              { bg: 'bg-fuchsia-500/25', text: 'text-fuchsia-500' },
-  'MTN':              { bg: 'bg-cyan-500/20', text: 'text-cyan-400' },
-  'Server Migration': { bg: 'bg-violet-500/20', text: 'text-violet-400' },
-  'E-INV + SST':      { bg: 'bg-rose-500/20', text: 'text-rose-400' },
-  'WhatsApp':         { bg: 'bg-emerald-500/20', text: 'text-emerald-400' },
-  'Training':         { bg: 'bg-amber-500/20', text: 'text-amber-400' },
-  'Others':           { bg: 'bg-gray-500/20', text: 'text-gray-400' },
+  'ISP':                { bg: 'bg-fuchsia-500/25', text: 'text-fuchsia-500' },
+  'MTN':                { bg: 'bg-cyan-500/20', text: 'text-cyan-400' },
+  'Server Migration':   { bg: 'bg-violet-500/20', text: 'text-violet-400' },
+  'EINV Only':          { bg: 'bg-orange-500/20', text: 'text-orange-400' },
+  'EINV + WS':          { bg: 'bg-orange-500/20', text: 'text-orange-400' },
+  'EINV + SST':         { bg: 'bg-orange-500/20', text: 'text-orange-400' },
+  'WS Only':            { bg: 'bg-lime-500/20', text: 'text-lime-400' },
+  'SST':                { bg: 'bg-pink-500/20', text: 'text-pink-400' },
+  'Training EINV':      { bg: 'bg-amber-500/20', text: 'text-amber-400' },
+  'Training Inventory': { bg: 'bg-amber-500/20', text: 'text-amber-400' },
+  'Training SST':       { bg: 'bg-amber-500/20', text: 'text-amber-400' },
+  'Others':             { bg: 'bg-gray-500/20', text: 'text-gray-400' },
+  // Legacy
+  'E-INV + SST':        { bg: 'bg-orange-500/20', text: 'text-orange-400' },
+  'WhatsApp':           { bg: 'bg-emerald-500/20', text: 'text-emerald-400' },
+  'Training':           { bg: 'bg-amber-500/20', text: 'text-amber-400' },
 }
 
 // Channel colours for timeline display

@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/client'
 // staff_leave rows. Per user direction, no approval flow; just a calendar overlay.
 
 const REASONS = ['Annual', 'Medical', 'Emergency', 'Replacement', 'Other'] as const
+const HALF_DAY_OPTIONS = ['Full Day', 'Half Day AM', 'Half Day PM'] as const
 
 interface Props {
   open: boolean
@@ -29,6 +30,7 @@ export default function MarkLeaveModal({ open, onClose, onSaved, agents, prefill
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')  // optional — if set, creates a range
   const [reason, setReason] = useState<string>('Annual')
+  const [halfDay, setHalfDay] = useState<string>('Full Day')
   const [otherReason, setOtherReason] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -40,6 +42,7 @@ export default function MarkLeaveModal({ open, onClose, onSaved, agents, prefill
       setStartDate(prefilledDate || '')
       setEndDate('')
       setReason('Annual')
+      setHalfDay('Full Day')
       setOtherReason('')
     }
   }, [open, prefilledDate])
@@ -63,7 +66,8 @@ export default function MarkLeaveModal({ open, onClose, onSaved, agents, prefill
     }
     setSaving(true)
     const { data: { session } } = await supabase.auth.getSession()
-    const finalReason = reason === 'Other' ? (otherReason.trim() || 'Other') : reason
+    let finalReason = reason === 'Other' ? (otherReason.trim() || 'Other') : reason
+    if (reason === 'Annual' && halfDay !== 'Full Day') finalReason = `Annual (${halfDay})`
     const dates = expandRange(startDate, endDate)
     const rows = dates.map(d => ({
       staff_id: staffId,
@@ -127,6 +131,25 @@ export default function MarkLeaveModal({ open, onClose, onSaved, agents, prefill
             {REASONS.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
         </div>
+
+        {reason === 'Annual' && (
+          <div className="flex gap-1.5">
+            {HALF_DAY_OPTIONS.map(opt => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setHalfDay(opt)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  halfDay === opt
+                    ? 'bg-accent/15 text-accent border-accent/30'
+                    : 'bg-surface border-border text-text-secondary hover:text-text-primary'
+                }`}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        )}
 
         {reason === 'Other' && (
           <div>

@@ -47,6 +47,7 @@ export default function HolidaysSection() {
   const [adding, setAdding] = useState(false)
   const [newDate, setNewDate] = useState('')
   const [newName, setNewName] = useState('')
+  const [newNotes, setNewNotes] = useState('')
   const [newScope, setNewScope] = useState('federal')
   const [filter, setFilter] = useState<'all' | 'federal' | 'state'>('all')
   const [collapsed, setCollapsed] = useState(true)
@@ -81,6 +82,7 @@ export default function HolidaysSection() {
     const { error } = await supabase.from('public_holidays').insert({
       holiday_date: newDate,
       name: newName.trim(),
+      notes: newNotes.trim() || null,
       scope: newScope,
       created_by: session?.user.id || null,
     })
@@ -92,6 +94,7 @@ export default function HolidaysSection() {
     toast('Holiday added', 'success')
     setNewDate('')
     setNewName('')
+    setNewNotes('')
     setNewScope('federal')
     load()
   }
@@ -159,7 +162,7 @@ export default function HolidaysSection() {
       </p>
 
       {/* Add row */}
-      <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr_180px_auto] gap-2 mb-4 p-3 bg-surface-raised rounded-lg">
+      <div className="grid grid-cols-1 sm:grid-cols-[150px_1fr_1fr_180px_auto] gap-2 mb-4 p-3 bg-surface-raised rounded-lg">
         <div>
           <Label>Date</Label>
           <Input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)} />
@@ -167,6 +170,10 @@ export default function HolidaysSection() {
         <div>
           <Label>Name</Label>
           <Input type="text" value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Sultan's Birthday" />
+        </div>
+        <div>
+          <Label>Notes</Label>
+          <Input type="text" value={newNotes} onChange={(e) => setNewNotes(e.target.value)} placeholder="e.g. Replacement for Wesak Day" />
         </div>
         <div>
           <Label>Scope</Label>
@@ -223,7 +230,7 @@ export default function HolidaysSection() {
                 <span className="text-xs font-mono text-text-tertiary w-20 flex-shrink-0">
                   {fmtDate(h.holiday_date)}
                 </span>
-                <span className="text-sm text-text-primary truncate">{h.name}</span>
+                <span className="text-sm text-text-primary truncate">{h.name}{h.notes ? <span className="text-text-tertiary text-xs ml-1">— {h.notes}</span> : ''}</span>
                 <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${
                   h.scope === 'federal'
                     ? 'bg-rose-500/15 text-rose-300'

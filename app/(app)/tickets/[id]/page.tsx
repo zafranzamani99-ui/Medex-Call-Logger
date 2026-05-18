@@ -185,10 +185,13 @@ export default function TicketDetailPage() {
       }
       const json = await res.json() as {
         skipped?: boolean
+        reason?: string
         mode?: 'fresh' | 'variant'
         matched_kb?: { id: string; issue: string }
       }
-      if (json.skipped && json.matched_kb) {
+      if (json.skipped && json.reason === 'admin_ticket') {
+        return
+      } else if (json.skipped && json.matched_kb) {
         toast(`Matches existing KB: "${json.matched_kb.issue}" — no new draft generated.`, 'success')
       } else if (json.mode === 'variant') {
         toast('KB draft created (improved from existing article).', 'success')

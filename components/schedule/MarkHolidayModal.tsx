@@ -42,6 +42,7 @@ export default function MarkHolidayModal({ open, onClose, onSaved, prefilledDate
   const { toast } = useToast()
   const [date, setDate] = useState('')
   const [name, setName] = useState('')
+  const [notes, setNotes] = useState('')
   const [scope, setScope] = useState('federal')
   const [saving, setSaving] = useState(false)
 
@@ -49,6 +50,7 @@ export default function MarkHolidayModal({ open, onClose, onSaved, prefilledDate
     if (open) {
       setDate(prefilledDate || '')
       setName('')
+      setNotes('')
       setScope('federal')
     }
   }, [open, prefilledDate])
@@ -63,6 +65,7 @@ export default function MarkHolidayModal({ open, onClose, onSaved, prefilledDate
     const { error } = await supabase.from('public_holidays').insert({
       holiday_date: date,
       name: name.trim(),
+      notes: notes.trim() || null,
       scope,
       created_by: session?.user.id || null,
     })
@@ -90,6 +93,15 @@ export default function MarkHolidayModal({ open, onClose, onSaved, prefilledDate
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Company: MEDEX Anniversary"
+          />
+        </div>
+        <div>
+          <Label>Notes</Label>
+          <Input
+            type="text"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="e.g. Replacement for Wesak Day (31/05, Sunday)"
           />
         </div>
         <div>

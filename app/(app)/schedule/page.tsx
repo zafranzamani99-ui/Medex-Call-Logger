@@ -115,7 +115,7 @@ export default function SchedulePage() {
   const workNotesValueRef = useRef('')
   const [elapsedMinutes, setElapsedMinutes] = useState(0)
 
-  // Pause state (persisted via sessionStorage so it survives page navigation)
+  // Pause state (persisted to DB so all users can see)
   const [isPaused, setIsPaused] = useState(false)
   const [pausedAt, setPausedAt] = useState<number | null>(null)
   const [totalPausedMs, setTotalPausedMs] = useState(0)
@@ -125,20 +125,18 @@ export default function SchedulePage() {
   const [pauseLog, setPauseLog] = useState<{ reason: string; startedAt: number; endedAt: number; durationSec: number }[]>([])
   const pauseNudge = isPaused && pausedAt && (Date.now() - pausedAt) > 15 * 60 * 1000
 
-  const restorePauseState = useCallback((scheduleId: string) => {
-    try {
-      const raw = sessionStorage.getItem(`pause-${scheduleId}`)
-      if (raw) {
-        const saved = JSON.parse(raw)
-        setPauseLog(saved.pauseLog || [])
-        setTotalPausedMs(saved.totalPausedMs || 0)
-        if (saved.pausedAt) {
-          setIsPaused(true)
-          setPausedAt(saved.pausedAt)
-          setPauseReason(saved.pauseReason || '')
-        }
-      }
-    } catch { /* ignore */ }
+  const restorePauseState = useCallback((schedule: Schedule) => {
+    setPauseLog(schedule.pause_log || [])
+    setTotalPausedMs(schedule.total_paused_ms || 0)
+    if (schedule.is_paused && schedule.paused_at) {
+      setIsPaused(true)
+      setPausedAt(new Date(schedule.paused_at).getTime())
+      setPauseReason(schedule.pause_reason || '')
+    } else {
+      setIsPaused(false)
+      setPausedAt(null)
+      setPauseReason('')
+    }
   }, [])
   const [existingJobSheetId, setExistingJobSheetId] = useState<string | null>(null)
 
@@ -337,7 +335,7 @@ export default function SchedulePage() {
       setShowDetailModal(true)
       setShowWorkPanel(true)
       setWorkNotes(activeWork.notes || '')
-      restorePauseState(activeWork.id)
+      restorePauseState(activeWork)
       if (activeWork.clinic_code && activeWork.clinic_code !== 'MANUAL') {
         supabase.from('clinics').select('*').eq('clinic_code', activeWork.clinic_code).single()
           .then(({ data }: { data: Clinic | null }) => setWorkClinic(data))
@@ -480,7 +478,7 @@ export default function SchedulePage() {
     setShowWorkPanel(schedule.status === 'in_progress')
     setExistingJobSheetId(null)
     if (schedule.status === 'in_progress') {
-      restorePauseState(schedule.id)
+      restorePauseState(schedule)
       setWorkNotes(schedule.notes || '')
       if (schedule.clinic_code && schedule.clinic_code !== 'MANUAL') {
         const { data } = await supabase.from('clinics').select('*').eq('clinic_code', schedule.clinic_code).single()
@@ -560,7 +558,11 @@ export default function SchedulePage() {
     setPauseReason('')
     setPauseLog([])
     setShowPauseModal(false)
-    sessionStorage.removeItem(`pause-${id}`)
+    updatePayload.is_paused = false
+    updatePayload.paused_at = null
+    updatePayload.pause_reason = null
+    updatePayload.total_paused_ms = totalPausedMs
+    updatePayload.pause_log = pauseLog
     const { error } = await supabase.from('schedules').update(updatePayload).eq('id', id)
     if (error) {
       // Fallback without time tracking columns
@@ -715,7 +717,6 @@ export default function SchedulePage() {
     setPauseReason('')
     setPauseLog([])
     setShowPauseModal(false)
-    sessionStorage.removeItem(`pause-${s.id}`)
     // Update local state immediately — don't wait for fetchSchedules
     const updated = { ...s, status: 'in_progress' as const, started_at: now, updated_at: now }
     setSelectedSchedule(updated)
@@ -792,18 +793,13 @@ export default function SchedulePage() {
     return list
   }, [wpResources, resourceSearch, resourceFilter])
 
-  // Memoized set of paused schedule IDs — avoids sessionStorage reads inside .map() loops
   const pausedScheduleIds = useMemo(() => {
     const ids = new Set<string>()
     for (const s of schedules) {
-      if (s.status !== 'in_progress') continue
-      try {
-        const raw = sessionStorage.getItem(`pause-${s.id}`)
-        if (raw) { const p = JSON.parse(raw); if (p.pausedAt) ids.add(s.id) }
-      } catch { /* ignore */ }
+      if (s.status === 'in_progress' && s.is_paused) ids.add(s.id)
     }
     return ids
-  }, [schedules, isPaused])
+  }, [schedules])
 
   // Format phone for WhatsApp link (strip non-digits, add 60 if needed)
   const formatWALink = (phone: string) => {
@@ -1219,14 +1215,14 @@ export default function SchedulePage() {
                 {dayHolidays.map(h => (
                   <div
                     key={h.id}
-                    title={`${h.name}${h.scope !== 'federal' ? ` (${h.scope} only)` : ''}`}
-                    className={`px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] mb-0.5 truncate ${
+                    title={`${h.name}${h.notes ? ` — ${h.notes}` : ''}${h.scope !== 'federal' ? ` (${h.scope} only)` : ''}`}
+                    className={`px-1.5 py-0.5 rounded text-[10px] sm:text-[11px] mb-0.5 leading-tight ${
                       h.scope === 'federal'
                         ? 'bg-rose-500/15 text-rose-300 font-medium'
                         : 'bg-rose-500/5 text-rose-400/70'
                     }`}
                   >
-                    {h.scope === 'federal' ? '' : `[${h.scope}] `}{h.name}
+                    {h.scope === 'federal' ? '' : `[${h.scope}] `}{h.name}{h.notes ? ` — ${h.notes}` : ''}
                   </div>
                 ))}
 
@@ -1364,6 +1360,7 @@ export default function SchedulePage() {
                           <path d="M5 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm6.5 4a.5.5 0 00-1 0v4.586L9.207 11.293a.5.5 0 10-.707.707l2 2a.5.5 0 00.707 0l2-2a.5.5 0 00-.707-.707L11.5 12.586V8z" />
                         </svg>
                         <span className="font-medium">{h.name}</span>
+                        {h.notes && <span className="text-rose-400/70">— {h.notes}</span>}
                         {h.scope !== 'federal' && <span className="text-rose-400/70">({h.scope})</span>}
                       </p>
                     ))}
@@ -1690,6 +1687,7 @@ export default function SchedulePage() {
                               <span aria-hidden>⚠</span>
                               <span>
                                 Public holiday: <span className="font-medium">{h.name}</span>
+                                {h.notes && <span className="text-amber-400/70"> — {h.notes}</span>}
                                 {h.scope !== 'federal' && <span className="text-amber-400/70"> ({h.scope})</span>}
                               </span>
                             </p>
@@ -1710,25 +1708,16 @@ export default function SchedulePage() {
                     {/* Schedule Type */}
                     <div>
                       <Label required>Type</Label>
-                      <div className="flex flex-wrap gap-1.5">
-                        {SCHEDULE_TYPES.map((t) => {
-                          const colors = SCHEDULE_TYPE_COLORS[t.value] || { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
-                          return (
-                            <button
-                              key={t.value}
-                              type="button"
-                              onClick={() => setEditType(editType === t.value ? null : t.value)}
-                              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                                editType === t.value
-                                  ? `${colors.bg} ${colors.text} border-current/30`
-                                  : 'bg-surface border-border text-text-secondary hover:text-text-primary'
-                              }`}
-                            >
-                              {t.label}
-                            </button>
-                          )
-                        })}
-                      </div>
+                      <select
+                        value={editType || ''}
+                        onChange={(e) => setEditType(e.target.value || null)}
+                        className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      >
+                        <option value="">Select type...</option>
+                        {SCHEDULE_TYPES.map(t => (
+                          <option key={t.value} value={t.value}>{t.label}{t.duration ? ` (${t.duration})` : ''}</option>
+                        ))}
+                      </select>
                     </div>
 
                     {/* Custom type */}
@@ -2249,7 +2238,7 @@ export default function SchedulePage() {
                         <div className="space-y-2">
                           <Button
                             size="sm"
-                            onClick={() => {
+                            onClick={async () => {
                               const now = Date.now()
                               const added = now - (pausedAt || now)
                               const newTotal = totalPausedMs + added
@@ -2260,7 +2249,13 @@ export default function SchedulePage() {
                               setPausedAt(null)
                               setPauseReason('')
                               setPauseLog(newLog)
-                              sessionStorage.setItem(`pause-${selectedSchedule.id}`, JSON.stringify({ pausedAt: null, totalPausedMs: newTotal, pauseReason: '', pauseLog: newLog }))
+                              await supabase.from('schedules').update({
+                                is_paused: false,
+                                paused_at: null,
+                                pause_reason: null,
+                                total_paused_ms: newTotal,
+                                pause_log: newLog,
+                              }).eq('id', selectedSchedule.id)
                               toast('Work resumed')
                             }}
                             className="w-full bg-amber-500 hover:bg-amber-600 text-black"
@@ -2441,12 +2436,18 @@ export default function SchedulePage() {
                   ))}
                 </div>
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const now = Date.now()
                     setIsPaused(true)
                     setPausedAt(now)
                     setShowPauseModal(false)
-                    sessionStorage.setItem(`pause-${selectedSchedule.id}`, JSON.stringify({ pausedAt: now, totalPausedMs, pauseReason, pauseLog }))
+                    await supabase.from('schedules').update({
+                      is_paused: true,
+                      paused_at: new Date(now).toISOString(),
+                      pause_reason: pauseReason || null,
+                      total_paused_ms: totalPausedMs,
+                      pause_log: pauseLog,
+                    }).eq('id', selectedSchedule.id)
                     toast(`Work paused${pauseReason ? ` — ${pauseReason}` : ''}`)
                   }}
                   className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-orange-500 hover:bg-orange-600 text-white transition-colors"
@@ -2625,6 +2626,7 @@ export default function SchedulePage() {
                           <span aria-hidden>⚠</span>
                           <span>
                             Public holiday: <span className="font-medium">{h.name}</span>
+                            {h.notes && <span className="text-amber-400/70"> — {h.notes}</span>}
                             {h.scope !== 'federal' && <span className="text-amber-400/70"> ({h.scope})</span>}
                           </span>
                         </p>
@@ -2645,26 +2647,16 @@ export default function SchedulePage() {
                 {/* Schedule Type */}
                 <div>
                   <Label required>Type</Label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {SCHEDULE_TYPES.map((t) => {
-                      const colors = SCHEDULE_TYPE_COLORS[t.value] || { bg: 'bg-zinc-500/20', text: 'text-zinc-400' }
-                      return (
-                        <button
-                          key={t.value}
-                          type="button"
-                          onClick={() => setFormType(formType === t.value ? null : t.value)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                            formType === t.value
-                              ? `${colors.bg} ${colors.text} border-current/30`
-                              : 'bg-surface border-border text-text-secondary hover:text-text-primary'
-                          }`}
-                        >
-                          {t.label}
-                          {t.duration && <span className="ml-1 opacity-60">({t.duration})</span>}
-                        </button>
-                      )
-                    })}
-                  </div>
+                  <select
+                    value={formType || ''}
+                    onChange={(e) => setFormType(e.target.value || null)}
+                    className="w-full px-3 py-2.5 bg-surface border border-border rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                  >
+                    <option value="">Select type...</option>
+                    {SCHEDULE_TYPES.map(t => (
+                      <option key={t.value} value={t.value}>{t.label}{t.duration ? ` (${t.duration})` : ''}</option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Custom type */}

@@ -435,6 +435,11 @@ export interface Schedule {
   pic_support_id: string | null
   reschedule_reason: string | null
   edit_history: { by: string; at: string; fields: string[] }[] | null
+  is_paused: boolean
+  paused_at: string | null
+  pause_reason: string | null
+  total_paused_ms: number
+  pause_log: { reason: string; startedAt: number; endedAt: number; durationSec: number }[] | null
   created_at: string
   updated_at: string
 }
@@ -445,6 +450,7 @@ export interface PublicHoliday {
   id: string
   holiday_date: string  // YYYY-MM-DD
   name: string
+  notes: string | null
   scope: string  // 'federal' OR Malaysian state code: SEL, KUL, PNG, JHR, KDH, KTN, MLK, NSN, PHG, PRK, PLS, SBH, SWK, TRG, LBN, PJY
   created_at: string
   created_by: string | null
