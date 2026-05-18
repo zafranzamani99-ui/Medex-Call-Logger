@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useToast } from '@/components/ui/Toast'
 import type { Clinic } from '@/lib/types'
 
 interface Props {
@@ -19,6 +20,7 @@ type VersionFilter = 'all' | 'latest' | 'outdated' | 'unknown'
 
 export default function SystemVersionsReport({ clinics, onClinicClick, onCountChange }: Props) {
   const supabase = createClient()
+  const { toast } = useToast()
   const [latest, setLatest] = useState<LatestVersion>({ program_version: '', db_version: '' })
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<LatestVersion>({ program_version: '', db_version: '' })
@@ -95,9 +97,12 @@ export default function SystemVersionsReport({ clinics, onClinicClick, onCountCh
       .from('system_settings')
       .upsert({ key: 'latest_version', value: draft, updated_at: new Date().toISOString() }, { onConflict: 'key' })
     setSaving(false)
-    if (!error) {
+    if (error) {
+      toast('Failed to save: ' + error.message, 'error')
+    } else {
       setLatest(draft)
       setEditing(false)
+      toast('Latest version updated')
     }
   }
 
