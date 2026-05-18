@@ -2178,41 +2178,12 @@ export default function SchedulePage() {
                         </div>
                       )}
                     </div>
-                    {selectedSchedule.notes && (() => {
-                      const raw = selectedSchedule.notes
-                      const sysKeys = /\b(PC Name|Processor|RAM|C:|D:|DB Size|AnyDesk|Anydesk|UltraViewer|Ultraviewer|Backup|Ext HDD|Latest Backup):/gi
-                      const hasSystemInfo = sysKeys.test(raw)
-                      if (hasSystemInfo) {
-                        const parts = raw.split(/(?=\b(?:PC Name|Processor|RAM|C:|D:|DB Size|AnyDesk|Anydesk|UltraViewer|Ultraviewer|Backup|Ext HDD|Latest Backup):)/gi)
-                        const numPart = parts[0]?.match(/^\d+\s*pc\b/i) ? parts.shift()!.trim() : null
-                        return (
-                          <div>
-                            <span className="text-text-tertiary text-xs">Notes</span>
-                            <div className="mt-1 bg-surface-inset/50 border border-border rounded-lg p-3 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                              {numPart && <div className="col-span-2 text-text-primary font-medium text-sm mb-1">{numPart}</div>}
-                              {parts.map((part, i) => {
-                                const colonIdx = part.indexOf(':')
-                                if (colonIdx === -1) return <div key={i} className="col-span-2 text-text-secondary">{part.trim()}</div>
-                                const key = part.slice(0, colonIdx).trim()
-                                const val = part.slice(colonIdx + 1).trim()
-                                return (
-                                  <div key={i} className={key.toLowerCase().includes('backup') || key.toLowerCase().includes('processor') ? 'col-span-2' : ''}>
-                                    <span className="text-text-muted">{key}</span>
-                                    <p className="text-text-primary font-mono">{val}</p>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        )
-                      }
-                      return (
-                        <div>
-                          <span className="text-text-tertiary text-xs">Notes</span>
-                          <p className="text-sm text-text-primary whitespace-pre-wrap">{raw}</p>
-                        </div>
-                      )
-                    })()}
+                    {selectedSchedule.notes && (
+                      <div>
+                        <span className="text-text-tertiary text-xs">Notes</span>
+                        <p className="text-sm text-text-primary whitespace-pre-wrap">{selectedSchedule.notes}</p>
+                      </div>
+                    )}
                     {selectedSchedule.status === 'rescheduled' && selectedSchedule.reschedule_reason && (
                       <div>
                         <span className="text-text-tertiary text-xs">Reschedule Reason</span>
