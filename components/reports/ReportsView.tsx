@@ -7,6 +7,7 @@ import type { Clinic } from '@/lib/types'
 import Button from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
 import { ModalDialog } from '@/components/Modal'
+import SystemVersionsReport from '@/components/reports/SystemVersionsReport'
 import {
   HorizontalDndProvider,
   SortableHeader,
@@ -36,9 +37,10 @@ import {
 //     · In-app PDF Preview Modal (save-as-PDF without leaving the app)
 //     · Row WhatsApp + copy-phone quick actions
 
-type ReportTab = 'subscriptions' | 'maintenance' | 'cloud' | 'einvoice'
+type ReportTab = 'subscriptions' | 'maintenance' | 'cloud' | 'einvoice' | 'versions'
 const TABS: Array<{ id: ReportTab; label: string; hint: string }> = [
   { id: 'subscriptions', label: 'Subscriptions', hint: 'Product-combo overview — who has what, any combination filter' },
+  { id: 'versions',      label: 'System Versions', hint: 'Track program and DB versions across clinics — see who is up to date' },
   { id: 'maintenance',   label: 'MTN Renewal',   hint: 'CMS maintenance expiry queue — who to chase this week' },
   { id: 'cloud',         label: 'Cloud Renewal', hint: 'Cloud backup expiry queue — same workflow as MTN but for cloud' },
   { id: 'einvoice',      label: 'E-Invoice',     hint: 'E-Invoice adoption funnel — PO → Signed → Paid → Live' },
@@ -2683,7 +2685,7 @@ export default function ReportsView({ onClinicClick, refreshKey = 0 }: { onClini
   // URL-synced sub-tab: ?tab=maintenance|cloud|einvoice
   const urlTab = searchParams.get('tab')
   const activeTab: ReportTab =
-    urlTab === 'subscriptions' || urlTab === 'cloud' || urlTab === 'einvoice' || urlTab === 'maintenance'
+    urlTab === 'subscriptions' || urlTab === 'cloud' || urlTab === 'einvoice' || urlTab === 'maintenance' || urlTab === 'versions'
       ? urlTab
       : 'subscriptions'
   const setActiveTab = useCallback((tab: ReportTab) => {
@@ -2700,7 +2702,7 @@ export default function ReportsView({ onClinicClick, refreshKey = 0 }: { onClini
 
   const [common, setCommon] = useState<CommonFilters>(EMPTY_COMMON)
 
-  const [counts, setCounts] = useState<Record<ReportTab, number>>({ subscriptions: 0, maintenance: 0, cloud: 0, einvoice: 0 })
+  const [counts, setCounts] = useState<Record<ReportTab, number>>({ subscriptions: 0, versions: 0, maintenance: 0, cloud: 0, einvoice: 0 })
   const setCountFor = useCallback((tab: ReportTab) => (n: number) => {
     setCounts(prev => prev[tab] === n ? prev : { ...prev, [tab]: n })
   }, [])
@@ -2736,6 +2738,7 @@ export default function ReportsView({ onClinicClick, refreshKey = 0 }: { onClini
         // WhatsApp + SST detail (for Subscriptions overview)
         'wspp_live_date', 'wa_account_no',
         'sst_registration_no', 'sst_start_date', 'sst_frequency', 'sst_period_next',
+        'current_program_version', 'current_db_version',
       ].join(',')
       const PAGE_SIZE = 1000
 
@@ -2891,6 +2894,14 @@ export default function ReportsView({ onClinicClick, refreshKey = 0 }: { onClini
           onClinicClick={onClinicClick}
           onCountChange={setCountFor('subscriptions')}
           openPreview={setPreview}
+        />
+      )}
+
+      {activeTab === 'versions' && (
+        <SystemVersionsReport
+          clinics={filtered}
+          onClinicClick={onClinicClick}
+          onCountChange={setCountFor('versions')}
         />
       )}
 
