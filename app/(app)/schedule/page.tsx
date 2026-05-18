@@ -327,7 +327,7 @@ export default function SchedulePage() {
     if (!userId || !schedules.length || autoResumedRef.current) return
     const activeWork = schedules.find(s =>
       s.status === 'in_progress' &&
-      (s.pic_support_id ? s.pic_support_id === userId : s.agent_id === userId)
+      s.pic_support_id === userId
     )
     if (activeWork) {
       autoResumedRef.current = true
