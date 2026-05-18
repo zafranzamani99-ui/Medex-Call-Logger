@@ -278,8 +278,11 @@ export default function JobSheetDetailPage() {
     }
 
     if (newStatus) setStatus(newStatus)
+    if (newStatus === 'completed' && clinicCode) {
+      await saveToCrm(true)
+    }
     if (!silent) {
-      toast(newStatus === 'completed' ? 'Job sheet completed' : 'Saved')
+      toast(newStatus === 'completed' ? 'Job sheet completed — system info saved to CRM' : 'Saved')
       if (newStatus === 'draft' || newStatus === 'completed') router.push('/job-sheets')
     } else {
       setAutoSaved(true)
@@ -318,10 +321,10 @@ export default function JobSheetDetailPage() {
     scheduleAutoSave()
   }
 
-  // Save operational data back to CRM
-  const saveToCrm = async () => {
+  // Save operational data back to CRM. silent=true skips toast (used by auto-sync on complete).
+  const saveToCrm = async (silent = false) => {
     if (!clinicCode) return
-    setSavingToCrm(true)
+    if (!silent) setSavingToCrm(true)
     const { data: { session } } = await supabase.auth.getSession()
     const uid = session?.user?.id || null
     const { data: profile } = uid ? await supabase.from('profiles').select('display_name').eq('id', uid).single() : { data: null }
@@ -353,11 +356,11 @@ export default function JobSheetDetailPage() {
     if (dbNote) updates.current_db_version = dbNote
 
     const { error } = await supabase.from('clinics').update(updates).eq('clinic_code', clinicCode)
-    setSavingToCrm(false)
+    if (!silent) setSavingToCrm(false)
     if (error) {
-      toast('Failed to save to CRM: ' + error.message, 'error')
+      if (!silent) toast('Failed to save to CRM: ' + error.message, 'error')
     } else {
-      toast('System info saved to CRM')
+      if (!silent) toast('System info saved to CRM')
     }
   }
 
@@ -825,7 +828,7 @@ export default function JobSheetDetailPage() {
             <Button
               variant="secondary"
               size="sm"
-              onClick={saveToCrm}
+              onClick={() => saveToCrm()}
               loading={savingToCrm}
               disabled={!clinicCode || savingToCrm}
               className="border border-green-500/30 text-green-400 hover:bg-green-600/10"
