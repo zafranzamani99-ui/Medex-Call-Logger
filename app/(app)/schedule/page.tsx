@@ -1789,7 +1789,7 @@ export default function SchedulePage() {
                     <div className="flex items-center gap-3 text-sm text-text-secondary">
                       <span className="font-mono text-accent">{formatTimeDisplay(selectedSchedule.schedule_time)}</span>
                       <span>{selectedSchedule.schedule_date.split('-').reverse().join('/')}</span>
-                      <span>{agentDisplayName(selectedSchedule)}</span>
+                      <span>{selectedSchedule.pic_support ? toProperCase(selectedSchedule.pic_support) : agentDisplayName(selectedSchedule)}</span>
                       {selectedSchedule.started_at && (
                         <span className={`ml-auto inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium tabular-nums ${isPaused ? 'bg-orange-500/15 text-orange-500' : 'bg-amber-500/15 text-amber-400'}`}>
                           {isPaused ? (
