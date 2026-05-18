@@ -191,7 +191,7 @@ export default function SettingsPage() {
 
     setUserId(session.user.id)
 
-    const [profileRes, countRes, latestRes, teamRes] = await Promise.all([
+    const [profileRes, countRes, , teamRes] = await Promise.all([
       supabase.from('profiles').select('display_name, role').eq('id', session.user.id).single(),
       supabase.from('clinics').select('*', { count: 'exact', head: true }),
       supabase.from('clinics').select('updated_at').order('updated_at', { ascending: false }).limit(1),
