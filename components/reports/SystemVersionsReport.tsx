@@ -233,14 +233,43 @@ export default function SystemVersionsReport({ clinics, onClinicClick, onCountCh
         </div>
       )}
 
-      {/* Search */}
-      <div className="mb-3">
+      {/* Search + Export */}
+      <div className="flex items-center gap-3 mb-3">
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder="Search by clinic name, code, or version..."
-          className="w-full px-3 py-2 bg-surface border border-border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
+          className="flex-1 px-3 py-2 bg-surface border border-border rounded-lg text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/50"
         />
+        <button
+          onClick={() => {
+            const headers = ['Acct No', 'Clinic', 'Product', 'Program Version', 'DB Version', 'REV', 'Status']
+            const rows = filtered.map(c => {
+              const status = classify(c)
+              const rev = status === 'latest' && latest.revision ? latest.revision : ''
+              return [
+                c.clinic_code,
+                c.clinic_name || '',
+                c.product_type || '',
+                c.current_program_version || '',
+                c.current_db_version || '',
+                rev,
+                status === 'latest' ? 'Latest' : status === 'outdated' ? 'Outdated' : 'Unknown',
+              ]
+            })
+            const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+            const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `system-versions-${new Date().toISOString().slice(0, 10)}.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+          }}
+          className="px-3 py-2 bg-surface border border-border rounded-lg text-sm text-text-secondary hover:text-text-primary hover:border-border-hover transition-colors whitespace-nowrap"
+        >
+          Export CSV
+        </button>
       </div>
 
       {/* Table */}
@@ -254,6 +283,7 @@ export default function SystemVersionsReport({ clinics, onClinicClick, onCountCh
                 <th className="text-left px-3 py-2 text-[11px] text-text-muted font-medium uppercase tracking-wider">Product</th>
                 <th className="text-left px-3 py-2 text-[11px] text-text-muted font-medium uppercase tracking-wider">Program Version</th>
                 <th className="text-left px-3 py-2 text-[11px] text-text-muted font-medium uppercase tracking-wider">DB Version</th>
+                <th className="text-left px-3 py-2 text-[11px] text-text-muted font-medium uppercase tracking-wider">REV</th>
                 <th className="text-left px-3 py-2 text-[11px] text-text-muted font-medium uppercase tracking-wider">Status</th>
               </tr>
             </thead>
@@ -281,12 +311,15 @@ export default function SystemVersionsReport({ clinics, onClinicClick, onCountCh
                         {c.current_db_version || '—'}
                       </span>
                     </td>
+                    <td className="px-3 py-2 font-mono text-xs text-text-muted">
+                      {status === 'latest' && latest.revision ? latest.revision : '—'}
+                    </td>
                     <td className="px-3 py-2">{statusBadge(status)}</td>
                   </tr>
                 )
               })}
               {filtered.length === 0 && (
-                <tr><td colSpan={6} className="px-3 py-8 text-center text-text-muted text-sm">No clinics match this filter</td></tr>
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-text-muted text-sm">No clinics match this filter</td></tr>
               )}
             </tbody>
           </table>
