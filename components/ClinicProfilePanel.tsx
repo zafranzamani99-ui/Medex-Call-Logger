@@ -1435,6 +1435,7 @@ export default function ClinicProfilePanel({ clinicCode, onClose, onClinicUpdate
               <EditableField label="Device ID" value={clinic.device_id} onSave={v => saveField('device_id', v)} mono />
               <EditableField label="Program Version (on-site)" value={clinic.current_program_version} onSave={v => saveField('current_program_version', v)} mono />
               <EditableField label="Product Version (xlsx)" value={clinic.product_version} onSave={v => saveField('product_version', v)} mono />
+              <EditableField label="Revision (REV)" value={clinic.revision} onSave={v => saveField('revision', v)} mono />
               <EditableField label="DB Version (on-site)" value={clinic.current_db_version} onSave={v => saveField('current_db_version', v)} mono />
               <EditableField label="DB Version (xlsx)" value={clinic.db_version} onSave={v => saveField('db_version', v)} mono />
               <EditableField label="DB Size" value={clinic.db_size} onSave={v => saveField('db_size', v)} mono />

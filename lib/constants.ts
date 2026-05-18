@@ -281,6 +281,7 @@ export const JOB_SHEET_ISSUE_CATEGORIES = [
 export const JOB_SHEET_CHECKLIST_LABELS = [
   'Total Workstation',
   'Install/Update Program Version No',
+  'Revision (REV)',
   'Database Version (after update)',
   'Apply License Key',
   'Open port tcp: 3050 and udp: 9050',

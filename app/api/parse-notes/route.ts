@@ -47,6 +47,7 @@ FIELD GUIDE — extract into this JSON structure. Only include fields you find e
   "program_version_after": "",    // Medex program version AFTER update
   "db_version_before": "",        // Database schema version BEFORE
   "db_version_after": "",         // Database schema version AFTER
+  "revision": "",                 // Revision number (REV) — patch/hotfix number within a version (e.g. "5", "12")
   "total_workstation": "",        // Number of PCs/workstations (e.g. "4")
   "main_pc_name": "",             // Server/main PC hostname (e.g. "SERVER", "RECEPTION", "SVR01")
   "space_c": "",                  // C drive space info (preserve original text)
@@ -76,7 +77,7 @@ FIELD GUIDE — extract into this JSON structure. Only include fields you find e
   "checklist_notes": {}           // Map of checklist label → notes (e.g. {"Total Workstation": "4"})
 }
 
-CHECKLIST LABELS (for checklist_notes): "Total Workstation", "Install/Update Program Version No", "Database Version (after update)", "Apply License Key", "Open port tcp: 3050 and udp: 9050", "Change Referral Letter Header", "Install Ultraviewer/Anydesk", "Download handwriting language", "Share MDO_SERVER and setting directory", "Create System Shortcut and rename \\"Clinisys\\"", "Turn on sharing folder", "Setting region – English (Malaysia)", "Install Gprinter (*if any)", "Install Mycard Reader (*if any)", "Full Training"
+CHECKLIST LABELS (for checklist_notes): "Total Workstation", "Install/Update Program Version No", "Revision (REV)", "Database Version (after update)", "Apply License Key", "Open port tcp: 3050 and udp: 9050", "Change Referral Letter Header", "Install Ultraviewer/Anydesk", "Download handwriting language", "Share MDO_SERVER and setting directory", "Create System Shortcut and rename \\"Clinisys\\"", "Turn on sharing folder", "Setting region – English (Malaysia)", "Install Gprinter (*if any)", "Install Mycard Reader (*if any)", "Full Training"
 
 Return ONLY valid JSON — no markdown, no explanation, no extra text.`
 

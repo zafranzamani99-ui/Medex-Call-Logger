@@ -352,6 +352,8 @@ export default function JobSheetDetailPage() {
     if (wsNote) updates.workstation_count = wsNote
     const progNote = checklist.find(c => c.label === 'Install/Update Program Version No')?.notes
     if (progNote) updates.current_program_version = progNote
+    const revNote = checklist.find(c => c.label === 'Revision (REV)')?.notes
+    if (revNote) updates.revision = revNote
     const dbNote = checklist.find(c => c.label === 'Database Version (after update)')?.notes
     if (dbNote) updates.current_db_version = dbNote
 

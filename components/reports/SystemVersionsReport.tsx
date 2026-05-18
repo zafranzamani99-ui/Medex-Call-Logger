@@ -246,7 +246,7 @@ export default function SystemVersionsReport({ clinics, onClinicClick, onCountCh
             const headers = ['Acct No', 'Clinic', 'Product', 'Program Version', 'DB Version', 'REV', 'Status']
             const rows = filtered.map(c => {
               const status = classify(c)
-              const rev = status === 'latest' && latest.revision ? latest.revision : ''
+              const rev = c.revision || ''
               return [
                 c.clinic_code,
                 c.clinic_name || '',
@@ -312,7 +312,7 @@ export default function SystemVersionsReport({ clinics, onClinicClick, onCountCh
                       </span>
                     </td>
                     <td className="px-3 py-2 font-mono text-xs text-text-muted">
-                      {status === 'latest' && latest.revision ? latest.revision : '—'}
+                      {c.revision || '—'}
                     </td>
                     <td className="px-3 py-2">{statusBadge(status)}</td>
                   </tr>

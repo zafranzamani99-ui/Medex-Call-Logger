@@ -2738,7 +2738,7 @@ export default function ReportsView({ onClinicClick, refreshKey = 0 }: { onClini
         // WhatsApp + SST detail (for Subscriptions overview)
         'wspp_live_date', 'wa_account_no',
         'sst_registration_no', 'sst_start_date', 'sst_frequency', 'sst_period_next',
-        'current_program_version', 'current_db_version',
+        'current_program_version', 'current_db_version', 'revision',
       ].join(',')
       const PAGE_SIZE = 1000
 

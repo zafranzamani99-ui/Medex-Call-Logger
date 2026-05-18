@@ -134,10 +134,12 @@ export default function JobSheetsPage() {
       // CRM defaults first (full format e.g. "2026.1.1.23")
       if (clinicData?.workstation_count && label === 'Total Workstation') item.notes = clinicData.workstation_count
       if (clinicData?.current_program_version && label === 'Install/Update Program Version No') item.notes = clinicData.current_program_version
+      if (clinicData?.revision && label === 'Revision (REV)') item.notes = clinicData.revision
       if (clinicData?.current_db_version && label === 'Database Version (after update)') item.notes = clinicData.current_db_version
       // AI-parsed values only fill EMPTY checklist fields (CRM has proper full version format, AI has shorthand like "426")
       if (parsed.total_workstation && label === 'Total Workstation' && !item.notes) item.notes = parsed.total_workstation
       if (parsed.program_version_after && label === 'Install/Update Program Version No' && !item.notes) item.notes = parsed.program_version_after
+      if (parsed.revision && label === 'Revision (REV)' && !item.notes) item.notes = parsed.revision
       if (parsed.db_version_after && label === 'Database Version (after update)' && !item.notes) item.notes = parsed.db_version_after
       if (parsed.checklist_notes?.[label] && !item.notes) item.notes = parsed.checklist_notes[label]
       return item
@@ -262,10 +264,12 @@ export default function JobSheetsPage() {
       // CRM defaults first (full format e.g. "2026.1.1.23")
       if (clinicData?.workstation_count && label === 'Total Workstation') item.notes = clinicData.workstation_count
       if (clinicData?.current_program_version && label === 'Install/Update Program Version No') item.notes = clinicData.current_program_version
+      if (clinicData?.revision && label === 'Revision (REV)') item.notes = clinicData.revision
       if (clinicData?.current_db_version && label === 'Database Version (after update)') item.notes = clinicData.current_db_version
       // AI-parsed values only fill EMPTY checklist fields (CRM has proper full version format, AI has shorthand like "426")
       if (parsed.total_workstation && label === 'Total Workstation' && !item.notes) item.notes = parsed.total_workstation
       if (parsed.program_version_after && label === 'Install/Update Program Version No' && !item.notes) item.notes = parsed.program_version_after
+      if (parsed.revision && label === 'Revision (REV)' && !item.notes) item.notes = parsed.revision
       if (parsed.db_version_after && label === 'Database Version (after update)' && !item.notes) item.notes = parsed.db_version_after
       if (parsed.checklist_notes && parsed.checklist_notes[label] && !item.notes) item.notes = parsed.checklist_notes[label]
       return item

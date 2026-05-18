@@ -80,6 +80,7 @@ export interface Clinic {
   device_id: string | null
   current_program_version: string | null
   current_db_version: string | null
+  revision: string | null
   db_size: string | null
   ultraviewer_id: string | null
   ultraviewer_pw: string | null
