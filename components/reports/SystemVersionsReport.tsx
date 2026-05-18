@@ -14,6 +14,7 @@ interface Props {
 interface LatestVersion {
   program_version: string
   db_version: string
+  revision: string
 }
 
 type VersionFilter = 'all' | 'latest' | 'outdated' | 'unknown'
@@ -21,9 +22,9 @@ type VersionFilter = 'all' | 'latest' | 'outdated' | 'unknown'
 export default function SystemVersionsReport({ clinics, onClinicClick, onCountChange }: Props) {
   const supabase = createClient()
   const { toast } = useToast()
-  const [latest, setLatest] = useState<LatestVersion>({ program_version: '', db_version: '' })
+  const [latest, setLatest] = useState<LatestVersion>({ program_version: '', db_version: '', revision: '' })
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState<LatestVersion>({ program_version: '', db_version: '' })
+  const [draft, setDraft] = useState<LatestVersion>({ program_version: '', db_version: '', revision: '' })
   const [filter, setFilter] = useState<VersionFilter>('all')
   const [search, setSearch] = useState('')
   const [saving, setSaving] = useState(false)
@@ -148,6 +149,10 @@ export default function SystemVersionsReport({ clinics, onClinicClick, onCountCh
               <span className="text-[10px] text-text-muted">DB</span>
               <p className="text-sm text-text-primary font-mono">{latest.db_version || '—'}</p>
             </div>
+            <div>
+              <span className="text-[10px] text-text-muted">REV</span>
+              <p className="text-sm text-text-primary font-mono">{latest.revision || '—'}</p>
+            </div>
           </div>
         ) : (
           <div className="flex items-center gap-3">
@@ -166,6 +171,15 @@ export default function SystemVersionsReport({ clinics, onClinicClick, onCountCh
                 value={draft.db_version}
                 onChange={e => setDraft(d => ({ ...d, db_version: e.target.value }))}
                 placeholder="e.g. 426"
+                className="px-2 py-1.5 bg-surface-inset border border-border rounded text-sm text-text-primary font-mono w-40 focus:outline-none focus:ring-1 focus:ring-accent/50"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-text-muted block mb-0.5">Revision (REV)</label>
+              <input
+                value={draft.revision}
+                onChange={e => setDraft(d => ({ ...d, revision: e.target.value }))}
+                placeholder="e.g. 5"
                 className="px-2 py-1.5 bg-surface-inset border border-border rounded text-sm text-text-primary font-mono w-40 focus:outline-none focus:ring-1 focus:ring-accent/50"
               />
             </div>
