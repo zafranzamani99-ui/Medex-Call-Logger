@@ -178,10 +178,17 @@ export default function JobSheetDetailPage() {
     setJobOutcome(js.job_outcome)
     setCustomerRepName(js.customer_rep_name || '')
 
-    // Checklist — initialize from constants if empty
-    const cl = Array.isArray(js.checklist) && js.checklist.length > 0
+    // Checklist — initialize from constants if empty, backfill any missing labels
+    let cl = Array.isArray(js.checklist) && js.checklist.length > 0
       ? js.checklist
       : JOB_SHEET_CHECKLIST_LABELS.map(label => ({ label, checked: false, notes: '' }))
+    const existingLabels = new Set(cl.map((c: { label: string }) => c.label))
+    for (let i = 0; i < JOB_SHEET_CHECKLIST_LABELS.length; i++) {
+      const label = JOB_SHEET_CHECKLIST_LABELS[i]
+      if (!existingLabels.has(label)) {
+        cl = [...cl.slice(0, i), { label, checked: false, notes: '' }, ...cl.slice(i)]
+      }
+    }
     setChecklist(cl)
 
     // Issue categories
