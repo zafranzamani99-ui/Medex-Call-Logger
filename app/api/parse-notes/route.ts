@@ -55,7 +55,7 @@ FIELD GUIDE — extract into this JSON structure. Only include fields you find e
   "space_d": "",                  // D drive space info
   "space_d_type": "",             // D drive type: "SSD" or "HDD"
   "service_db_size_before": "",   // Database file size before service (preserve units as written)
-  "service_db_size_after": "",    // Database file size after service
+  "service_db_size_after": "",    // Database file size after service (may appear as "DB Size After:" in system info output)
   "ultraviewer_id": "",           // UltraViewer ID (9-digit number)
   "ultraviewer_pw": "",           // UltraViewer password
   "anydesk_id": "",               // AnyDesk ID (9-10 digit number)
