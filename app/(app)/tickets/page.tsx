@@ -234,29 +234,40 @@ export default function HistoryPage() {
   useEffect(() => {
     async function fetchTickets() {
       setLoading(true)
-      let query = supabase
-        .from('tickets')
-        .select('*, timeline_entries(count)')
-        .order('created_at', { ascending: false })
+      const PAGE_SIZE = 1000
+      const allRows: (Ticket & { timeline_entries: [{ count: number }] })[] = []
+      let from = 0
 
-      if (!loadAllHistory) {
-        const windowStart = new Date(Date.now() - HISTORY_WINDOW_DAYS * 86400000).toISOString()
-        query = query.gte('created_at', windowStart)
+      const windowStart = !loadAllHistory
+        ? new Date(Date.now() - HISTORY_WINDOW_DAYS * 86400000).toISOString()
+        : null
+
+      while (true) {
+        let query = supabase
+          .from('tickets')
+          .select('*, timeline_entries(count)')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1)
+
+        if (windowStart) {
+          query = query.gte('created_at', windowStart)
+        }
+
+        const { data } = await query
+        if (!data || data.length === 0) break
+        allRows.push(...(data as typeof allRows))
+        if (data.length < PAGE_SIZE) break
+        from += PAGE_SIZE
       }
 
-      const { data } = await query
-
-      if (data) {
-        const typed = data as (Ticket & { timeline_entries: [{ count: number }] })[]
-        setTickets(typed)
-        const counts: Record<string, number> = {}
-        typed.forEach((t) => {
-          counts[t.id] = t.timeline_entries?.[0]?.count || 0
-        })
-        setUpdateCounts(counts)
-        const names = Array.from(new Set(typed.map((t) => t.created_by_name)))
-        setAgents(names)
-      }
+      setTickets(allRows)
+      const counts: Record<string, number> = {}
+      allRows.forEach((t) => {
+        counts[t.id] = t.timeline_entries?.[0]?.count || 0
+      })
+      setUpdateCounts(counts)
+      const names = Array.from(new Set(allRows.map((t) => t.created_by_name)))
+      setAgents(names)
       setLoading(false)
     }
     fetchTickets()
