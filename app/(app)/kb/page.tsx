@@ -448,6 +448,21 @@ export default function KBPage() {
                         </>
                       )}
                       <Button variant="danger" size="sm" onClick={() => handleDiscard(entry.id)}>Discard</Button>
+                      {entry.source_ticket_id && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => router.push(`/tickets/${entry.source_ticket_id}`)}
+                          className="ml-auto"
+                        >
+                          <span className="flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M15 5l-7 7 7 7" />
+                            </svg>
+                            View Ticket
+                          </span>
+                        </Button>
+                      )}
                     </div>
                   </div>
                 ) : (

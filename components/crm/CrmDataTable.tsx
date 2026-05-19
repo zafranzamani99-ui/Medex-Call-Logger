@@ -1425,25 +1425,39 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
           {/* ─ Pagination ─ */}
           <div className="flex items-center justify-between px-4 py-2.5 border-t border-border bg-surface">
             <span className="text-xs text-text-muted tabular-nums">
-              {filteredCount > 0 ? `${start}–${end} of ${filteredCount.toLocaleString()}` : 'No results'}
+              {filteredCount > 0 ? `Showing ${start.toLocaleString()}–${end.toLocaleString()} of ${filteredCount.toLocaleString()}` : 'No results'}
             </span>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => table.setPageIndex(0)}
+                disabled={!table.getCanPreviousPage()}
+                className="px-2 py-1 text-xs bg-surface border border-border rounded-md disabled:opacity-30 text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
+              >
+                «
+              </button>
               <button
                 onClick={() => table.previousPage()}
                 disabled={!table.getCanPreviousPage()}
                 className="px-2.5 py-1 text-xs bg-surface border border-border rounded-md disabled:opacity-30 text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
               >
-                Previous
+                ‹ Previous
               </button>
               <span className="text-xs text-text-tertiary tabular-nums px-2">
-                {pageIndex + 1} / {table.getPageCount() || 1}
+                Page {pageIndex + 1} of {table.getPageCount() || 1}
               </span>
               <button
                 onClick={() => table.nextPage()}
                 disabled={!table.getCanNextPage()}
                 className="px-2.5 py-1 text-xs bg-surface border border-border rounded-md disabled:opacity-30 text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
               >
-                Next
+                Next ›
+              </button>
+              <button
+                onClick={() => table.setPageIndex(table.getPageCount() - 1)}
+                disabled={!table.getCanNextPage()}
+                className="px-2 py-1 text-xs bg-surface border border-border rounded-md disabled:opacity-30 text-text-secondary hover:text-text-primary hover:bg-surface-raised transition-colors"
+              >
+                »
               </button>
             </div>
           </div>

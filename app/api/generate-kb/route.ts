@@ -40,19 +40,31 @@ export async function POST(req: NextRequest) {
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-  // Admin tickets (invoices, payments, collections) aren't useful as KB articles.
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', userRes.user.id)
-    .single()
-
-  if (profile?.role === 'admin') {
-    return NextResponse.json({ success: true, skipped: true, reason: 'admin_ticket' })
-  }
-
   const body = await req.json()
   const { ticket_id, issue_type, issue, my_response, next_step, agent_name } = body
+
+  // Admin tickets (invoices, payments, collections) aren't useful as KB articles.
+  // Check the ticket creator's role, not the resolver's — an admin ticket resolved
+  // by a support user should still be skipped.
+  if (ticket_id) {
+    const { data: ticketData } = await supabase
+      .from('tickets')
+      .select('created_by')
+      .eq('id', ticket_id)
+      .single()
+
+    if (ticketData?.created_by) {
+      const { data: creatorProfile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', ticketData.created_by)
+        .single()
+
+      if (creatorProfile?.role === 'admin') {
+        return NextResponse.json({ success: true, skipped: true, reason: 'admin_ticket' })
+      }
+    }
+  }
 
   if (!ticket_id || !issue_type || !issue) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
