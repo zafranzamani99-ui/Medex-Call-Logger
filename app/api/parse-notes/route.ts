@@ -46,8 +46,8 @@ FIELD GUIDE — extract into this JSON structure. Only include fields you find e
 {
   "version_before": "",           // Medex program version BEFORE update (e.g. "321", "2026.1.1.23"). May appear as "Program Version Before:" in system info output
   "program_version_after": "",    // Medex program version AFTER update. May appear as "Program Version After:" in system info output
-  "db_version_before": "",        // Database schema version BEFORE. May appear as "DB Version Before:" in system info output
-  "db_version_after": "",         // Database schema version AFTER. May appear as "DB Version After:" in system info output
+  "db_version_before": "",        // Database schema version BEFORE. May appear as "DB Version Before:" in system info output. If value looks like "426.0.0.0", extract only the first number: "426"
+  "db_version_after": "",         // Database schema version AFTER. May appear as "DB Version After:" in system info output. If value looks like "426.0.0.0", extract only the first number: "426"
   "revision": "",                 // Revision number (REV) — patch/hotfix number within a version (e.g. "5", "12")
   "total_workstation": "",        // Number of PCs/workstations (e.g. "4")
   "main_pc_name": "",             // Server/main PC hostname (e.g. "SERVER", "RECEPTION", "SVR01")
