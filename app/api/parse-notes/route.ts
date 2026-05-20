@@ -34,6 +34,7 @@ CONTEXT:
 - MedexOne agents service clinic PCs running Medex medical software
 - Agents write in mixed English/Malay with abbreviations and typos
 - Notes may contain output from a system-info tool (structured "Key: Value" lines) pasted directly
+- System info tool outputs labeled lines like "Program Version Before: 2026.1.1.23", "Program Version After: 2026.1.1.25", "DB Version Before: 426", "DB Version After: 428" — map these directly to version fields
 - A "version pair" like "321-426" means program version 321, database version 426
 - "db same" or "before=after" means duplicate the DB size to both before and after fields
 - "need server" is a boolean request, not a PC name. A standalone name like "SERVER" or "RECEPTION" IS a PC name.
@@ -43,10 +44,10 @@ CONTEXT:
 FIELD GUIDE — extract into this JSON structure. Only include fields you find evidence for. Leave others as "" or null:
 
 {
-  "version_before": "",           // Medex program version BEFORE update (e.g. "321", "2026.1.1.23")
-  "program_version_after": "",    // Medex program version AFTER update
-  "db_version_before": "",        // Database schema version BEFORE
-  "db_version_after": "",         // Database schema version AFTER
+  "version_before": "",           // Medex program version BEFORE update (e.g. "321", "2026.1.1.23"). May appear as "Program Version Before:" in system info output
+  "program_version_after": "",    // Medex program version AFTER update. May appear as "Program Version After:" in system info output
+  "db_version_before": "",        // Database schema version BEFORE. May appear as "DB Version Before:" in system info output
+  "db_version_after": "",         // Database schema version AFTER. May appear as "DB Version After:" in system info output
   "revision": "",                 // Revision number (REV) — patch/hotfix number within a version (e.g. "5", "12")
   "total_workstation": "",        // Number of PCs/workstations (e.g. "4")
   "main_pc_name": "",             // Server/main PC hostname (e.g. "SERVER", "RECEPTION", "SVR01")
