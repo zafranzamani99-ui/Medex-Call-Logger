@@ -32,6 +32,7 @@ interface CallLogDraft {
   clinicWa: string
   callDuration: number | null
   issueCategory: string | null
+  customerStatus: string | null
   issueType: string | null
   issue: string
   myResponse: string
@@ -72,6 +73,7 @@ export default function LogCallPage() {
   const [clinicWa, setClinicWa] = useState('')
   const [callDuration, setCallDuration] = useState<number | null>(null)
   const [issueCategory, setIssueCategory] = useState<string | null>(null)
+  const [customerStatus, setCustomerStatus] = useState<string | null>(null)
   const [issueType, setIssueType] = useState<IssueType | null>(null)
   const [issue, setIssue] = useState('')
   const [myResponse, setMyResponse] = useState('')
@@ -236,6 +238,7 @@ export default function LogCallPage() {
       setClinicWa(draft.clinicWa || '')
       setCallDuration(draft.callDuration)
       setIssueCategory(draft.issueCategory || null)
+      setCustomerStatus(draft.customerStatus || null)
       setIssueType(draft.issueType as IssueType | null)
       setIssue(draft.issue)
       setMyResponse(draft.myResponse)
@@ -271,11 +274,11 @@ export default function LogCallPage() {
       label: 'autosave',
       savedAt: new Date().toISOString(),
       selectedClinic, callerTel, pic, clinicWa,
-      callDuration, issueCategory, issueType, issue, myResponse,
+      callDuration, issueCategory, customerStatus, issueType, issue, myResponse,
       nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline,
       needTeamCheck, status, jiraLink, adminMessage, invoices, description, callDate,
     }
-  }, [selectedClinic, callerTel, pic, clinicWa, callDuration, issueCategory, issueType, issue,
+  }, [selectedClinic, callerTel, pic, clinicWa, callDuration, issueCategory, customerStatus, issueType, issue,
       myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck, status, jiraLink, adminMessage, invoices, description, callDate])
 
   useEffect(() => {
@@ -496,6 +499,7 @@ export default function LogCallPage() {
       call_duration: callDuration,
       issue_category: issueCategory,
       issue_type: issueType,
+      customer_status: customerStatus,
       issue: issue.trim() || null,
       my_response: myResponse.trim() || null,
       invoices: invoices.filter(inv => inv.invoice_number.trim()).map(inv => ({ invoice_number: inv.invoice_number.trim(), amount: parseFloat(inv.amount) || 0 })),
@@ -599,7 +603,7 @@ export default function LogCallPage() {
     localStorage.removeItem(AUTOSAVE_KEY)
     router.push(`/tickets/${ticket.id}`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClinic, pic, issueCategory, issueType, issue, status, jiraLink, adminMessage, callerTel, callDuration,
+  }, [selectedClinic, pic, issueCategory, customerStatus, issueType, issue, status, jiraLink, adminMessage, callerTel, callDuration,
       myResponse, nextStep, nextStepPic, nextStepContact, timelineFromCustomer, internalTimeline, needTeamCheck,
       timelineData, userId, userName, router, supabase, activeDraftId,
       scheduleDate, scheduleTime, scheduleType, customScheduleType, attachments, callDate, invoices, description, userRole])
@@ -626,6 +630,7 @@ export default function LogCallPage() {
     setClinicWa('')
     setCallDuration(null)
     setIssueCategory(null)
+    setCustomerStatus(null)
     setIssueType(null)
     setIssue('')
     setMyResponse('')
@@ -665,6 +670,7 @@ export default function LogCallPage() {
     setClinicWa('')
     setCallDuration(null)
     setIssueCategory(null)
+    setCustomerStatus(null)
     setIssueType(null)
     setIssue('')
     setMyResponse('')
@@ -704,7 +710,7 @@ export default function LogCallPage() {
     const label = selectedClinic?.clinic_name || pic || 'Draft'
     const formData = {
       selectedClinic, callerTel, pic, clinicWa, callDuration,
-      issueCategory, issueType, issue, myResponse, nextStep, nextStepPic, nextStepContact,
+      issueCategory, customerStatus, issueType, issue, myResponse, nextStep, nextStepPic, nextStepContact,
       timelineFromCustomer, internalTimeline, needTeamCheck,
       status, jiraLink, adminMessage, invoices, description, callDate,
     }
@@ -757,6 +763,7 @@ export default function LogCallPage() {
     setClinicWa(draft.clinicWa || '')
     setCallDuration(draft.callDuration)
     setIssueCategory(draft.issueCategory || null)
+    setCustomerStatus(draft.customerStatus || null)
     setIssueType(draft.issueType as IssueType | null)
     setIssue(draft.issue)
     setMyResponse(draft.myResponse)
@@ -1069,7 +1076,7 @@ export default function LogCallPage() {
                 <label className="block text-sm text-text-secondary mb-1">Customer Status</label>
                 <div className="flex gap-2">
                   {ADMIN_CUSTOMER_STATUS_TYPES.map((t) => {
-                    const isActive = issueType === t
+                    const isActive = customerStatus === t
                     const color = t === 'Active Customer'
                       ? { bg: 'bg-green-500/20', text: 'text-green-400' }
                       : { bg: 'bg-red-400/20', text: 'text-red-300' }
@@ -1077,10 +1084,7 @@ export default function LogCallPage() {
                       <button
                         key={t}
                         type="button"
-                        onClick={() => {
-                          setIssueType(isActive ? null : t)
-                          setFieldErrors(prev => ({ ...prev, issueType: false }))
-                        }}
+                        onClick={() => setCustomerStatus(isActive ? null : t)}
                         className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
                           isActive
                             ? `${color.bg} ${color.text} border-current/30`
@@ -1098,7 +1102,7 @@ export default function LogCallPage() {
             {/* Issue Type */}
             <div ref={issueTypeRef} className={fieldErrors.issueType ? 'ring-1 ring-red-500/50 rounded-lg p-0.5 -m-0.5' : ''}>
               <IssueTypeSelect
-                value={issueType && !ADMIN_CUSTOMER_STATUS_TYPES.includes(issueType) ? issueType : null}
+                value={issueType}
                 onChange={(v) => {
                   setIssueType(v)
                   setFieldErrors(prev => ({ ...prev, issueType: false }))

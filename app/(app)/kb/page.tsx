@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import type { KnowledgeBaseEntry } from '@/lib/types'
 import { ISSUE_TYPES, getIssueTypeColor } from '@/lib/constants'
@@ -21,6 +21,8 @@ import KBArticle from '@/components/ui/KBArticle'
 
 export default function KBPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const highlightId = searchParams.get('highlight')
   const supabase = createClient()
   const [entries, setEntries] = useState<KnowledgeBaseEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,6 +55,17 @@ export default function KBPage() {
     getUser()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!highlightId || loading) return
+    const entry = entries.find(e => e.id === highlightId)
+    if (entry) {
+      setTab(entry.status === 'draft' ? 'drafts' : 'published')
+      setTimeout(() => {
+        document.getElementById(`kb-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 100)
+    }
+  }, [highlightId, entries, loading])
 
   // "/" keyboard shortcut — focus search
   useEffect(() => {
@@ -385,12 +398,13 @@ export default function KBPage() {
             return (
               <div
                 key={entry.id}
+                id={`kb-${entry.id}`}
                 onClick={() => tab === 'published' ? setSelectedEntry(entry) : undefined}
                 className={`bg-surface border rounded-lg p-4 transition-colors group ${
                   tab === 'drafts'
                     ? 'border-blue-500/30 bg-blue-500/5'
                     : 'border-border hover:bg-zinc-800/50 cursor-pointer'
-                }`}
+                } ${highlightId === entry.id ? 'ring-2 ring-accent/50' : ''}`}
               >
                 {/* Draft: editable inline */}
                 {tab === 'drafts' ? (

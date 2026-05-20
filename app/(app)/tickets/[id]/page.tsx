@@ -42,6 +42,7 @@ export default function TicketDetailPage() {
   const [userName, setUserName] = useState('')
   const [linkedSchedule, setLinkedSchedule] = useState<{ id: string; actual_duration_minutes: number | null; duration_estimate: string | null; schedule_type: string; schedule_date: string; schedule_time: string; status: string; agent_name: string } | null>(null)
   const [linkedJobSheet, setLinkedJobSheet] = useState<{ id: string; js_number: string; status: string; service_date: string } | null>(null)
+  const [linkedKbDraft, setLinkedKbDraft] = useState<{ id: string; issue: string; status: string } | null>(null)
 
   // UI state
   const { toast } = useToast()
@@ -157,6 +158,14 @@ export default function TicketDetailPage() {
     } else {
       setLinkedJobSheet(null)
     }
+
+    const { data: kbData } = await supabase
+      .from('knowledge_base')
+      .select('id, issue, status')
+      .eq('source_ticket_id', ticketId)
+      .limit(1)
+      .maybeSingle()
+    setLinkedKbDraft(kbData)
 
     setLoading(false)
   }
@@ -743,6 +752,15 @@ export default function TicketDetailPage() {
           <StatusBadge status={ticket.status} />
           {ticket.issue_category && <IssueCategoryBadge category={ticket.issue_category} />}
           <IssueTypeBadge issueType={ticket.issue_type} />
+          {ticket.customer_status && (
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+              ticket.customer_status === 'Active Customer'
+                ? 'bg-green-500/15 text-green-400'
+                : 'bg-red-400/15 text-red-300'
+            }`}>
+              {ticket.customer_status}
+            </span>
+          )}
           {ticket.need_team_check && <NeedsAttentionBadge />}
           {isStale(ticket) && <StaleBadge />}
         </div>
@@ -1613,7 +1631,15 @@ export default function TicketDetailPage() {
                 <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
                 </svg>
-                KB Draft
+                {linkedKbDraft ? 'Regenerate KB' : 'KB Draft'}
+              </Button>
+            )}
+            {linkedKbDraft && (
+              <Button variant="secondary" size="sm" onClick={() => router.push(`/kb?highlight=${linkedKbDraft.id}`)} className="w-full justify-start">
+                <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+                </svg>
+                View KB {linkedKbDraft.status === 'draft' ? 'Draft' : 'Article'}
               </Button>
             )}
             <div className="pt-2 border-t border-border mt-2">

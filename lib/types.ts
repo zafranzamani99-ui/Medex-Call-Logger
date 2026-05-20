@@ -176,6 +176,7 @@ export interface Ticket {
   // Issue
   issue_category: string | null
   issue_type: IssueType
+  customer_status: string | null
   issue: string
   my_response: string | null
   invoice_number: string | null
