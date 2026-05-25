@@ -255,7 +255,7 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
                 {clinic.product_type && (
                   <span className="text-xs text-text-tertiary">{clinic.product_type}</span>
                 )}
-                <RenewalBadge status={clinic.renewal_status} />
+                <RenewalBadge status={clinic.renewal_status} mtnExpiry={clinic.mtn_expiry} />
               </div>
             </button>
           ))}

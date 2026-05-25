@@ -1049,7 +1049,7 @@ export default function SchedulePage() {
                   <button key={c.id} onClick={() => onPickSearchClinic(c)} className="w-full text-left px-3 py-2 hover:bg-surface-raised flex items-center gap-2 text-sm transition-colors">
                     <span className="text-text-primary truncate">{c.clinic_name}</span>
                     <span className="text-text-tertiary text-xs flex-shrink-0">{c.clinic_code}</span>
-                    <RenewalBadge status={c.renewal_status} />
+                    <RenewalBadge status={c.renewal_status} mtnExpiry={c.mtn_expiry} />
                   </button>
                 ))}
               </div>
@@ -1090,7 +1090,7 @@ export default function SchedulePage() {
       {searchClinic && !searchLoading && (
         <div className="mb-3 flex flex-wrap items-center justify-end gap-3 text-xs">
           <span className="font-medium text-text-primary text-sm">{searchClinic.clinic_name}</span>
-          <RenewalBadge status={searchClinic.renewal_status} />
+          <RenewalBadge status={searchClinic.renewal_status} mtnExpiry={searchClinic.mtn_expiry} />
           {searchClinic.mtn_expiry && (
             <span className="text-text-secondary">Exp: {format(new Date(searchClinic.mtn_expiry + 'T00:00:00'), 'dd MMM yyyy')}</span>
           )}
