@@ -134,6 +134,8 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
   const { theme: currentTheme, toggleTheme } = useTheme()
 
   // Notification bell: fetch + realtime
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
   const fetchNotifications = useCallback(async () => {
     setNotifLoading(true)
     const { data } = await supabase
@@ -145,12 +147,28 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
     setNotifLoading(false)
   }, [supabase])
 
+  // Get user ID on mount so we can filter realtime subscription
   useEffect(() => {
+    async function getUid() {
+      const { data } = await supabase.auth.getSession()
+      if (data.session?.user) setCurrentUserId(data.session.user.id)
+    }
+    getUid()
+  }, [supabase])
+
+  // Subscribe to realtime notifications only after we have the user ID
+  useEffect(() => {
+    if (!currentUserId) return
     const channel = supabase
       .channel('notif-realtime')
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications' },
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'notifications',
+          filter: `user_id=eq.${currentUserId}`,
+        },
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (payload: any) => {
           const notif = payload.new as Notification
@@ -160,7 +178,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }
-  }, [supabase])
+  }, [supabase, currentUserId])
 
   useEffect(() => {
     if (!bellOpen) return
@@ -340,86 +358,6 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
           </div>
         )}
 
-        {/* Notification bell */}
-        <div className="px-3 mb-1 flex-shrink-0" ref={bellRef}>
-          <button
-            onClick={handleOpenBell}
-            title="Notifications"
-            className={`relative flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-[13px] transition-colors ${
-              bellOpen
-                ? 'bg-indigo-500/10 text-indigo-400'
-                : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-raised'
-            } ${collapsed ? 'justify-center px-0' : ''}`}
-          >
-            <span className="relative flex-shrink-0">
-              <svg className="size-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-              </svg>
-              {notifCount > 0 && (
-                <span className="absolute -top-1 -right-1.5 size-4 flex items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
-                  {notifCount > 9 ? '9+' : notifCount}
-                </span>
-              )}
-            </span>
-            {!collapsed && <span className="flex-1">Notifications</span>}
-          </button>
-
-          {/* Notification dropdown */}
-          {bellOpen && (
-            <div className={`absolute z-50 bg-surface border border-border rounded-lg shadow-xl overflow-hidden ${
-              collapsed ? 'left-[60px] bottom-20 w-72' : 'left-2 right-2 bottom-auto mt-1 w-auto max-w-[216px]'
-            }`}
-              style={collapsed ? {} : { position: 'relative' }}
-            >
-              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-                <span className="text-xs font-semibold text-text-primary">Notifications</span>
-                {notifications.length > 0 && (
-                  <button
-                    onClick={() => router.push('/inbox')}
-                    className="text-[10px] text-indigo-400 hover:text-indigo-300"
-                  >
-                    View Inbox
-                  </button>
-                )}
-              </div>
-              <div className="max-h-64 overflow-y-auto">
-                {notifLoading ? (
-                  <div className="p-4 space-y-2">
-                    <div className="h-8 skeleton rounded" />
-                    <div className="h-8 skeleton rounded" />
-                  </div>
-                ) : notifications.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-text-muted">No notifications</div>
-                ) : (
-                  notifications.map(n => {
-                    const style = NOTIF_ICONS[n.type] || NOTIF_ICONS.assignment
-                    return (
-                      <button
-                        key={n.id}
-                        onClick={() => { setBellOpen(false); if (n.link) router.push(n.link) }}
-                        className={`w-full text-left px-3 py-2.5 border-b border-border/50 last:border-0 hover:bg-surface-raised transition-colors ${
-                          !n.is_read ? 'bg-indigo-500/5' : ''
-                        }`}
-                      >
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
-                            {style.label}
-                          </span>
-                          <span className="text-[10px] text-text-muted ml-auto">
-                            {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
-                          </span>
-                        </div>
-                        <p className="text-xs text-text-primary font-medium truncate">{n.title}</p>
-                        {n.body && <p className="text-[11px] text-text-tertiary truncate">{n.body}</p>}
-                      </button>
-                    )
-                  })
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* User section */}
         <div className="p-3 flex-shrink-0 border-t border-border">
           {collapsed ? (
@@ -468,19 +406,6 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
                 {openTickets} open
               </span>
             )}
-            <button
-              onClick={handleOpenBell}
-              className="relative p-1 text-text-muted hover:text-text-primary transition-colors"
-            >
-              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
-              </svg>
-              {notifCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 size-4 flex items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
-                  {notifCount > 9 ? '9+' : notifCount}
-                </span>
-              )}
-            </button>
             <span className="text-xs text-text-tertiary">{displayName}</span>
           </div>
         </div>
@@ -600,6 +525,85 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
           </div>
         </>
       )}
+
+      {/* ===== Notification FAB — bottom-right, all screens ===== */}
+      <div ref={bellRef} className="fixed z-50 right-5 bottom-[84px] md:bottom-6">
+        <div className="relative">
+          <button
+            onClick={handleOpenBell}
+            className={`relative size-12 rounded-full flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-105 active:scale-95 ${
+              bellOpen
+                ? 'bg-indigo-500 text-white shadow-indigo-500/30'
+                : 'bg-surface-raised border border-border text-text-secondary hover:text-indigo-400 hover:border-indigo-500/30 shadow-theme-lg'
+            }`}
+          >
+            <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+            </svg>
+            {notifCount > 0 && (
+              <span className="absolute -top-1 -right-1 size-5 flex items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-[var(--color-surface)]">
+                {notifCount > 9 ? '9+' : notifCount}
+              </span>
+            )}
+          </button>
+
+          {bellOpen && (
+            <div className="absolute bottom-14 right-0 w-80 bg-surface border border-border rounded-xl shadow-xl overflow-hidden">
+              <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+                <span className="text-sm font-semibold text-text-primary">Notifications</span>
+                {notifications.length > 0 && (
+                  <button
+                    onClick={() => { setBellOpen(false); router.push('/inbox') }}
+                    className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                  >
+                    View Inbox
+                  </button>
+                )}
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {notifLoading ? (
+                  <div className="p-4 space-y-3">
+                    <div className="h-10 skeleton rounded" />
+                    <div className="h-10 skeleton rounded" />
+                    <div className="h-10 skeleton rounded" />
+                  </div>
+                ) : notifications.length === 0 ? (
+                  <div className="p-6 text-center">
+                    <svg className="size-8 text-text-muted mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.2} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+                    </svg>
+                    <p className="text-xs text-text-muted">No notifications yet</p>
+                  </div>
+                ) : (
+                  notifications.map(n => {
+                    const nStyle = NOTIF_ICONS[n.type] || NOTIF_ICONS.assignment
+                    return (
+                      <button
+                        key={n.id}
+                        onClick={() => { setBellOpen(false); if (n.link) router.push(n.link) }}
+                        className={`w-full text-left px-4 py-3 border-b border-border/50 last:border-0 hover:bg-surface-raised transition-colors ${
+                          !n.is_read ? 'bg-indigo-500/5' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${nStyle.bg} ${nStyle.text}`}>
+                            {nStyle.label}
+                          </span>
+                          <span className="text-[10px] text-text-muted ml-auto">
+                            {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                          </span>
+                        </div>
+                        <p className="text-xs text-text-primary font-medium truncate">{n.title}</p>
+                        {n.body && <p className="text-[11px] text-text-tertiary truncate mt-0.5">{n.body}</p>}
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </>
   )
 }
