@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { format, formatDistanceToNow } from 'date-fns'
 import type { InboxMessage, InboxReply, Profile } from '@/lib/types'
@@ -15,6 +15,7 @@ const ARCHIVE_DAYS = 30
 
 export default function InboxPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
   const { toast } = useToast()
 
@@ -94,6 +95,15 @@ export default function InboxPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Auto-open chat when navigating from a notification (?chat=<id>)
+  useEffect(() => {
+    const chatId = searchParams.get('chat')
+    if (!chatId || loading) return
+    const exists = messages.some(m => m.id === chatId)
+    if (exists) openChat(chatId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, loading])
+
   // Real-time subscription
   useEffect(() => {
     const channel = supabase
@@ -171,7 +181,7 @@ export default function InboxPage() {
       type,
       title,
       body,
-      link: '/inbox',
+      link: `/inbox?chat=${inboxMessageId}`,
       inbox_message_id: inboxMessageId,
     })
   }
