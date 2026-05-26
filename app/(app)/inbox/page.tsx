@@ -33,6 +33,7 @@ export default function InboxPage() {
   const [dateTo, setDateTo] = useState('')
   const [teamMembers, setTeamMembers] = useState<Pick<Profile, 'id' | 'display_name'>[]>([])
   const [assignDropdownFor, setAssignDropdownFor] = useState<string | null>(null)
+  const [trashDropdownFor, setTrashDropdownFor] = useState<string | null>(null)
 
   // Chat thread state
   const [chatOpenFor, setChatOpenFor] = useState<string | null>(null)
@@ -156,13 +157,13 @@ export default function InboxPage() {
     }
   }, [chatReplies, chatOpenFor])
 
-  // Close assign dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
-    if (!assignDropdownFor) return
-    const handler = () => setAssignDropdownFor(null)
+    if (!assignDropdownFor && !trashDropdownFor) return
+    const handler = () => { setAssignDropdownFor(null); setTrashDropdownFor(null) }
     document.addEventListener('click', handler)
     return () => document.removeEventListener('click', handler)
-  }, [assignDropdownFor])
+  }, [assignDropdownFor, trashDropdownFor])
 
   const roleLabel = userRole === 'administrator' ? 'Administrator' : userRole === 'admin' ? 'Admin' : 'Support'
   const nameWithRole = `${toProperCase(userName)} (${roleLabel})`
@@ -436,6 +437,54 @@ export default function InboxPage() {
       }
       toast('Reopened & ticket re-escalated')
     }
+  }
+
+  // ── Delete / Archive (admin only) ───────────────────────────────────────
+  const isAdmin = userRole === 'administrator' || userRole === 'admin'
+
+  const handleDelete = async (msgId: string) => {
+    const { error } = await supabase
+      .from('inbox_messages')
+      .delete()
+      .eq('id', msgId)
+
+    if (!error) {
+      setMessages(prev => prev.filter(m => m.id !== msgId))
+      if (chatOpenFor === msgId) closeChat()
+      toast('Message deleted')
+    } else {
+      toast('Failed to delete', 'error')
+    }
+    setTrashDropdownFor(null)
+  }
+
+  const handleArchiveNow = async (msgId: string) => {
+    const archiveDate = new Date()
+    archiveDate.setDate(archiveDate.getDate() - (ARCHIVE_DAYS + 1))
+    const { error } = await supabase
+      .from('inbox_messages')
+      .update({
+        status: 'done',
+        done_by: userId,
+        done_by_name: nameWithRole,
+        done_at: archiveDate.toISOString(),
+      })
+      .eq('id', msgId)
+
+    if (!error) {
+      setMessages(prev => prev.map(m => m.id === msgId ? {
+        ...m,
+        status: 'done' as const,
+        done_by: userId,
+        done_by_name: nameWithRole,
+        done_at: archiveDate.toISOString(),
+      } : m))
+      if (chatOpenFor === msgId) closeChat()
+      toast('Moved to archive')
+    } else {
+      toast('Failed to archive', 'error')
+    }
+    setTrashDropdownFor(null)
   }
 
   // ── Filters ─────────────────────────────────────────────────────────────
@@ -842,6 +891,49 @@ export default function InboxPage() {
                       >
                         Mark Done
                       </button>
+                    )}
+
+                    {isAdmin && (
+                      <div className="relative">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setTrashDropdownFor(trashDropdownFor === msg.id ? null : msg.id) }}
+                          title="Delete or archive"
+                          className={`px-2 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
+                            trashDropdownFor === msg.id
+                              ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                              : 'bg-surface-raised border-border text-text-tertiary hover:text-red-400 hover:border-red-500/20 hover:bg-red-500/10'
+                          }`}
+                        >
+                          <svg className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                        {trashDropdownFor === msg.id && (
+                          <div
+                            className="absolute z-50 right-0 top-full mt-1 w-40 bg-surface border border-border rounded-lg shadow-xl overflow-hidden"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <button
+                              onClick={() => handleArchiveNow(msg.id)}
+                              className="w-full text-left px-3 py-2 text-xs text-text-secondary hover:bg-surface-raised transition-colors flex items-center gap-2"
+                            >
+                              <svg className="size-3.5 text-zinc-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                              </svg>
+                              Archive
+                            </button>
+                            <button
+                              onClick={() => handleDelete(msg.id)}
+                              className="w-full text-left px-3 py-2 text-xs text-red-400 hover:bg-red-500/10 transition-colors border-t border-border flex items-center gap-2"
+                            >
+                              <svg className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
                     <span className="ml-auto text-[11px] text-text-muted">
                       {format(new Date(msg.created_at), 'dd MMM yyyy, h:mm a')}
