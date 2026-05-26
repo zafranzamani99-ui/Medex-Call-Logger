@@ -3,8 +3,10 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useTheme } from '@/lib/ThemeProvider'
+import { formatDistanceToNow } from 'date-fns'
+import type { Notification } from '@/lib/types'
 
 // WHY: Redesigned sidebar with spatial hierarchy — prominent CTA, notification dots, quick stats.
 // Mobile uses Instagram-style elevated center button for Log Call.
@@ -15,6 +17,7 @@ interface NavBarProps {
   openTickets?: number
   kbDrafts?: number
   inboxUnread?: number
+  notifCount?: number
 }
 
 const NAV_ITEMS = [
@@ -102,12 +105,19 @@ const DOT_COLORS: Record<string, string> = {
   inboxUnread: 'bg-purple-400',
 }
 
-export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, kbDrafts = 0, inboxUnread = 0 }: NavBarProps) {
+export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, kbDrafts = 0, inboxUnread = 0, notifCount: initialNotifCount = 0 }: NavBarProps) {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = createClient()
   const [collapsed, setCollapsed] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+
+  // Notification bell state
+  const [bellOpen, setBellOpen] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [notifCount, setNotifCount] = useState(initialNotifCount)
+  const [notifLoading, setNotifLoading] = useState(false)
+  const bellRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     document.documentElement.style.setProperty(
@@ -122,6 +132,65 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
     setTimeout(() => document.documentElement.removeAttribute('data-sidebar-animating'), 220)
   }
   const { theme: currentTheme, toggleTheme } = useTheme()
+
+  // Notification bell: fetch + realtime
+  const fetchNotifications = useCallback(async () => {
+    setNotifLoading(true)
+    const { data } = await supabase
+      .from('notifications')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20)
+    if (data) setNotifications(data as Notification[])
+    setNotifLoading(false)
+  }, [supabase])
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('notif-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications' },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (payload: any) => {
+          const notif = payload.new as Notification
+          setNotifications(prev => [notif, ...prev].slice(0, 20))
+          setNotifCount(c => c + 1)
+        }
+      )
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [supabase])
+
+  useEffect(() => {
+    if (!bellOpen) return
+    const handler = (e: MouseEvent) => {
+      if (bellRef.current && !bellRef.current.contains(e.target as Node)) {
+        setBellOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [bellOpen])
+
+  const handleOpenBell = async () => {
+    const opening = !bellOpen
+    setBellOpen(opening)
+    if (opening) {
+      await fetchNotifications()
+      // Mark all as read
+      if (notifCount > 0) {
+        await supabase.from('notifications').update({ is_read: true }).eq('is_read', false)
+        setNotifCount(0)
+      }
+    }
+  }
+
+  const NOTIF_ICONS: Record<string, { bg: string; text: string; label: string }> = {
+    assignment: { bg: 'bg-indigo-500/20', text: 'text-indigo-400', label: 'Assigned' },
+    mention: { bg: 'bg-cyan-500/20', text: 'text-cyan-400', label: 'Mentioned' },
+    priority: { bg: 'bg-red-500/20', text: 'text-red-400', label: 'High Priority' },
+  }
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -271,6 +340,86 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
           </div>
         )}
 
+        {/* Notification bell */}
+        <div className="px-3 mb-1 flex-shrink-0" ref={bellRef}>
+          <button
+            onClick={handleOpenBell}
+            title="Notifications"
+            className={`relative flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-[13px] transition-colors ${
+              bellOpen
+                ? 'bg-indigo-500/10 text-indigo-400'
+                : 'text-text-tertiary hover:text-text-secondary hover:bg-surface-raised'
+            } ${collapsed ? 'justify-center px-0' : ''}`}
+          >
+            <span className="relative flex-shrink-0">
+              <svg className="size-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+              </svg>
+              {notifCount > 0 && (
+                <span className="absolute -top-1 -right-1.5 size-4 flex items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
+                  {notifCount > 9 ? '9+' : notifCount}
+                </span>
+              )}
+            </span>
+            {!collapsed && <span className="flex-1">Notifications</span>}
+          </button>
+
+          {/* Notification dropdown */}
+          {bellOpen && (
+            <div className={`absolute z-50 bg-surface border border-border rounded-lg shadow-xl overflow-hidden ${
+              collapsed ? 'left-[60px] bottom-20 w-72' : 'left-2 right-2 bottom-auto mt-1 w-auto max-w-[216px]'
+            }`}
+              style={collapsed ? {} : { position: 'relative' }}
+            >
+              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+                <span className="text-xs font-semibold text-text-primary">Notifications</span>
+                {notifications.length > 0 && (
+                  <button
+                    onClick={() => router.push('/inbox')}
+                    className="text-[10px] text-indigo-400 hover:text-indigo-300"
+                  >
+                    View Inbox
+                  </button>
+                )}
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {notifLoading ? (
+                  <div className="p-4 space-y-2">
+                    <div className="h-8 skeleton rounded" />
+                    <div className="h-8 skeleton rounded" />
+                  </div>
+                ) : notifications.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-text-muted">No notifications</div>
+                ) : (
+                  notifications.map(n => {
+                    const style = NOTIF_ICONS[n.type] || NOTIF_ICONS.assignment
+                    return (
+                      <button
+                        key={n.id}
+                        onClick={() => { setBellOpen(false); if (n.link) router.push(n.link) }}
+                        className={`w-full text-left px-3 py-2.5 border-b border-border/50 last:border-0 hover:bg-surface-raised transition-colors ${
+                          !n.is_read ? 'bg-indigo-500/5' : ''
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded ${style.bg} ${style.text}`}>
+                            {style.label}
+                          </span>
+                          <span className="text-[10px] text-text-muted ml-auto">
+                            {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                          </span>
+                        </div>
+                        <p className="text-xs text-text-primary font-medium truncate">{n.title}</p>
+                        {n.body && <p className="text-[11px] text-text-tertiary truncate">{n.body}</p>}
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* User section */}
         <div className="p-3 flex-shrink-0 border-t border-border">
           {collapsed ? (
@@ -319,6 +468,19 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
                 {openTickets} open
               </span>
             )}
+            <button
+              onClick={handleOpenBell}
+              className="relative p-1 text-text-muted hover:text-text-primary transition-colors"
+            >
+              <svg className="size-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+              </svg>
+              {notifCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 size-4 flex items-center justify-center rounded-full bg-red-500 text-[9px] font-bold text-white">
+                  {notifCount > 9 ? '9+' : notifCount}
+                </span>
+              )}
+            </button>
             <span className="text-xs text-text-tertiary">{displayName}</span>
           </div>
         </div>

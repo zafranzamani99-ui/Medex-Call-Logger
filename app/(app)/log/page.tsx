@@ -573,6 +573,18 @@ export default function LogCallPage() {
       })
     }
 
+    // Insert inbox message when flagged for attention
+    if (needTeamCheck && status !== 'Resolved') {
+      await supabase.from('inbox_messages').insert({
+        ticket_id: ticket.id,
+        ticket_ref: ticket.ticket_ref,
+        clinic_name: ticketData.clinic_name,
+        message: `[Needs Attention] ${issue.trim()}`,
+        sent_by: userId,
+        sent_by_name: userName,
+      })
+    }
+
     if (issueType === 'Schedule' && scheduleDate && scheduleTime && scheduleType) {
       const duration = SCHEDULE_TYPES.find(t => t.value === scheduleType)?.duration || ''
       await supabase.from('schedules').insert({

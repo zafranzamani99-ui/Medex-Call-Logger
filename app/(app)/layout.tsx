@@ -42,7 +42,7 @@ export default async function AppLayout({
   today.setHours(0, 0, 0, 0)
   const todayISO = today.toISOString()
 
-  const [profileResult, todayCallsResult, openTicketsResult, kbDraftsResult, inboxUnreadResult] = await Promise.all([
+  const [profileResult, todayCallsResult, openTicketsResult, kbDraftsResult, inboxUnreadResult, notifCountResult] = await Promise.all([
     withTimeout(
       supabase
         .from('profiles')
@@ -76,6 +76,10 @@ export default async function AppLayout({
       supabase.rpc('get_inbox_unread_count'),
       2000
     ),
+    withTimeout(
+      supabase.rpc('get_notification_unread_count'),
+      2000
+    ),
   ])
 
   // WHY: If the profile query succeeded AND is_active is explicitly false,
@@ -93,6 +97,7 @@ export default async function AppLayout({
   const openTickets = openTicketsResult?.count ?? 0
   const kbDrafts = kbDraftsResult?.count ?? 0
   const inboxUnread = inboxUnreadResult?.data ?? 0
+  const notifCount = notifCountResult?.data ?? 0
 
   return (
     <div className="min-h-dvh flex flex-col md:flex-row">
@@ -102,6 +107,7 @@ export default async function AppLayout({
         openTickets={openTickets}
         kbDrafts={kbDrafts}
         inboxUnread={inboxUnread}
+        notifCount={notifCount}
       />
       <main className="flex-1 md:pl-[var(--sidebar-width)] w-full">
         <div className="relative mx-auto max-w-[1440px] px-4 py-6 pb-24 sm:px-6 md:px-10 md:py-8">

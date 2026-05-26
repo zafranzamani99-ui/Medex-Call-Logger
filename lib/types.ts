@@ -388,6 +388,9 @@ export interface InboxMessage {
   done_by: string | null
   done_by_name: string | null
   done_at: string | null
+  assigned_to: string | null
+  assigned_to_name: string | null
+  priority: 'normal' | 'high'
 }
 
 // Individual reply in an inbox chat thread
@@ -397,6 +400,18 @@ export interface InboxReply {
   message: string
   sent_by: string
   sent_by_name: string
+  created_at: string
+}
+
+export interface Notification {
+  id: string
+  user_id: string
+  type: 'assignment' | 'mention' | 'priority'
+  title: string
+  body: string | null
+  link: string | null
+  inbox_message_id: string | null
+  is_read: boolean
   created_at: string
 }
 

@@ -307,6 +307,17 @@ export default function TicketDetailPage() {
           sent_by_name: userName,
         })
       }
+      // Insert inbox message when flagged for attention
+      if (effectiveNeedCheck && !ticket.need_team_check) {
+        await supabase.from('inbox_messages').insert({
+          ticket_id: ticket.id,
+          ticket_ref: ticket.ticket_ref,
+          clinic_name: ticket.clinic_name,
+          message: `[Needs Attention] ${ticket.issue}`,
+          sent_by: userId,
+          sent_by_name: userName,
+        })
+      }
       setEditing(false)
       fetchTicket()
       toast('Ticket updated')
@@ -527,6 +538,17 @@ export default function TicketDetailPage() {
         ticket_ref: ticket.ticket_ref,
         clinic_name: ticket.clinic_name,
         message: followUpAdminMessage.trim(),
+        sent_by: userId,
+        sent_by_name: userName,
+      })
+    }
+    // Insert inbox message for "Needs Attention" follow-up activity
+    if (ticket.need_team_check && followUpStatus !== 'Resolved') {
+      await supabase.from('inbox_messages').insert({
+        ticket_id: ticket.id,
+        ticket_ref: ticket.ticket_ref,
+        clinic_name: ticket.clinic_name,
+        message: `[Needs Attention] ${trimmedResponse || ticket.issue}`,
         sent_by: userId,
         sent_by_name: userName,
       })
