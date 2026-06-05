@@ -627,3 +627,42 @@ export interface Resource {
   created_at: string
   updated_at: string
 }
+
+// Shift management
+export interface StaffRef {
+  id: string
+  name: string
+}
+
+export interface SaturdayShift {
+  id: string
+  shift_date: string
+  staff: StaffRef[]
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface StandbyShift {
+  id: string
+  week_start: string
+  week_end: string
+  weekday_staff: StaffRef[]
+  weekend_staff: StaffRef[]
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ReplacementLeave {
+  id: string
+  staff_id: string
+  staff_name: string
+  leave_date: string
+  duration: number
+  notes: string | null
+  created_by: string | null
+  created_at: string
+}

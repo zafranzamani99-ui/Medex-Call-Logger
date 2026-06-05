@@ -10,6 +10,7 @@ import { usePathname } from 'next/navigation'
 const TITLES: Array<[RegExp, string]> = [
   [/^\/$/, 'Dashboard'],
   [/^\/my-log/, 'My Log'],
+  [/^\/shift/, 'Shift'],
   [/^\/inbox/, 'Inbox'],
   [/^\/tickets\/[^/]+/, 'Ticket'],
   [/^\/tickets/, 'History'],

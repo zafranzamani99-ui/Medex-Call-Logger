@@ -68,7 +68,7 @@ export default function SchedulePage() {
   const [currentMonth, setCurrentMonth] = useState(new Date())
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [holidays, setHolidays] = useState<PublicHoliday[]>([])
-  const [leaveEntries, setLeaveEntries] = useState<(StaffLeave & { staff_name: string })[]>([])
+  const [leaveEntries, setLeaveEntries] = useState<(StaffLeave & { staff_name: string; leave_type?: 'leave' | 'replacement' })[]>([])
   const [showLeaveModal, setShowLeaveModal] = useState(false)
   const [leavePrefilledDate, setLeavePrefilledDate] = useState<string | undefined>(undefined)
   const [showHolidayModal, setShowHolidayModal] = useState(false)
@@ -384,8 +384,8 @@ export default function SchedulePage() {
       }
     }
 
-    // Public holidays + staff leave for the visible month
-    const [holRes, leaveRes] = await Promise.all([
+    // Public holidays + staff leave + replacement leave for the visible month
+    const [holRes, leaveRes, rlRes] = await Promise.all([
       supabase.from('public_holidays')
         .select('*')
         .gte('holiday_date', monthStart)
@@ -394,10 +394,14 @@ export default function SchedulePage() {
         .select('id, staff_id, leave_date, reason, created_by, created_at, profiles!staff_leave_staff_id_fkey(display_name)')
         .gte('leave_date', monthStart)
         .lte('leave_date', monthEnd),
+      supabase.from('replacement_leaves')
+        .select('id, staff_id, staff_name, leave_date, duration, notes, created_by, created_at')
+        .gte('leave_date', monthStart)
+        .lte('leave_date', monthEnd),
     ])
     setHolidays((holRes.data || []) as PublicHoliday[])
     type LeaveRow = StaffLeave & { profiles: { display_name: string } | { display_name: string }[] | null }
-    setLeaveEntries(((leaveRes.data || []) as LeaveRow[]).map((r) => ({
+    const staffLeaves = ((leaveRes.data || []) as LeaveRow[]).map((r) => ({
       id: r.id,
       staff_id: r.staff_id,
       leave_date: r.leave_date,
@@ -405,7 +409,20 @@ export default function SchedulePage() {
       created_by: r.created_by,
       created_at: r.created_at,
       staff_name: Array.isArray(r.profiles) ? (r.profiles[0]?.display_name || '') : (r.profiles?.display_name || ''),
-    })))
+      leave_type: 'leave' as const,
+    }))
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const replLeaves = ((rlRes.data || []) as any[]).map((r) => ({
+      id: r.id,
+      staff_id: r.staff_id,
+      leave_date: r.leave_date,
+      reason: r.notes ? `RL${r.duration === 0.5 ? ' (half)' : ''} — ${r.notes}` : `Replacement Leave${r.duration === 0.5 ? ' (half day)' : ''}`,
+      created_by: r.created_by,
+      created_at: r.created_at,
+      staff_name: r.staff_name,
+      leave_type: 'replacement' as const,
+    }))
+    setLeaveEntries([...staffLeaves, ...replLeaves])
   }
 
   // Build calendar grid
@@ -445,7 +462,7 @@ export default function SchedulePage() {
 
   // Leave grouped by date for chip rendering AND by staff+date for conflict lookup
   const leaveByDate = useMemo(() => {
-    const map: Record<string, (StaffLeave & { staff_name: string })[]> = {}
+    const map: Record<string, (StaffLeave & { staff_name: string; leave_type?: 'leave' | 'replacement' })[]> = {}
     leaveEntries.forEach(l => {
       if (!map[l.leave_date]) map[l.leave_date] = []
       map[l.leave_date].push(l)
@@ -1226,24 +1243,31 @@ export default function SchedulePage() {
                   </div>
                 ))}
 
-                {/* Leave chips — grey, distinct from schedules */}
-                {dayLeave.map(l => (
-                  <div
-                    key={l.id}
-                    title={`${l.staff_name} on leave${l.reason ? ` — ${l.reason}` : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDeleteLeave(l)
-                    }}
-                    className="px-1.5 py-0.5 rounded text-[10px] sm:text-xs mb-0.5 bg-zinc-500/15 text-zinc-300 hover:bg-zinc-500/25 transition-colors truncate flex items-center gap-1"
-                  >
-                    <svg className="size-2.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    <span className="truncate font-medium">{l.staff_name}</span>
-                    <span className="text-zinc-500">· Leave</span>
-                  </div>
-                ))}
+                {/* Leave chips — grey for regular leave, teal for replacement leave */}
+                {dayLeave.map(l => {
+                  const isRL = l.leave_type === 'replacement'
+                  return (
+                    <div
+                      key={l.id}
+                      title={`${l.staff_name}${isRL ? ' — Replacement Leave' : ' on leave'}${l.reason ? ` — ${l.reason}` : ''}`}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (!isRL) handleDeleteLeave(l)
+                      }}
+                      className={`px-1.5 py-0.5 rounded text-[10px] sm:text-xs mb-0.5 transition-colors truncate flex items-center gap-1 ${
+                        isRL
+                          ? 'bg-teal-500/15 text-teal-300 hover:bg-teal-500/25'
+                          : 'bg-zinc-500/15 text-zinc-300 hover:bg-zinc-500/25'
+                      }`}
+                    >
+                      <svg className="size-2.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      <span className="truncate font-medium">{l.staff_name}</span>
+                      <span className={isRL ? 'text-teal-500' : 'text-zinc-500'}>· {isRL ? 'RL' : 'Leave'}</span>
+                    </div>
+                  )
+                })}
 
                 {/* Schedule chips — show all, no truncation */}
                 <div className="space-y-0.5">
@@ -1374,28 +1398,36 @@ export default function SchedulePage() {
                       On Leave
                     </div>
                     <div className="divide-y divide-border/50">
-                      {dayLeaveList.map(l => (
-                        <div key={l.id} className="px-5 py-2 flex items-center justify-between gap-3 hover:bg-surface-raised/40 transition-colors">
-                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                            <div className="size-7 rounded-full bg-zinc-500/15 flex items-center justify-center flex-shrink-0">
-                              <svg className="size-3.5 text-zinc-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                              </svg>
+                      {dayLeaveList.map(l => {
+                        const isRL = l.leave_type === 'replacement'
+                        return (
+                          <div key={l.id} className="px-5 py-2 flex items-center justify-between gap-3 hover:bg-surface-raised/40 transition-colors">
+                            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                              <div className={`size-7 rounded-full flex items-center justify-center flex-shrink-0 ${isRL ? 'bg-teal-500/15' : 'bg-zinc-500/15'}`}>
+                                <svg className={`size-3.5 ${isRL ? 'text-teal-300' : 'text-zinc-300'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                              </div>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-text-primary truncate">
+                                  {l.staff_name}
+                                  {isRL && <span className="ml-1.5 text-[10px] font-medium text-teal-400">RL</span>}
+                                </p>
+                                {l.reason && <p className="text-xs text-text-tertiary truncate">{l.reason}</p>}
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-text-primary truncate">{l.staff_name}</p>
-                              {l.reason && <p className="text-xs text-text-tertiary truncate">{l.reason}</p>}
-                            </div>
+                            {!isRL && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLeave(l)}
+                                className="text-xs text-text-tertiary hover:text-red-400 px-2 py-1 transition-colors flex-shrink-0"
+                              >
+                                Remove
+                              </button>
+                            )}
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteLeave(l)}
-                            className="text-xs text-text-tertiary hover:text-red-400 px-2 py-1 transition-colors flex-shrink-0"
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 )}
