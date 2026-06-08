@@ -264,7 +264,7 @@ export default function LogCallPage() {
       }
     }
 
-    // Pre-fill from URL params (e.g. /log?phone=xxx&clinic=yyy from Call Log missed tab)
+    // Pre-fill from URL params (e.g. /log?phone=xxx&missed_id=yyy from Call Log missed tab)
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search)
       const phoneParam = params.get('phone')
@@ -685,6 +685,20 @@ export default function LogCallPage() {
     if (activeDraftId) {
       await supabase.from('call_log_drafts').delete().eq('id', activeDraftId)
       setDrafts(prev => prev.filter(d => d.id !== activeDraftId))
+    }
+
+    // If this call was logged from a missed call, mark it as resolved
+    if (typeof window !== 'undefined') {
+      const missedId = new URLSearchParams(window.location.search).get('missed_id')
+      if (missedId) {
+        await supabase.from('missed_calls').update({
+          resolved_status: 'logged',
+          resolved_by: userId,
+          resolved_by_name: userName,
+          resolved_at: new Date().toISOString(),
+          resolved_note: `Logged as ${ticket.ticket_ref}`,
+        }).eq('id', missedId)
+      }
     }
 
     submittedRef.current = true

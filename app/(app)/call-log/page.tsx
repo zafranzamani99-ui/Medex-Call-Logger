@@ -29,6 +29,10 @@ interface CallEntry {
   status?: string
   ticketRef?: string
   notes?: string
+  resolvedStatus?: string | null
+  resolvedByName?: string | null
+  resolvedAt?: string | null
+  resolvedNote?: string | null
 }
 
 interface PhoneSuggestion {
@@ -66,13 +70,13 @@ const LOG_DEFAULT_WIDTHS: Record<string, number> = {
 }
 
 // ── Missed tab columns ──────────────────────────────────────────
-const MISSED_COL_KEYS = ['time', 'phone', 'clinic', 'notes', 'callnow', 'actions'] as const
+const MISSED_COL_KEYS = ['time', 'phone', 'clinic', 'resolution', 'actions'] as const
 const MISSED_COL_LABELS: Record<string, string> = {
-  time: 'Time', phone: 'Phone No.', clinic: 'Clinic', notes: 'Notes', callnow: '', actions: '',
+  time: 'Time', phone: 'Phone No.', clinic: 'Clinic', resolution: 'Action / Status', actions: '',
 }
 const MISSED_ALWAYS_VISIBLE = new Set(['time', 'phone', 'actions'])
 const MISSED_DEFAULT_WIDTHS: Record<string, number> = {
-  time: 90, phone: 150, clinic: 280, notes: 220, callnow: 80, actions: 40,
+  time: 90, phone: 150, clinic: 280, resolution: 320, actions: 40,
 }
 
 export default function CallLogPage() {
@@ -155,7 +159,7 @@ export default function CallLogPage() {
   )
 
   // ── Missed tab column config ───────────────────────────────────
-  const MISSED_VIS_KEY = 'missed-col-visibility'
+  const MISSED_VIS_KEY = 'missed-col-visibility-v2'
   const [missedColVis, setMissedColVis] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') return Object.fromEntries(MISSED_COL_KEYS.map(k => [k, true]))
     try {
@@ -166,7 +170,7 @@ export default function CallLogPage() {
   })
   useEffect(() => { try { localStorage.setItem(MISSED_VIS_KEY, JSON.stringify(missedColVis)) } catch {} }, [missedColVis])
 
-  const MISSED_ORDER_KEY = 'missed-col-order'
+  const MISSED_ORDER_KEY = 'missed-col-order-v2'
   const [missedColOrder, setMissedColOrder] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [...MISSED_COL_KEYS]
     try {
@@ -181,7 +185,7 @@ export default function CallLogPage() {
   })
   useEffect(() => { try { localStorage.setItem(MISSED_ORDER_KEY, JSON.stringify(missedColOrder)) } catch {} }, [missedColOrder])
 
-  const MISSED_WIDTHS_KEY = 'missed-col-widths-v2'
+  const MISSED_WIDTHS_KEY = 'missed-col-widths-v3'
   const [missedColWidths, setMissedColWidths] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return MISSED_DEFAULT_WIDTHS
     try {
@@ -309,7 +313,7 @@ export default function CallLogPage() {
     }
     if (missedRes.data) {
       for (const m of missedRes.data) {
-        combined.push({ id: m.id, phone: m.phone, clinic: m.clinic_name || '-', staff: m.logged_by_name || '-', time: m.called_at || m.created_at, source: 'missed', notes: m.notes })
+        combined.push({ id: m.id, phone: m.phone, clinic: m.clinic_name || '-', staff: m.logged_by_name || '-', time: m.called_at || m.created_at, source: 'missed', notes: m.notes, resolvedStatus: m.resolved_status, resolvedByName: m.resolved_by_name, resolvedAt: m.resolved_at, resolvedNote: m.resolved_note })
       }
     }
 
@@ -451,6 +455,20 @@ export default function CallLogPage() {
     const { error } = await supabase.from('missed_calls').delete().eq('id', entry.id)
     if (error) { toast('Failed to delete', 'error'); return }
     setAllEntries(prev => prev.filter(e => e.id !== entry.id))
+  }
+
+  // ── Resolve missed call (no answer / dismiss) ──────────────────
+  const handleResolve = async (entry: CallEntry, status: 'no_answer' | 'dismissed', note?: string) => {
+    const { error } = await supabase.from('missed_calls').update({
+      resolved_status: status,
+      resolved_by: userId,
+      resolved_by_name: userName,
+      resolved_at: new Date().toISOString(),
+      resolved_note: note || null,
+    }).eq('id', entry.id)
+    if (error) { toast('Failed to update', 'error'); return }
+    setAllEntries(prev => prev.map(e => e.id === entry.id ? { ...e, resolvedStatus: status, resolvedByName: userName, resolvedAt: new Date().toISOString(), resolvedNote: note || null } : e))
+    toast(status === 'no_answer' ? 'Marked as no answer' : 'Dismissed', 'success')
   }
 
   // ── Phone auto-suggest ─────────────────────────────────────────
@@ -796,15 +814,9 @@ export default function CallLogPage() {
                       {resizeHandle}
                     </SortableHeader>
                   )
-                  if (k === 'notes') return (
+                  if (k === 'resolution') return (
                     <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
-                      <span>Notes</span>
-                      {resizeHandle}
-                    </SortableHeader>
-                  )
-                  if (k === 'callnow') return (
-                    <SortableHeader key={k} id={k} disabled className={baseTh}>
-                      <span></span>
+                      <span>Action / Status</span>
                       {resizeHandle}
                     </SortableHeader>
                   )
@@ -835,12 +847,36 @@ export default function CallLogPage() {
                         </div>
                       </td>
                     )
-                    if (k === 'notes') return <td key={k} className="px-4 py-3 text-text-tertiary text-xs align-top">{e.notes || '-'}</td>
-                    if (k === 'callnow') return (
+                    if (k === 'resolution') return (
                       <td key={k} className="px-4 py-3 align-top">
-                        <button onClick={ev => { ev.stopPropagation(); window.open(`/log?phone=${encodeURIComponent(e.phone)}${e.clinic !== '-' ? `&clinic=${encodeURIComponent(e.clinic)}` : ''}`, '_blank') }} className="text-xs font-medium px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors whitespace-nowrap">
-                          Log Call
-                        </button>
+                        {e.resolvedStatus ? (
+                          <div className="space-y-0.5">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                              e.resolvedStatus === 'logged' ? 'bg-emerald-500/20 text-emerald-400'
+                              : e.resolvedStatus === 'no_answer' ? 'bg-amber-500/20 text-amber-400'
+                              : 'bg-zinc-500/20 text-zinc-400'
+                            }`}>
+                              {e.resolvedStatus === 'logged' ? 'Logged' : e.resolvedStatus === 'no_answer' ? 'No Answer' : 'Dismissed'}
+                            </span>
+                            <p className="text-[11px] text-text-tertiary">
+                              {e.resolvedByName && toProperCase(e.resolvedByName)}
+                              {e.resolvedAt && ` · ${format(new Date(e.resolvedAt), 'hh:mm a')}`}
+                            </p>
+                            {e.resolvedNote && <p className="text-[11px] text-text-tertiary italic">{e.resolvedNote}</p>}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button onClick={ev => { ev.stopPropagation(); window.open(`/log?phone=${encodeURIComponent(e.phone)}${e.clinic !== '-' ? `&clinic=${encodeURIComponent(e.clinic)}` : ''}&missed_id=${e.id}`, '_blank') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors whitespace-nowrap">
+                              Log Call
+                            </button>
+                            <button onClick={ev => { ev.stopPropagation(); handleResolve(e, 'no_answer') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors whitespace-nowrap">
+                              No Answer
+                            </button>
+                            <button onClick={ev => { ev.stopPropagation(); handleResolve(e, 'dismissed', 'Duplicate / same clinic') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-zinc-600 text-white hover:bg-zinc-700 transition-colors whitespace-nowrap">
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
                       </td>
                     )
                     if (k === 'actions') return (
@@ -881,12 +917,7 @@ export default function CallLogPage() {
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {tab === 'log' && sourceBadge(e)}
-                    {e.source === 'missed' && (
-                      <button onClick={ev => { ev.stopPropagation(); window.open(`/log?phone=${encodeURIComponent(e.phone)}${e.clinic !== '-' ? `&clinic=${encodeURIComponent(e.clinic)}` : ''}`, '_blank') }} className="text-xs font-medium px-2.5 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors whitespace-nowrap">
-                        Log Call
-                      </button>
-                    )}
-                    {e.source === 'missed' && (
+                    {e.source === 'missed' && !e.resolvedStatus && (
                       <button onClick={ev => handleDelete(e, ev)} className="text-text-muted hover:text-red-400 p-1" aria-label="Delete">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                       </button>
@@ -899,7 +930,30 @@ export default function CallLogPage() {
                   <span className="text-accent font-medium">{toProperCase(e.staff)}</span>
                   {e.ticketRef && <><span>·</span><span className="font-mono">{e.ticketRef}</span></>}
                 </div>
-                {e.notes && <p className="text-xs text-text-tertiary italic mt-0.5">{e.notes}</p>}
+                {/* Mobile resolution actions */}
+                {e.source === 'missed' && (
+                  e.resolvedStatus ? (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
+                        e.resolvedStatus === 'logged' ? 'bg-emerald-500/20 text-emerald-400'
+                        : e.resolvedStatus === 'no_answer' ? 'bg-amber-500/20 text-amber-400'
+                        : 'bg-zinc-500/20 text-zinc-400'
+                      }`}>
+                        {e.resolvedStatus === 'logged' ? 'Logged' : e.resolvedStatus === 'no_answer' ? 'No Answer' : 'Dismissed'}
+                      </span>
+                      <span className="text-[11px] text-text-tertiary">
+                        {e.resolvedByName && toProperCase(e.resolvedByName)}
+                        {e.resolvedAt && ` · ${format(new Date(e.resolvedAt), 'hh:mm a')}`}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mt-1.5 flex items-center gap-1.5">
+                      <button onClick={ev => { ev.stopPropagation(); window.open(`/log?phone=${encodeURIComponent(e.phone)}${e.clinic !== '-' ? `&clinic=${encodeURIComponent(e.clinic)}` : ''}&missed_id=${e.id}`, '_blank') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">Log Call</button>
+                      <button onClick={ev => { ev.stopPropagation(); handleResolve(e, 'no_answer') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors">No Answer</button>
+                      <button onClick={ev => { ev.stopPropagation(); handleResolve(e, 'dismissed', 'Duplicate / same clinic') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-zinc-600 text-white hover:bg-zinc-700 transition-colors">Dismiss</button>
+                    </div>
+                  )
+                )}
               </div>
             ))}
           </div>

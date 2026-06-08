@@ -86,7 +86,8 @@ export default async function AppLayout({
       supabase
         .from('missed_calls')
         .select('id', { count: 'exact', head: true })
-        .eq('call_date', todayDate),
+        .eq('call_date', todayDate)
+        .is('resolved_status', null),
       2000
     ),
   ])
