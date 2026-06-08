@@ -529,7 +529,12 @@ export default function CallLogPage() {
   }
 
   // ── Voice Go CSV import ────────────────────────────────────────
-  const normalizePhone = (p: string) => p.replace(/[\s\-()]/g, '').replace(/^0/, '')
+  const normalizePhone = (p: string) => {
+    let v = p.replace(/[^\d]/g, '')
+    if (v.startsWith('60') && v.length > 9) v = v.slice(2)
+    if (v.startsWith('0')) v = v.slice(1)
+    return v
+  }
 
   const handleImportCSV = async (file: File) => {
     const text = await file.text()
@@ -729,7 +734,7 @@ export default function CallLogPage() {
       <div className="flex gap-1 mb-4 border-b border-border">
         {([
           { key: 'log' as Tab, label: 'Call Log', count: logEntries.length },
-          { key: 'missed' as Tab, label: 'Missed Call', count: missedEntries.length },
+          { key: 'missed' as Tab, label: 'Missed Call', count: missedEntries.filter(e => !e.resolvedStatus).length },
         ]).map(t => (
           <button
             key={t.key}
