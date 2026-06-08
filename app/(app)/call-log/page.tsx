@@ -578,39 +578,49 @@ export default function CallLogPage() {
       result.push(current.replace(/\t/g, '').trim()); return result
     }
 
-    const callingNumbers: { phone: string; time: string }[] = []
-    let skippedIncoming = 0
+    // Parse all rows, track missed times + which numbers had Incoming (answered)
+    const missedByPhone = new Map<string, { phone: string; times: string[] }>()
+    const answeredPhones = new Set<string>()
+
     for (let i = headerIdx + 1; i < lines.length; i++) {
       const vals = parseCsvLine(lines[i]); const phone = vals[callingIdx]?.trim()
       if (!phone) continue
       const callType = typeIdx >= 0 ? vals[typeIdx]?.trim().toLowerCase() : ''
-      if (callType === 'incoming') { skippedIncoming++; continue }
-      callingNumbers.push({ phone, time: timeIdx >= 0 ? (vals[timeIdx]?.trim() || '') : '' })
+      const norm = normalizePhone(phone)
+      const time = timeIdx >= 0 ? (vals[timeIdx]?.trim() || '') : ''
+
+      if (callType === 'incoming') {
+        answeredPhones.add(norm)
+      } else if (callType === 'outgoing') {
+        continue
+      } else {
+        const existing = missedByPhone.get(norm)
+        if (existing) { if (time) existing.times.push(time) }
+        else missedByPhone.set(norm, { phone, times: time ? [time] : [] })
+      }
     }
-    if (callingNumbers.length === 0) {
-      toast(skippedIncoming > 0 ? `All ${skippedIncoming} calls were answered (Incoming) — no missed calls found` : 'No phone numbers found in CSV', 'error')
+
+    if (missedByPhone.size === 0) {
+      toast('No missed calls found in CSV', 'error')
       return
     }
 
-    // Group by phone — same number calling 3x = 1 row with all times
-    const phoneGroup = new Map<string, { phone: string; times: string[] }>()
-    for (const cn of callingNumbers) {
-      const norm = normalizePhone(cn.phone)
-      const existing = phoneGroup.get(norm)
-      if (existing) {
-        if (cn.time) existing.times.push(cn.time)
-      } else {
-        phoneGroup.set(norm, { phone: cn.phone, times: cn.time ? [cn.time] : [] })
-      }
-    }
-    const dedupedNumbers = Array.from(phoneGroup.values())
+    const dedupedNumbers = Array.from(missedByPhone.values())
 
     const loggedPhones = new Map<string, { clinic: string; ref: string }>()
     allEntries.forEach(e => { const norm = normalizePhone(e.phone); if (!loggedPhones.has(norm)) loggedPhones.set(norm, { clinic: e.clinic, ref: e.ticketRef || '' }) })
 
     const rows: VoiceGoRow[] = dedupedNumbers.map(cn => {
-      const norm = normalizePhone(cn.phone); const match = loggedPhones.get(norm)
-      return { times: cn.times, phone: cn.phone, matched: !!match, matchedClinic: match?.clinic, matchedRef: match?.ref, selected: !match }
+      const norm = normalizePhone(cn.phone)
+      const logMatch = loggedPhones.get(norm)
+      const wasAnswered = answeredPhones.has(norm)
+      const matched = !!logMatch || wasAnswered
+      return {
+        times: cn.times, phone: cn.phone, matched,
+        matchedClinic: logMatch?.clinic || (wasAnswered ? 'Answered (Incoming)' : undefined),
+        matchedRef: logMatch?.ref,
+        selected: !matched,
+      }
     })
     setImportRows(rows); setShowImport(true)
   }
