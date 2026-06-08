@@ -666,3 +666,13 @@ export interface ReplacementLeave {
   created_by: string | null
   created_at: string
 }
+
+export interface ShiftLog {
+  id: string
+  action: 'add' | 'edit' | 'delete'
+  tab: 'saturday' | 'standby' | 'leave'
+  summary: string
+  done_by: string | null
+  done_by_name: string
+  created_at: string
+}

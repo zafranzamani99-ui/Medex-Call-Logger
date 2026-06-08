@@ -3,8 +3,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { format, subDays, startOfDay } from 'date-fns'
-import type { Ticket, DashboardStats, Schedule } from '@/lib/types'
+import { format, subDays, startOfDay, startOfISOWeek, getDay, nextSaturday } from 'date-fns'
+import type { Ticket, DashboardStats, Schedule, StaffRef } from '@/lib/types'
 import { isStale } from '@/lib/staleDetection'
 import dynamic from 'next/dynamic'
 import Button from '@/components/ui/Button'
@@ -38,6 +38,10 @@ export default function DashboardPage() {
   const [activeWork, setActiveWork] = useState<Schedule[]>([])
   const [jobSheetsToday, setJobSheetsToday] = useState(0)
   const [kbDraftsCount, setKbDraftsCount] = useState(0)
+  const [standbyWeekday, setStandbyWeekday] = useState<StaffRef[]>([])
+  const [standbyWeekend, setStandbyWeekend] = useState<StaffRef[]>([])
+  const [saturdayStaff, setSaturdayStaff] = useState<StaffRef[]>([])
+  const [saturdayDate, setSaturdayDate] = useState('')
   const [, setTick] = useState(0)
 
   const triageRef = useRef<HTMLDivElement>(null)
@@ -156,11 +160,41 @@ export default function DashboardPage() {
     setKbDraftsCount(kbRes.count ?? 0)
   }
 
+  const fetchStandby = async () => {
+    const now = new Date()
+    const monday = format(startOfISOWeek(now), 'yyyy-MM-dd')
+    const sat = getDay(now) === 6 ? now : nextSaturday(now)
+    const satStr = format(sat, 'yyyy-MM-dd')
+
+    const [standbyRes, satRes] = await Promise.all([
+      supabase
+        .from('standby_shifts')
+        .select('weekday_staff, weekend_staff')
+        .eq('week_start', monday)
+        .maybeSingle(),
+      supabase
+        .from('saturday_shifts')
+        .select('shift_date, staff')
+        .eq('shift_date', satStr)
+        .maybeSingle(),
+    ])
+
+    if (standbyRes.data) {
+      setStandbyWeekday((standbyRes.data.weekday_staff || []) as StaffRef[])
+      setStandbyWeekend((standbyRes.data.weekend_staff || []) as StaffRef[])
+    }
+    if (satRes.data) {
+      setSaturdayStaff((satRes.data.staff || []) as StaffRef[])
+      setSaturdayDate(satRes.data.shift_date)
+    }
+  }
+
   useEffect(() => {
     fetchData()
     fetchUpcomingSchedules()
     fetchActiveWork()
     fetchExtras()
+    fetchStandby()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -316,6 +350,50 @@ export default function DashboardPage() {
           )}
         </div>
       </div>
+
+      {/* ═══ STANDBY THIS WEEK ═══ */}
+      {(standbyWeekday.length > 0 || standbyWeekend.length > 0 || saturdayStaff.length > 0) && (
+        <div className="mb-5 flex items-center gap-5 px-5 py-3.5 rounded-xl border border-indigo-500/20 bg-indigo-500/[0.04] flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <svg className="size-4 text-indigo-400" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z" />
+            </svg>
+            <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Standby</span>
+          </div>
+          {standbyWeekday.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-text-secondary">Weekday</span>
+              {standbyWeekday.map(s => (
+                <span key={s.id} className="px-2.5 py-1 text-xs font-bold rounded-lg bg-indigo-600 text-white">
+                  {toProperCase(s.name)}
+                </span>
+              ))}
+            </div>
+          )}
+          {standbyWeekend.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-text-secondary">Weekend</span>
+              {standbyWeekend.map(s => (
+                <span key={s.id} className="px-2.5 py-1 text-xs font-bold rounded-lg bg-amber-600 text-white">
+                  {toProperCase(s.name)}
+                </span>
+              ))}
+            </div>
+          )}
+          {saturdayStaff.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold text-text-secondary">
+                Sat {saturdayDate ? format(new Date(saturdayDate + 'T00:00:00'), 'd/M') : ''}
+              </span>
+              {saturdayStaff.map(s => (
+                <span key={s.id} className="px-2.5 py-1 text-xs font-bold rounded-lg bg-cyan-600 text-white">
+                  {toProperCase(s.name)}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ═══ WORKING NOW + NEXT UP — schedule awareness strip ═══ */}
       {(activeWork.length > 0 || upcomingSchedules.length > 0) && (

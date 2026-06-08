@@ -7,7 +7,8 @@ import {
   eachDayOfInterval, getDay, addDays, startOfISOWeek,
   getISOWeek,
 } from 'date-fns'
-import type { SaturdayShift, StandbyShift, ReplacementLeave, StaffRef, PublicHoliday, Profile } from '@/lib/types'
+import type { SaturdayShift, StandbyShift, ReplacementLeave, StaffRef, PublicHoliday, Profile, ShiftLog } from '@/lib/types'
+import { formatDistanceToNow } from 'date-fns'
 import { toProperCase } from '@/lib/constants'
 import { ModalDialog } from '@/components/Modal'
 import { Label, Input, Textarea, Select } from '@/components/ui/Input'
@@ -27,7 +28,10 @@ export default function ShiftPage() {
   const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()))
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
+  const [userName, setUserName] = useState('')
   const [agents, setAgents] = useState<Pick<Profile, 'id' | 'display_name'>[]>([])
+  const [shiftLogs, setShiftLogs] = useState<ShiftLog[]>([])
+  const [allStandby, setAllStandby] = useState<StandbyShift[]>([])
 
   const [saturdayShifts, setSaturdayShifts] = useState<SaturdayShift[]>([])
   const [standbyShifts, setStandbyShifts] = useState<StandbyShift[]>([])
@@ -50,6 +54,9 @@ export default function ShiftPage() {
   // Leave modal form
   const [formStaffId, setFormStaffId] = useState('')
   const [formDuration, setFormDuration] = useState<number>(1)
+
+  // Hours detail modal
+  const [hoursDetailFor, setHoursDetailFor] = useState<string | null>(null)
 
   // Leave tab filters
   const [leaveFilterStaff, setLeaveFilterStaff] = useState('all')
@@ -98,13 +105,19 @@ export default function ShiftPage() {
       const uid = session.user.id
       setUserId(uid)
 
-      const [agentsRes, holidaysRes] = await Promise.all([
+      const [profileRes, agentsRes, holidaysRes, logsRes, allStandbyRes] = await Promise.all([
+        supabase.from('profiles').select('display_name').eq('id', uid).single(),
         supabase.from('profiles').select('id, display_name').eq('is_active', true).in('role', ['support', 'administrator']).order('display_name'),
         supabase.from('public_holidays').select('*').in('scope', HOLIDAY_SCOPES),
+        supabase.from('shift_logs').select('*').order('created_at', { ascending: false }).limit(20),
+        supabase.from('standby_shifts').select('*'),
       ])
 
+      if (profileRes.data) setUserName(profileRes.data.display_name)
       if (agentsRes.data) setAgents(agentsRes.data)
       if (holidaysRes.data) setHolidays(holidaysRes.data as PublicHoliday[])
+      if (logsRes.data) setShiftLogs(logsRes.data as ShiftLog[])
+      if (allStandbyRes.data) setAllStandby(allStandbyRes.data as StandbyShift[])
 
       await Promise.all([loadMonthData(startOfMonth(new Date())), loadLeaves()])
       setLoading(false)
@@ -176,6 +189,75 @@ export default function ShiftPage() {
     return Array.from(months).sort().reverse()
   }, [leaves])
 
+  // ── Hours summary (Weekday 2h×5=10h/wk, Sun 9am-6pm=9h) ──
+  // Saturday (9am-1pm=4h) is OT claim, not replacement leave
+  // 1 day RL = 8h deduction, 0.5 day = 4h
+  const WEEKDAY_HRS = 10
+  const SUN_HRS = 9
+  const RL_DAY_HRS = 8
+
+  const hoursSummary = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const map: Record<string, { name: string; weekdayWeeks: number; sunWeeks: number }> = {}
+    const ensure = (id: string, name: string) => {
+      if (!map[id]) map[id] = { name, weekdayWeeks: 0, sunWeeks: 0 }
+    }
+
+    allStandby.forEach(s => {
+      if (s.week_end > today) return
+      ;(s.weekday_staff || []).forEach(r => { ensure(r.id, r.name); map[r.id].weekdayWeeks++ })
+      ;(s.weekend_staff || []).forEach(r => { ensure(r.id, r.name); map[r.id].sunWeeks++ })
+    })
+
+    const rlByStaff: Record<string, number> = {}
+    leaves.forEach(l => { rlByStaff[l.staff_id] = (rlByStaff[l.staff_id] || 0) + l.duration })
+
+    return Object.entries(map)
+      .map(([id, h]) => {
+        const earnedHrs = h.weekdayWeeks * WEEKDAY_HRS + h.sunWeeks * SUN_HRS
+        const rlDays = rlByStaff[id] || 0
+        const usedHrs = rlDays * RL_DAY_HRS
+        return {
+          id,
+          name: h.name,
+          weekdayWeeks: h.weekdayWeeks,
+          weekdayHrs: h.weekdayWeeks * WEEKDAY_HRS,
+          sunWeeks: h.sunWeeks,
+          sunHrs: h.sunWeeks * SUN_HRS,
+          earnedHrs,
+          rlDays,
+          usedHrs,
+          balanceHrs: earnedHrs - usedHrs,
+        }
+      })
+      .sort((a, b) => b.balanceHrs - a.balanceHrs)
+  }, [allStandby, leaves])
+
+  const hoursDetail = useMemo(() => {
+    if (!hoursDetailFor) return null
+    const today = format(new Date(), 'yyyy-MM-dd')
+    const weekdays: { from: string; to: string }[] = []
+    const sundays: { from: string; to: string }[] = []
+
+    allStandby.forEach(s => {
+      if (s.week_end > today) return
+      if ((s.weekday_staff || []).some(r => r.id === hoursDetailFor)) {
+        weekdays.push({ from: s.week_start, to: s.week_end })
+      }
+      if ((s.weekend_staff || []).some(r => r.id === hoursDetailFor)) {
+        sundays.push({ from: s.week_start, to: s.week_end })
+      }
+    })
+
+    weekdays.sort((a, b) => a.from.localeCompare(b.from))
+    sundays.sort((a, b) => a.from.localeCompare(b.from))
+
+    const rlEntries = leaves.filter(l => l.staff_id === hoursDetailFor).sort((a, b) => a.leave_date.localeCompare(b.leave_date))
+    const summary = hoursSummary.find(h => h.id === hoursDetailFor)
+
+    return { weekdays, sundays, rlEntries, summary }
+  }, [hoursDetailFor, allStandby, leaves, hoursSummary])
+
   // ── Modal helpers ──────────────────────────────────────────────────────
 
   const resetForm = () => {
@@ -234,6 +316,12 @@ export default function ShiftPage() {
   const buildStaffRefs = (ids: Set<string>): StaffRef[] =>
     agents.filter(a => ids.has(a.id)).map(a => ({ id: a.id, name: a.display_name }))
 
+  const logChange = async (action: 'add' | 'edit' | 'delete', logTab: 'saturday' | 'standby' | 'leave', summary: string) => {
+    const entry = { action, tab: logTab, summary, done_by: userId, done_by_name: userName }
+    await supabase.from('shift_logs').insert(entry)
+    setShiftLogs(prev => [{ ...entry, id: crypto.randomUUID(), created_at: new Date().toISOString() }, ...prev].slice(0, 20))
+  }
+
   // ── CRUD: Saturday ─────────────────────────────────────────────────────
 
   const saveSaturday = async () => {
@@ -256,6 +344,8 @@ export default function ShiftPage() {
       : await supabase.from('saturday_shifts').upsert(payload, { onConflict: 'shift_date' })
 
     if (!error) {
+      const names = buildStaffRefs(formStaff).map(s => toProperCase(s.name)).join(', ')
+      await logChange(editingItem ? 'edit' : 'add', 'saturday', `${format(new Date(formDate + 'T00:00:00'), 'dd/MM/yyyy')} — ${names}`)
       toast(editingItem ? 'Updated' : 'Saved')
       closeModal()
       await loadMonthData(currentMonth)
@@ -267,8 +357,10 @@ export default function ShiftPage() {
 
   const deleteSaturday = async (id: string) => {
     if (!confirm('Delete this Saturday shift?')) return
+    const shift = saturdayShifts.find(s => s.id === id)
     const { error } = await supabase.from('saturday_shifts').delete().eq('id', id)
     if (!error) {
+      if (shift) await logChange('delete', 'saturday', `${format(new Date(shift.shift_date + 'T00:00:00'), 'dd/MM/yyyy')} — ${staffNames(shift.staff)}`)
       setSaturdayShifts(prev => prev.filter(s => s.id !== id))
       toast('Deleted')
     }
@@ -280,8 +372,7 @@ export default function ShiftPage() {
     if (!formDate) { toast('Please select a date', 'error'); return }
     const dayOfWeek = getDay(new Date(formDate + 'T00:00:00'))
     if (dayOfWeek !== 1) { toast('Please select a Monday', 'error'); return }
-    if (formWeekdayStaff.size === 0) { toast('Select weekday staff', 'error'); return }
-    if (formWeekendStaff.size === 0) { toast('Select weekend staff', 'error'); return }
+    if (formWeekdayStaff.size === 0 && formWeekendStaff.size === 0) { toast('Select at least one staff', 'error'); return }
 
     setSaving(true)
     const weekEnd = format(addDays(new Date(formDate + 'T00:00:00'), 6), 'yyyy-MM-dd')
@@ -300,6 +391,9 @@ export default function ShiftPage() {
       : await supabase.from('standby_shifts').upsert(payload, { onConflict: 'week_start' })
 
     if (!error) {
+      const wdNames = buildStaffRefs(formWeekdayStaff).map(s => toProperCase(s.name)).join(', ')
+      const weNames = buildStaffRefs(formWeekendStaff).map(s => toProperCase(s.name)).join(', ')
+      await logChange(editingItem ? 'edit' : 'add', 'standby', `W${getISOWeek(new Date(formDate + 'T00:00:00'))} — WD: ${wdNames} / WE: ${weNames}`)
       toast(editingItem ? 'Updated' : 'Saved')
       closeModal()
       await loadMonthData(currentMonth)
@@ -311,8 +405,10 @@ export default function ShiftPage() {
 
   const deleteStandby = async (id: string) => {
     if (!confirm('Delete this standby week?')) return
+    const shift = standbyShifts.find(s => s.id === id)
     const { error } = await supabase.from('standby_shifts').delete().eq('id', id)
     if (!error) {
+      if (shift) await logChange('delete', 'standby', `W${getISOWeek(new Date(shift.week_start + 'T00:00:00'))} — ${staffNames(shift.weekday_staff)} / ${staffNames(shift.weekend_staff)}`)
       setStandbyShifts(prev => prev.filter(s => s.id !== id))
       toast('Deleted')
     }
@@ -343,6 +439,8 @@ export default function ShiftPage() {
     }
 
     if (!error) {
+      const durLabel = formDuration === 0.5 ? 'half day' : 'full day'
+      await logChange(editingItem ? 'edit' : 'add', 'leave', `${toProperCase(staffName)} — ${format(new Date(formDate + 'T00:00:00'), 'dd/MM/yyyy')} (${durLabel})`)
       toast(editingItem ? 'Updated' : 'Saved')
       closeModal()
       await loadLeaves()
@@ -356,8 +454,10 @@ export default function ShiftPage() {
 
   const deleteLeave = async (id: string) => {
     if (!confirm('Delete this replacement leave?')) return
+    const lv = leaves.find(l => l.id === id)
     const { error } = await supabase.from('replacement_leaves').delete().eq('id', id)
     if (!error) {
+      if (lv) await logChange('delete', 'leave', `${toProperCase(lv.staff_name)} — ${format(new Date(lv.leave_date + 'T00:00:00'), 'dd/MM/yyyy')}`)
       setLeaves(prev => prev.filter(l => l.id !== id))
       toast('Deleted')
     }
@@ -617,6 +717,44 @@ export default function ShiftPage() {
       {/* ── Replacement Leave Tab ─────────────────────────────────────── */}
       {tab === 'leave' && (
         <>
+          {/* Hours summary cards */}
+          {hoursSummary.length > 0 && (
+            <div className="mb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {hoursSummary.map(h => (
+                <div key={h.id} onClick={() => setHoursDetailFor(h.id)} className="p-3.5 rounded-xl border border-border bg-surface cursor-pointer hover:border-indigo-500/30 hover:bg-indigo-500/[0.02] transition-colors">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <span className="text-sm font-bold text-text-primary">{toProperCase(h.name)}</span>
+                    <span className={`text-lg font-bold tabular-nums ${h.balanceHrs > 0 ? 'text-indigo-400' : h.balanceHrs === 0 ? 'text-text-muted' : 'text-red-400'}`}>{h.balanceHrs}h</span>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-tertiary">Weekday <span className="text-text-muted">(2h×5/wk)</span></span>
+                      <span className="text-text-secondary font-medium tabular-nums">{h.weekdayWeeks} wk = <span className="text-indigo-400">{h.weekdayHrs}h</span></span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-tertiary">Sunday <span className="text-text-muted">(9h each)</span></span>
+                      <span className="text-text-secondary font-medium tabular-nums">{h.sunWeeks}× = <span className="text-amber-400">{h.sunHrs}h</span></span>
+                    </div>
+                    <div className="h-px bg-border my-1" />
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-tertiary">Earned</span>
+                      <span className="text-text-primary font-bold tabular-nums">{h.earnedHrs}h</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-tertiary">Used <span className="text-text-muted">(1 day = 8h)</span></span>
+                      <span className="text-red-400 font-medium tabular-nums">−{h.usedHrs}h <span className="text-text-muted font-normal">({h.rlDays}d)</span></span>
+                    </div>
+                    <div className="h-px bg-border my-1" />
+                    <div className="flex items-center justify-between">
+                      <span className="text-text-secondary font-semibold">Balance</span>
+                      <span className={`font-bold tabular-nums ${h.balanceHrs > 0 ? 'text-green-400' : h.balanceHrs === 0 ? 'text-text-muted' : 'text-red-400'}`}>{h.balanceHrs}h</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <Select
@@ -766,11 +904,11 @@ export default function ShiftPage() {
             )}
           </div>
           <div>
-            <Label required>Weekday Standby</Label>
+            <Label>Weekday Standby</Label>
             <StaffCheckboxes selected={formWeekdayStaff} onChange={setFormWeekdayStaff} />
           </div>
           <div>
-            <Label required>Weekend Standby</Label>
+            <Label>Weekend Standby</Label>
             <StaffCheckboxes selected={formWeekendStaff} onChange={setFormWeekendStaff} />
           </div>
           <div>
@@ -796,67 +934,226 @@ export default function ShiftPage() {
         title={editingItem ? 'Edit Replacement Leave' : 'Add Replacement Leave'}
         size="sm"
       >
-        <div className="p-4 space-y-4">
-          <div>
-            <Label required>Staff</Label>
-            <Select
-              value={formStaffId}
-              onChange={e => setFormStaffId(e.target.value)}
-            >
-              <option value="">Select staff...</option>
-              {agents.map(a => (
-                <option key={a.id} value={a.id}>{toProperCase(a.display_name)}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <Label required>Date</Label>
-            <Input
-              type="date"
-              value={formDate}
-              onChange={e => setFormDate(e.target.value)}
-            />
-          </div>
-          <div>
-            <Label required>Duration</Label>
-            <div className="flex gap-4 mt-1">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="duration"
-                  checked={formDuration === 1}
-                  onChange={() => setFormDuration(1)}
-                  className="text-indigo-500 focus:ring-indigo-500/50"
+        {(() => {
+          const selectedBalance = formStaffId ? (hoursSummary.find(h => h.id === formStaffId)?.balanceHrs ?? 0) : null
+          const editingOwnHrs = editingItem && 'duration' in editingItem ? (editingItem as ReplacementLeave).duration * RL_DAY_HRS : 0
+          const effectiveBalance = selectedBalance !== null ? selectedBalance + editingOwnHrs : null
+          const canFullDay = effectiveBalance !== null && effectiveBalance >= RL_DAY_HRS
+          const canHalfDay = effectiveBalance !== null && effectiveBalance >= (RL_DAY_HRS / 2)
+          const canSave = formStaffId && formDate && (formDuration === 1 ? canFullDay : canHalfDay)
+          return (
+            <div className="p-4 space-y-4">
+              <div>
+                <Label required>Staff</Label>
+                <Select
+                  value={formStaffId}
+                  onChange={e => {
+                    const id = e.target.value
+                    setFormStaffId(id)
+                    const bal = id ? (hoursSummary.find(h => h.id === id)?.balanceHrs ?? 0) : 0
+                    setFormDuration(bal >= RL_DAY_HRS ? 1 : 0.5)
+                  }}
+                >
+                  <option value="">Select staff...</option>
+                  {agents.map(a => {
+                    const bal = hoursSummary.find(h => h.id === a.id)?.balanceHrs ?? 0
+                    return (
+                      <option key={a.id} value={a.id}>{toProperCase(a.display_name)} ({bal}h)</option>
+                    )
+                  })}
+                </Select>
+              </div>
+
+              {formStaffId && effectiveBalance !== null && (
+                <div className={`px-3 py-2.5 rounded-lg border text-xs ${
+                  effectiveBalance >= RL_DAY_HRS
+                    ? 'bg-green-500/5 border-green-500/20 text-green-400'
+                    : effectiveBalance >= (RL_DAY_HRS / 2)
+                    ? 'bg-amber-500/5 border-amber-500/20 text-amber-400'
+                    : 'bg-red-500/5 border-red-500/20 text-red-400'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold">Available Balance</span>
+                    <span className="font-bold tabular-nums text-sm">{effectiveBalance}h</span>
+                  </div>
+                  {effectiveBalance < RL_DAY_HRS && effectiveBalance >= (RL_DAY_HRS / 2) && (
+                    <p className="mt-1">Only enough for half day (4h)</p>
+                  )}
+                  {effectiveBalance < (RL_DAY_HRS / 2) && (
+                    <p className="mt-1">Not enough hours for replacement leave</p>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <Label required>Date</Label>
+                <Input
+                  type="date"
+                  value={formDate}
+                  onChange={e => setFormDate(e.target.value)}
                 />
-                <span className="text-sm text-text-secondary">Full Day (1)</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="duration"
-                  checked={formDuration === 0.5}
-                  onChange={() => setFormDuration(0.5)}
-                  className="text-indigo-500 focus:ring-indigo-500/50"
+              </div>
+              <div>
+                <Label required>Duration</Label>
+                <div className="flex gap-4 mt-1">
+                  <label className={`flex items-center gap-2 ${canFullDay ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}>
+                    <input
+                      type="radio"
+                      name="duration"
+                      checked={formDuration === 1}
+                      onChange={() => setFormDuration(1)}
+                      disabled={!canFullDay}
+                      className="text-indigo-500 focus:ring-indigo-500/50"
+                    />
+                    <span className="text-sm text-text-secondary">Full Day (−8h)</span>
+                  </label>
+                  <label className={`flex items-center gap-2 ${canHalfDay ? 'cursor-pointer' : 'opacity-40 cursor-not-allowed'}`}>
+                    <input
+                      type="radio"
+                      name="duration"
+                      checked={formDuration === 0.5}
+                      onChange={() => setFormDuration(0.5)}
+                      disabled={!canHalfDay}
+                      className="text-indigo-500 focus:ring-indigo-500/50"
+                    />
+                    <span className="text-sm text-text-secondary">Half Day (−4h)</span>
+                  </label>
+                </div>
+              </div>
+              <div>
+                <Label>Notes</Label>
+                <Textarea
+                  value={formNotes}
+                  onChange={e => setFormNotes(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. Worked Saturday 7 Jun"
                 />
-                <span className="text-sm text-text-secondary">Half Day (0.5)</span>
-              </label>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="secondary" size="sm" onClick={closeModal}>Cancel</Button>
+                <Button size="sm" onClick={saveLeave} loading={saving} disabled={!canSave}>Save</Button>
+              </div>
+            </div>
+          )
+        })()}
+      </ModalDialog>
+
+      {/* Hours Detail Modal */}
+      <ModalDialog
+        open={!!hoursDetailFor && !!hoursDetail}
+        onClose={() => setHoursDetailFor(null)}
+        title={hoursDetail?.summary ? `${toProperCase(hoursDetail.summary.name)} — Balance: ${hoursDetail.summary.balanceHrs}h` : 'Hours Detail'}
+        size="md"
+      >
+        {hoursDetail && (
+          <div className="p-4 space-y-5 text-sm">
+            {/* Weekday Standby */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider">Weekday Standby</span>
+                <span className="text-xs font-bold text-text-primary tabular-nums">{hoursDetail.summary?.weekdayHrs || 0}h <span className="text-text-muted font-normal">({hoursDetail.weekdays.length} wk × 10h)</span></span>
+              </div>
+              {hoursDetail.weekdays.length > 0 ? (
+                <div className="space-y-0.5">
+                  {hoursDetail.weekdays.map((w, i) => (
+                    <div key={i} className="flex items-center justify-between py-1 px-2.5 rounded hover:bg-surface-raised/50 text-xs">
+                      <span className="text-text-secondary">{format(new Date(w.from + 'T00:00:00'), 'dd/MM/yyyy')} – {format(new Date(w.to + 'T00:00:00'), 'dd/MM/yyyy')}</span>
+                      <span className="text-indigo-400 font-medium tabular-nums">10h</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-text-muted px-2.5">No weekday standby</p>
+              )}
+            </div>
+
+            {/* Sunday / Weekend Standby */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-amber-400 uppercase tracking-wider">Sunday Standby</span>
+                <span className="text-xs font-bold text-text-primary tabular-nums">{hoursDetail.summary?.sunHrs || 0}h <span className="text-text-muted font-normal">({hoursDetail.sundays.length}× × 9h)</span></span>
+              </div>
+              {hoursDetail.sundays.length > 0 ? (
+                <div className="space-y-0.5">
+                  {hoursDetail.sundays.map((w, i) => (
+                    <div key={i} className="flex items-center justify-between py-1 px-2.5 rounded hover:bg-surface-raised/50 text-xs">
+                      <span className="text-text-secondary">{format(new Date(w.from + 'T00:00:00'), 'dd/MM/yyyy')} – {format(new Date(w.to + 'T00:00:00'), 'dd/MM/yyyy')}</span>
+                      <span className="text-amber-400 font-medium tabular-nums">9h</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-text-muted px-2.5">No weekend standby</p>
+              )}
+            </div>
+
+            {/* RL Taken */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xs font-semibold text-red-400 uppercase tracking-wider">Replacement Leave Used</span>
+                <span className="text-xs font-bold text-text-primary tabular-nums">−{hoursDetail.summary?.usedHrs || 0}h <span className="text-text-muted font-normal">({hoursDetail.summary?.rlDays || 0} day{(hoursDetail.summary?.rlDays || 0) !== 1 ? 's' : ''})</span></span>
+              </div>
+              {hoursDetail.rlEntries.length > 0 ? (
+                <div className="space-y-0.5">
+                  {hoursDetail.rlEntries.map((l, i) => (
+                    <div key={i} className="flex items-center justify-between py-1 px-2.5 rounded hover:bg-surface-raised/50 text-xs">
+                      <span className="text-text-secondary">
+                        {format(new Date(l.leave_date + 'T00:00:00'), 'dd/MM/yyyy')}
+                        <span className="text-text-muted ml-1.5">{l.duration === 0.5 ? 'Half day' : 'Full day'}</span>
+                      </span>
+                      <span className="text-red-400 font-medium tabular-nums">−{l.duration * RL_DAY_HRS}h</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-text-muted px-2.5">No replacement leave taken</p>
+              )}
+            </div>
+
+            {/* Summary */}
+            <div className="rounded-lg bg-surface-raised p-3 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-text-secondary">Total Earned</span>
+                <span className="text-text-primary font-bold tabular-nums">{hoursDetail.summary?.earnedHrs || 0}h</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-text-secondary">Total Used</span>
+                <span className="text-red-400 font-bold tabular-nums">−{hoursDetail.summary?.usedHrs || 0}h</span>
+              </div>
+              <div className="h-px bg-border" />
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-text-primary font-bold">Balance</span>
+                <span className={`font-bold tabular-nums ${(hoursDetail.summary?.balanceHrs || 0) > 0 ? 'text-green-400' : (hoursDetail.summary?.balanceHrs || 0) === 0 ? 'text-text-muted' : 'text-red-400'}`}>
+                  {hoursDetail.summary?.balanceHrs || 0}h
+                </span>
+              </div>
             </div>
           </div>
-          <div>
-            <Label>Notes</Label>
-            <Textarea
-              value={formNotes}
-              onChange={e => setFormNotes(e.target.value)}
-              rows={2}
-              placeholder="e.g. Worked Saturday 7 Jun"
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="secondary" size="sm" onClick={closeModal}>Cancel</Button>
-            <Button size="sm" onClick={saveLeave} loading={saving}>Save</Button>
+        )}
+      </ModalDialog>
+
+      {/* ── Recent Changes ─────────────────────────────────────────── */}
+      {shiftLogs.length > 0 && (
+        <div className="mt-8">
+          <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-3">Recent Changes</h3>
+          <div className="space-y-1">
+            {shiftLogs.map(log => {
+              const actionColor = log.action === 'add' ? 'text-green-400' : log.action === 'edit' ? 'text-amber-400' : 'text-red-400'
+              const tabLabel = log.tab === 'saturday' ? 'Saturday' : log.tab === 'standby' ? 'Standby' : 'RL'
+              return (
+                <div key={log.id} className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-lg hover:bg-surface-raised/50 transition-colors">
+                  <span className={`font-semibold uppercase text-[10px] w-10 ${actionColor}`}>{log.action}</span>
+                  <span className="px-1.5 py-0.5 rounded bg-surface-raised text-text-tertiary text-[10px] font-medium">{tabLabel}</span>
+                  <span className="text-text-secondary flex-1 truncate">{log.summary}</span>
+                  <span className="text-text-muted text-[11px] flex-shrink-0">
+                    {toProperCase(log.done_by_name)} · {formatDistanceToNow(new Date(log.created_at), { addSuffix: true })}
+                  </span>
+                </div>
+              )
+            })}
           </div>
         </div>
-      </ModalDialog>
+      )}
     </div>
   )
 }

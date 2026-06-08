@@ -136,6 +136,75 @@ export default function LogCallPage() {
   const [kbEntries, setKBEntries] = useState<KnowledgeBaseEntry[]>([])
   const [kbSearch, setKBSearch] = useState('')
 
+  // Phone auto-suggest — type a number, see matching phones from past tickets
+  const [phoneSuggestions, setPhoneSuggestions] = useState<{ phone: string; clinic_name: string; clinic_code: string; count: number }[]>([])
+  const [showPhoneSuggest, setShowPhoneSuggest] = useState(false)
+  const [phoneSuggestLoading, setPhoneSuggestLoading] = useState(false)
+  const phoneSuggestRef = useRef<HTMLDivElement>(null)
+  const phoneDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (phoneSuggestRef.current && !phoneSuggestRef.current.contains(e.target as Node)) setShowPhoneSuggest(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const searchPhoneSuggest = useCallback(async (q: string) => {
+    if (q.length < 3) { setPhoneSuggestions([]); return }
+    setPhoneSuggestLoading(true)
+    const { data } = await supabase.from('tickets').select('caller_tel, clinic_name, clinic_code').ilike('caller_tel', `%${q}%`).not('caller_tel', 'is', null).limit(200)
+    if (data) {
+      const map = new Map<string, { clinic_name: string; clinic_code: string; count: number }>()
+      for (const row of data) {
+        const phone = row.caller_tel?.trim(); if (!phone) continue
+        const existing = map.get(phone)
+        if (existing) existing.count++
+        else map.set(phone, { clinic_name: row.clinic_name || '', clinic_code: row.clinic_code || '', count: 1 })
+      }
+      const results: { phone: string; clinic_name: string; clinic_code: string; count: number }[] = []
+      map.forEach((v, phone) => results.push({ phone, ...v }))
+      results.sort((a, b) => b.count - a.count)
+      setPhoneSuggestions(results.slice(0, 8))
+    }
+    setPhoneSuggestLoading(false)
+  }, [supabase])
+
+  const cleanPhone = (raw: string) => {
+    let v = raw.replace(/[\s()]/g, '')
+    if (v.startsWith('+60')) v = '0' + v.slice(3)
+    else if (v.startsWith('60') && v.length > 9) v = '0' + v.slice(2)
+    return v
+  }
+
+  const handleCallerTelChange = (val: string) => {
+    const cleaned = cleanPhone(val)
+    setCallerTel(cleaned)
+    if (phoneDebounceRef.current) clearTimeout(phoneDebounceRef.current)
+    if (val.trim().length >= 3 && !selectedClinic) {
+      setShowPhoneSuggest(true)
+      phoneDebounceRef.current = setTimeout(() => searchPhoneSuggest(val.trim()), 300)
+    } else {
+      setPhoneSuggestions([])
+      setShowPhoneSuggest(false)
+    }
+  }
+
+  const pickPhoneSuggestion = async (s: { phone: string; clinic_name: string; clinic_code: string }) => {
+    setCallerTel(s.phone)
+    setShowPhoneSuggest(false)
+    setPhoneSuggestions([])
+    if (s.clinic_code && !selectedClinic) {
+      const { data: clinic } = await supabase
+        .from('clinics')
+        .select('id, clinic_code, clinic_name, clinic_phone, mtn_start, mtn_expiry, renewal_status, product_type, city, state, registered_contact, email_main, email_secondary, lkey_line1, lkey_line2, lkey_line3, lkey_line4, lkey_line5')
+        .eq('clinic_code', s.clinic_code)
+        .single()
+      if (clinic) handleClinicSelect(clinic as Clinic)
+    }
+  }
+
   // Fetch current user on mount + check for KB pre-fill from /kb page
   useEffect(() => {
     async function getUser() {
@@ -193,6 +262,13 @@ export default function LogCallPage() {
             }
           })
       }
+    }
+
+    // Pre-fill from URL params (e.g. /log?phone=xxx&clinic=yyy from Call Log missed tab)
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const phoneParam = params.get('phone')
+      if (phoneParam) setCallerTel(phoneParam)
     }
 
     // Load drafts from Supabase (persistent, survives browser clear)
@@ -994,14 +1070,37 @@ export default function LogCallPage() {
             )}
 
             {/* Caller Tel */}
-            <div>
+            <div ref={phoneSuggestRef} className="relative">
               <Label>Caller Tel</Label>
               <Input
                 type="tel"
                 value={callerTel}
-                onChange={(e) => setCallerTel(e.target.value)}
+                onChange={(e) => handleCallerTelChange(e.target.value)}
+                onFocus={() => { if (phoneSuggestions.length > 0 && !selectedClinic) setShowPhoneSuggest(true) }}
                 placeholder="Phone number of whoever called"
+                autoComplete="off"
               />
+              {showPhoneSuggest && (phoneSuggestions.length > 0 || phoneSuggestLoading) && (
+                <div className="absolute z-50 left-0 right-0 mt-1 rounded-xl bg-surface-raised border border-border shadow-theme-lg max-h-64 overflow-y-auto">
+                  {phoneSuggestLoading && phoneSuggestions.length === 0 && (
+                    <div className="px-4 py-3 text-xs text-text-tertiary">Searching...</div>
+                  )}
+                  {phoneSuggestions.map(s => (
+                    <button
+                      key={s.phone}
+                      type="button"
+                      onClick={() => pickPhoneSuggestion(s)}
+                      className="w-full text-left px-4 py-2.5 hover:bg-indigo-500/10 transition-colors flex items-center justify-between gap-2"
+                    >
+                      <div>
+                        <p className="font-mono text-sm text-text-primary">{s.phone}</p>
+                        {s.clinic_name && <p className="text-xs text-text-tertiary truncate">{s.clinic_name}</p>}
+                      </div>
+                      <span className="text-xs text-text-tertiary whitespace-nowrap">{s.count} call{s.count > 1 ? 's' : ''}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* PIC */}

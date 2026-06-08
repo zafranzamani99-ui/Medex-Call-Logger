@@ -11,6 +11,7 @@ const TITLES: Array<[RegExp, string]> = [
   [/^\/$/, 'Dashboard'],
   [/^\/my-log/, 'My Log'],
   [/^\/shift/, 'Shift'],
+  [/^\/call-log/, 'Call Log'],
   [/^\/inbox/, 'Inbox'],
   [/^\/tickets\/[^/]+/, 'Ticket'],
   [/^\/tickets/, 'History'],
