@@ -70,13 +70,13 @@ const LOG_DEFAULT_WIDTHS: Record<string, number> = {
 }
 
 // ── Missed tab columns ──────────────────────────────────────────
-const MISSED_COL_KEYS = ['time', 'phone', 'clinic', 'resolution', 'actions'] as const
+const MISSED_COL_KEYS = ['time', 'phone', 'clinic', 'notes', 'resolution', 'actions'] as const
 const MISSED_COL_LABELS: Record<string, string> = {
-  time: 'Time', phone: 'Phone No.', clinic: 'Clinic', resolution: 'Action / Status', actions: '',
+  time: 'Time', phone: 'Phone No.', clinic: 'Clinic', notes: 'Notes', resolution: 'Action / Status', actions: '',
 }
 const MISSED_ALWAYS_VISIBLE = new Set(['time', 'phone', 'actions'])
 const MISSED_DEFAULT_WIDTHS: Record<string, number> = {
-  time: 90, phone: 150, clinic: 280, resolution: 320, actions: 40,
+  time: 90, phone: 150, clinic: 220, notes: 180, resolution: 250, actions: 40,
 }
 
 export default function CallLogPage() {
@@ -159,7 +159,7 @@ export default function CallLogPage() {
   )
 
   // ── Missed tab column config ───────────────────────────────────
-  const MISSED_VIS_KEY = 'missed-col-visibility-v2'
+  const MISSED_VIS_KEY = 'missed-col-visibility-v3'
   const [missedColVis, setMissedColVis] = useState<Record<string, boolean>>(() => {
     if (typeof window === 'undefined') return Object.fromEntries(MISSED_COL_KEYS.map(k => [k, true]))
     try {
@@ -170,7 +170,7 @@ export default function CallLogPage() {
   })
   useEffect(() => { try { localStorage.setItem(MISSED_VIS_KEY, JSON.stringify(missedColVis)) } catch {} }, [missedColVis])
 
-  const MISSED_ORDER_KEY = 'missed-col-order-v2'
+  const MISSED_ORDER_KEY = 'missed-col-order-v3'
   const [missedColOrder, setMissedColOrder] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [...MISSED_COL_KEYS]
     try {
@@ -185,7 +185,7 @@ export default function CallLogPage() {
   })
   useEffect(() => { try { localStorage.setItem(MISSED_ORDER_KEY, JSON.stringify(missedColOrder)) } catch {} }, [missedColOrder])
 
-  const MISSED_WIDTHS_KEY = 'missed-col-widths-v3'
+  const MISSED_WIDTHS_KEY = 'missed-col-widths-v4'
   const [missedColWidths, setMissedColWidths] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return MISSED_DEFAULT_WIDTHS
     try {
@@ -853,6 +853,12 @@ export default function CallLogPage() {
                       {resizeHandle}
                     </SortableHeader>
                   )
+                  if (k === 'notes') return (
+                    <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
+                      <span>Notes</span>
+                      {resizeHandle}
+                    </SortableHeader>
+                  )
                   if (k === 'resolution') return (
                     <SortableHeader key={k} id={k} className={`${baseTh}${cursorTh}`}>
                       <span>Action / Status</span>
@@ -874,9 +880,6 @@ export default function CallLogPage() {
                     if (k === 'phone') return (
                       <td key={k} className="px-4 py-3 align-top">
                         <a href={`tel:${e.phone.replace(/\s+/g, '')}`} onClick={ev => ev.stopPropagation()} className="font-mono text-sm text-emerald-400 font-medium hover:text-emerald-300 hover:underline whitespace-nowrap">{e.phone}</a>
-                        {tab === 'missed' && e.notes && e.notes !== 'Imported from Voice Go' && (
-                          <p className="text-[11px] text-text-tertiary mt-0.5">{e.notes}</p>
-                        )}
                       </td>
                     )
                     if (k === 'clinic') return <td key={k} className="px-4 py-3 text-text-secondary truncate align-top">{e.clinic}</td>
@@ -887,6 +890,21 @@ export default function CallLogPage() {
                           {sourceBadge(e)}
                           {e.ticketRef && <span className="text-xs text-text-tertiary font-mono">{e.ticketRef}</span>}
                         </div>
+                      </td>
+                    )
+                    if (k === 'notes') return (
+                      <td key={k} className="px-4 py-3 align-top text-xs text-text-tertiary">
+                        {(() => {
+                          if (!e.notes || e.notes === 'Imported from Voice Go') return '-'
+                          const match = e.notes.match(/^Called (\d+)x: (.+)$/)
+                          if (match) return (
+                            <div>
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 mb-1">{match[1]}x called</span>
+                              <p className="text-text-tertiary">{match[2]}</p>
+                            </div>
+                          )
+                          return e.notes
+                        })()}
                       </td>
                     )
                     if (k === 'resolution') return (
