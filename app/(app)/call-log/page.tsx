@@ -904,15 +904,19 @@ export default function CallLogPage() {
                     if (k === 'notes') return (
                       <td key={k} className="px-4 py-3 align-top text-xs text-text-tertiary">
                         {(() => {
-                          if (!e.notes || e.notes === 'Imported from Voice Go') return '-'
-                          const match = e.notes.match(/^Called (\d+)x: (.+)$/)
-                          if (match) return (
-                            <div>
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 mb-1">{match[1]}x called</span>
-                              <p className="text-text-tertiary">{match[2]}</p>
-                            </div>
-                          )
-                          return e.notes
+                          const parts: React.ReactNode[] = []
+                          if (e.notes && e.notes !== 'Imported from Voice Go') {
+                            const match = e.notes.match(/^Called (\d+)x: (.+)$/)
+                            if (match) {
+                              parts.push(<div key="calls"><span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold bg-amber-500/20 text-amber-400 mb-1">{match[1]}x called</span><p className="text-text-tertiary">{match[2]}</p></div>)
+                            } else {
+                              parts.push(<p key="note">{e.notes}</p>)
+                            }
+                          }
+                          if (e.resolvedNote) {
+                            parts.push(<p key="remark" className="text-text-tertiary italic mt-1">{e.resolvedStatus === 'dismissed' ? '⤷ ' : ''}{e.resolvedNote}</p>)
+                          }
+                          return parts.length > 0 ? parts : '-'
                         })()}
                       </td>
                     )
