@@ -62,7 +62,7 @@ const LOG_COL_LABELS: Record<string, string> = {
 }
 const LOG_ALWAYS_VISIBLE = new Set(['time', 'phone', 'actions'])
 const LOG_DEFAULT_WIDTHS: Record<string, number> = {
-  time: 100, phone: 160, clinic: 250, staff: 120, source: 200, actions: 50,
+  time: 90, phone: 150, clinic: 320, staff: 110, source: 250, actions: 40,
 }
 
 // ── Missed tab columns ──────────────────────────────────────────
@@ -72,7 +72,7 @@ const MISSED_COL_LABELS: Record<string, string> = {
 }
 const MISSED_ALWAYS_VISIBLE = new Set(['time', 'phone', 'actions'])
 const MISSED_DEFAULT_WIDTHS: Record<string, number> = {
-  time: 100, phone: 160, clinic: 250, notes: 200, callnow: 90, actions: 50,
+  time: 90, phone: 150, clinic: 280, notes: 220, callnow: 80, actions: 40,
 }
 
 export default function CallLogPage() {
@@ -133,7 +133,7 @@ export default function CallLogPage() {
   })
   useEffect(() => { try { localStorage.setItem(LOG_ORDER_KEY, JSON.stringify(logColOrder)) } catch {} }, [logColOrder])
 
-  const LOG_WIDTHS_KEY = 'calllog-col-widths'
+  const LOG_WIDTHS_KEY = 'calllog-col-widths-v2'
   const [logColWidths, setLogColWidths] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return LOG_DEFAULT_WIDTHS
     try {
@@ -181,7 +181,7 @@ export default function CallLogPage() {
   })
   useEffect(() => { try { localStorage.setItem(MISSED_ORDER_KEY, JSON.stringify(missedColOrder)) } catch {} }, [missedColOrder])
 
-  const MISSED_WIDTHS_KEY = 'missed-col-widths'
+  const MISSED_WIDTHS_KEY = 'missed-col-widths-v2'
   const [missedColWidths, setMissedColWidths] = useState<Record<string, number>>(() => {
     if (typeof window === 'undefined') return MISSED_DEFAULT_WIDTHS
     try {
