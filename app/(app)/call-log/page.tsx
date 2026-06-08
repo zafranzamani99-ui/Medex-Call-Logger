@@ -42,7 +42,7 @@ interface PhoneSuggestion {
 }
 
 interface VoiceGoRow {
-  time: string
+  times: string[]
   phone: string
   matched: boolean
   matchedClinic?: string
@@ -471,6 +471,18 @@ export default function CallLogPage() {
     toast(status === 'no_answer' ? 'Marked as no answer' : 'Dismissed', 'success')
   }
 
+  const handleReopen = async (entry: CallEntry) => {
+    const { error } = await supabase.from('missed_calls').update({
+      resolved_status: null,
+      resolved_by: null,
+      resolved_by_name: null,
+      resolved_at: null,
+      resolved_note: null,
+    }).eq('id', entry.id)
+    if (error) { toast('Failed to reopen', 'error'); return }
+    setAllEntries(prev => prev.map(e => e.id === entry.id ? { ...e, resolvedStatus: null, resolvedByName: null, resolvedAt: null, resolvedNote: null } : e))
+  }
+
   // ── Phone auto-suggest ─────────────────────────────────────────
   const searchPhone = useCallback(async (q: string) => {
     if (q.length < 3) { setSuggestions([]); return }
@@ -545,12 +557,25 @@ export default function CallLogPage() {
     }
     if (callingNumbers.length === 0) { toast('No phone numbers found in CSV', 'error'); return }
 
+    // Group by phone — same number calling 3x = 1 row with all times
+    const phoneGroup = new Map<string, { phone: string; times: string[] }>()
+    for (const cn of callingNumbers) {
+      const norm = normalizePhone(cn.phone)
+      const existing = phoneGroup.get(norm)
+      if (existing) {
+        if (cn.time) existing.times.push(cn.time)
+      } else {
+        phoneGroup.set(norm, { phone: cn.phone, times: cn.time ? [cn.time] : [] })
+      }
+    }
+    const dedupedNumbers = Array.from(phoneGroup.values())
+
     const loggedPhones = new Map<string, { clinic: string; ref: string }>()
     allEntries.forEach(e => { const norm = normalizePhone(e.phone); if (!loggedPhones.has(norm)) loggedPhones.set(norm, { clinic: e.clinic, ref: e.ticketRef || '' }) })
 
-    const rows: VoiceGoRow[] = callingNumbers.map(cn => {
+    const rows: VoiceGoRow[] = dedupedNumbers.map(cn => {
       const norm = normalizePhone(cn.phone); const match = loggedPhones.get(norm)
-      return { time: cn.time, phone: cn.phone, matched: !!match, matchedClinic: match?.clinic, matchedRef: match?.ref, selected: !match }
+      return { times: cn.times, phone: cn.phone, matched: !!match, matchedClinic: match?.clinic, matchedRef: match?.ref, selected: !match }
     })
     setImportRows(rows); setShowImport(true)
   }
@@ -591,7 +616,7 @@ export default function CallLogPage() {
       return null
     }
 
-    const inserts = toSave.map(r => ({ phone: r.phone, clinic_name: phoneToClinic.get(normalizePhone(r.phone)) || null, notes: 'Imported from Voice Go', logged_by: userId, logged_by_name: userName, call_date: selectedDate, called_at: parseVoiceGoTime(r.time, selectedDate) }))
+    const inserts = toSave.map(r => ({ phone: r.phone, clinic_name: phoneToClinic.get(normalizePhone(r.phone)) || null, notes: r.times.length > 1 ? `Voice Go — called ${r.times.length}x` : 'Imported from Voice Go', logged_by: userId, logged_by_name: userName, call_date: selectedDate, called_at: parseVoiceGoTime(r.times[0] || '', selectedDate) }))
     const { error } = await supabase.from('missed_calls').insert(inserts)
     setImportSaving(false)
     if (error) { toast('Failed to save missed calls', 'error'); return }
@@ -849,20 +874,34 @@ export default function CallLogPage() {
                     )
                     if (k === 'resolution') return (
                       <td key={k} className="px-4 py-3 align-top">
-                        {e.resolvedStatus ? (
+                        {e.resolvedStatus === 'logged' ? (
                           <div className="space-y-0.5">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                              e.resolvedStatus === 'logged' ? 'bg-emerald-500/20 text-emerald-400'
-                              : e.resolvedStatus === 'no_answer' ? 'bg-amber-500/20 text-amber-400'
-                              : 'bg-zinc-500/20 text-zinc-400'
-                            }`}>
-                              {e.resolvedStatus === 'logged' ? 'Logged' : e.resolvedStatus === 'no_answer' ? 'No Answer' : 'Dismissed'}
-                            </span>
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400">Logged</span>
                             <p className="text-[11px] text-text-tertiary">
                               {e.resolvedByName && toProperCase(e.resolvedByName)}
                               {e.resolvedAt && ` · ${format(new Date(e.resolvedAt), 'hh:mm a')}`}
                             </p>
                             {e.resolvedNote && <p className="text-[11px] text-text-tertiary italic">{e.resolvedNote}</p>}
+                          </div>
+                        ) : e.resolvedStatus ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${e.resolvedStatus === 'no_answer' ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-500/20 text-zinc-400'}`}>
+                                {e.resolvedStatus === 'no_answer' ? 'No Answer' : 'Dismissed'}
+                              </span>
+                              <span className="text-[11px] text-text-tertiary">
+                                {e.resolvedByName && toProperCase(e.resolvedByName)}
+                                {e.resolvedAt && ` · ${format(new Date(e.resolvedAt), 'hh:mm a')}`}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button onClick={ev => { ev.stopPropagation(); window.open(`/log?phone=${encodeURIComponent(e.phone)}${e.clinic !== '-' ? `&clinic=${encodeURIComponent(e.clinic)}` : ''}&missed_id=${e.id}`, '_blank') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors whitespace-nowrap">
+                                Log Call
+                              </button>
+                              <button onClick={ev => { ev.stopPropagation(); handleReopen(e) }} className="text-xs text-text-tertiary hover:text-text-primary transition-colors">
+                                Undo
+                              </button>
+                            </div>
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5 flex-wrap">
@@ -932,19 +971,30 @@ export default function CallLogPage() {
                 </div>
                 {/* Mobile resolution actions */}
                 {e.source === 'missed' && (
-                  e.resolvedStatus ? (
+                  e.resolvedStatus === 'logged' ? (
                     <div className="mt-1.5 flex items-center gap-2">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                        e.resolvedStatus === 'logged' ? 'bg-emerald-500/20 text-emerald-400'
-                        : e.resolvedStatus === 'no_answer' ? 'bg-amber-500/20 text-amber-400'
-                        : 'bg-zinc-500/20 text-zinc-400'
-                      }`}>
-                        {e.resolvedStatus === 'logged' ? 'Logged' : e.resolvedStatus === 'no_answer' ? 'No Answer' : 'Dismissed'}
-                      </span>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-400">Logged</span>
                       <span className="text-[11px] text-text-tertiary">
                         {e.resolvedByName && toProperCase(e.resolvedByName)}
                         {e.resolvedAt && ` · ${format(new Date(e.resolvedAt), 'hh:mm a')}`}
                       </span>
+                      {e.resolvedNote && <span className="text-[11px] text-text-tertiary italic">{e.resolvedNote}</span>}
+                    </div>
+                  ) : e.resolvedStatus ? (
+                    <div className="mt-1.5 space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${e.resolvedStatus === 'no_answer' ? 'bg-amber-500/20 text-amber-400' : 'bg-zinc-500/20 text-zinc-400'}`}>
+                          {e.resolvedStatus === 'no_answer' ? 'No Answer' : 'Dismissed'}
+                        </span>
+                        <span className="text-[11px] text-text-tertiary">
+                          {e.resolvedByName && toProperCase(e.resolvedByName)}
+                          {e.resolvedAt && ` · ${format(new Date(e.resolvedAt), 'hh:mm a')}`}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <button onClick={ev => { ev.stopPropagation(); window.open(`/log?phone=${encodeURIComponent(e.phone)}${e.clinic !== '-' ? `&clinic=${encodeURIComponent(e.clinic)}` : ''}&missed_id=${e.id}`, '_blank') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">Log Call</button>
+                        <button onClick={ev => { ev.stopPropagation(); handleReopen(e) }} className="text-xs text-text-tertiary hover:text-text-primary transition-colors">Undo</button>
+                      </div>
                     </div>
                   ) : (
                     <div className="mt-1.5 flex items-center gap-1.5">
@@ -1017,7 +1067,7 @@ export default function CallLogPage() {
         <div className="p-4 space-y-4 overflow-y-auto max-h-[65vh]">
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-lg bg-surface border border-border p-3 text-center">
-              <p className="text-xs text-text-tertiary">Total from CSV</p>
+              <p className="text-xs text-text-tertiary">Unique Numbers</p>
               <p className="text-xl font-bold text-text-primary">{importRows.length}</p>
             </div>
             <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 text-center">
@@ -1046,15 +1096,24 @@ export default function CallLogPage() {
               </div>
               <div className="rounded-lg border border-red-500/20 overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-red-500/5 text-xs text-text-tertiary uppercase tracking-wider"><th className="px-3 py-2 text-left w-8"></th><th className="px-3 py-2 text-left">Time</th><th className="px-3 py-2 text-left">Calling Number</th></tr></thead>
+                  <thead><tr className="bg-red-500/5 text-xs text-text-tertiary uppercase tracking-wider"><th className="px-3 py-2 text-left w-8"></th><th className="px-3 py-2 text-left">Calling Number</th><th className="px-3 py-2 text-left">Called At</th></tr></thead>
                   <tbody className="divide-y divide-border">
                     {importRows.map((r, idx) => {
                       if (r.matched) return null
                       return (
                         <tr key={idx} className="hover:bg-red-500/[0.03] transition-colors">
-                          <td className="px-3 py-2"><input type="checkbox" checked={r.selected} onChange={() => toggleImportRow(idx)} className="rounded border-border" /></td>
-                          <td className="px-3 py-2 text-text-secondary text-xs whitespace-nowrap">{r.time || '-'}</td>
-                          <td className="px-3 py-2"><span className="font-mono font-medium text-text-primary">{r.phone}</span></td>
+                          <td className="px-3 py-2 align-top"><input type="checkbox" checked={r.selected} onChange={() => toggleImportRow(idx)} className="rounded border-border" /></td>
+                          <td className="px-3 py-2 align-top">
+                            <span className="font-mono font-medium text-text-primary">{r.phone}</span>
+                            {r.times.length > 1 && <span className="ml-1.5 text-xs text-red-400 font-medium">{r.times.length}x</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap gap-1">
+                              {r.times.map((t, ti) => (
+                                <span key={ti} className="text-xs text-text-secondary bg-surface-raised px-1.5 py-0.5 rounded">{t}</span>
+                              ))}
+                            </div>
+                          </td>
                         </tr>
                       )
                     })}
@@ -1072,15 +1131,21 @@ export default function CallLogPage() {
               </summary>
               <div className="mt-2 rounded-lg border border-emerald-500/20 overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead><tr className="bg-emerald-500/5 text-xs text-text-tertiary uppercase tracking-wider"><th className="px-3 py-2 text-left">Time</th><th className="px-3 py-2 text-left">Calling Number</th><th className="px-3 py-2 text-left">Matched To</th></tr></thead>
+                  <thead><tr className="bg-emerald-500/5 text-xs text-text-tertiary uppercase tracking-wider"><th className="px-3 py-2 text-left">Calling Number</th><th className="px-3 py-2 text-left">Called At</th><th className="px-3 py-2 text-left">Matched To</th></tr></thead>
                   <tbody className="divide-y divide-border">
                     {importRows.map((r, idx) => {
                       if (!r.matched) return null
                       return (
                         <tr key={idx} className="opacity-60">
-                          <td className="px-3 py-2 text-text-secondary text-xs whitespace-nowrap">{r.time || '-'}</td>
-                          <td className="px-3 py-2"><span className="font-mono text-text-primary">{r.phone}</span></td>
-                          <td className="px-3 py-2 text-xs text-text-tertiary">{r.matchedClinic && r.matchedClinic !== '-' ? r.matchedClinic : ''}{r.matchedRef && <span className="ml-1 font-mono">{r.matchedRef}</span>}</td>
+                          <td className="px-3 py-2 align-top"><span className="font-mono text-text-primary">{r.phone}</span></td>
+                          <td className="px-3 py-2">
+                            <div className="flex flex-wrap gap-1">
+                              {r.times.map((t, ti) => (
+                                <span key={ti} className="text-xs text-text-secondary bg-surface-raised px-1.5 py-0.5 rounded">{t}</span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-xs text-text-tertiary align-top">{r.matchedClinic && r.matchedClinic !== '-' ? r.matchedClinic : ''}{r.matchedRef && <span className="ml-1 font-mono">{r.matchedRef}</span>}</td>
                         </tr>
                       )
                     })}
