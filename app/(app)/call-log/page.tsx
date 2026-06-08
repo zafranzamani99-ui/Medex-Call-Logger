@@ -540,6 +540,19 @@ export default function CallLogPage() {
     return v
   }
 
+  const formatPhone = (p: string) => {
+    if (p.includes('-') || p.includes(' ')) return p
+    const digits = p.replace(/[^\d]/g, '')
+    if (!digits.startsWith('0')) return p
+    // Landline: 03-XXXXXXXX, 04-XXXXXXX, 05-XXXXXXX, 06-XXXXXXX, 07-XXXXXXX, 09-XXXXXXX
+    if (/^0[3-9][^1]/.test(digits)) return digits.slice(0, 2) + '-' + digits.slice(2)
+    // Mobile 011: 011-XXXXXXXX
+    if (digits.startsWith('011')) return digits.slice(0, 3) + '-' + digits.slice(3)
+    // Mobile 01X: 01X-XXXXXXX
+    if (digits.startsWith('01')) return digits.slice(0, 3) + '-' + digits.slice(3)
+    return p
+  }
+
   const handleImportCSV = async (file: File) => {
     const text = await file.text()
     const lines = text.split(/\r?\n/).filter(l => l.trim())
@@ -550,11 +563,12 @@ export default function CallLogPage() {
     if (headerIdx === -1) { toast('Could not find header row with "Calling Number"', 'error'); return }
 
     const cols = lines[headerIdx].split(',').map(c => c.replace(/"/g, '').replace(/\t/g, '').trim())
-    let callingIdx = -1; let timeIdx = -1
+    let callingIdx = -1; let timeIdx = -1; let typeIdx = -1
     cols.forEach((c, i) => {
       const cl = c.toLowerCase()
       if (cl.includes('calling')) callingIdx = i
       if (cl.includes('date') || cl.includes('time')) timeIdx = i
+      if (cl === 'type') typeIdx = i
     })
     if (callingIdx === -1) { toast('Could not find "Calling Number" column in CSV', 'error'); return }
 
@@ -565,12 +579,18 @@ export default function CallLogPage() {
     }
 
     const callingNumbers: { phone: string; time: string }[] = []
+    let skippedIncoming = 0
     for (let i = headerIdx + 1; i < lines.length; i++) {
       const vals = parseCsvLine(lines[i]); const phone = vals[callingIdx]?.trim()
       if (!phone) continue
+      const callType = typeIdx >= 0 ? vals[typeIdx]?.trim().toLowerCase() : ''
+      if (callType === 'incoming') { skippedIncoming++; continue }
       callingNumbers.push({ phone, time: timeIdx >= 0 ? (vals[timeIdx]?.trim() || '') : '' })
     }
-    if (callingNumbers.length === 0) { toast('No phone numbers found in CSV', 'error'); return }
+    if (callingNumbers.length === 0) {
+      toast(skippedIncoming > 0 ? `All ${skippedIncoming} calls were answered (Incoming) — no missed calls found` : 'No phone numbers found in CSV', 'error')
+      return
+    }
 
     // Group by phone — same number calling 3x = 1 row with all times
     const phoneGroup = new Map<string, { phone: string; times: string[] }>()
@@ -888,7 +908,7 @@ export default function CallLogPage() {
                     if (k === 'time') return <td key={k} className="px-4 py-3 text-text-secondary whitespace-nowrap align-top">{format(new Date(e.time), 'hh:mm a')}</td>
                     if (k === 'phone') return (
                       <td key={k} className="px-4 py-3 align-top">
-                        <a href={`tel:${e.phone.replace(/\s+/g, '')}`} onClick={ev => ev.stopPropagation()} className="font-mono text-sm text-emerald-400 font-medium hover:text-emerald-300 hover:underline whitespace-nowrap">{e.phone}</a>
+                        <a href={`tel:${e.phone.replace(/\s+/g, '')}`} onClick={ev => ev.stopPropagation()} className="font-mono text-sm text-emerald-400 font-medium hover:text-emerald-300 hover:underline whitespace-nowrap">{formatPhone(e.phone)}</a>
                       </td>
                     )
                     if (k === 'clinic') return <td key={k} className="px-4 py-3 text-text-secondary truncate align-top">{e.clinic}</td>
@@ -999,7 +1019,7 @@ export default function CallLogPage() {
               <div key={`${e.source}-${e.id}`} onClick={() => handleRowClick(e)} className={`px-4 py-3 ${getRowClasses(e)}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
-                    <a href={`tel:${e.phone.replace(/\s+/g, '')}`} onClick={ev => ev.stopPropagation()} className="font-mono text-sm text-emerald-400 font-medium hover:text-emerald-300 flex-shrink-0">{e.phone}</a>
+                    <a href={`tel:${e.phone.replace(/\s+/g, '')}`} onClick={ev => ev.stopPropagation()} className="font-mono text-sm text-emerald-400 font-medium hover:text-emerald-300 flex-shrink-0">{formatPhone(e.phone)}</a>
                     <span className="text-sm text-text-primary truncate">{e.clinic}</span>
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
