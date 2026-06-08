@@ -356,6 +356,12 @@ export default function CallLogPage() {
   const sorted = useMemo(() => {
     const arr = [...activeFiltered]
     arr.sort((a, b) => {
+      // Missed tab: resolved entries always go to the bottom
+      if (tab === 'missed') {
+        const aResolved = !!a.resolvedStatus
+        const bResolved = !!b.resolvedStatus
+        if (aResolved !== bResolved) return aResolved ? 1 : -1
+      }
       let cmp = 0
       switch (sortKey) {
         case 'time': cmp = new Date(a.time).getTime() - new Date(b.time).getTime(); break
@@ -616,7 +622,15 @@ export default function CallLogPage() {
       return null
     }
 
-    const inserts = toSave.map(r => ({ phone: r.phone, clinic_name: phoneToClinic.get(normalizePhone(r.phone)) || null, notes: r.times.length > 1 ? `Voice Go — called ${r.times.length}x` : 'Imported from Voice Go', logged_by: userId, logged_by_name: userName, call_date: selectedDate, called_at: parseVoiceGoTime(r.times[0] || '', selectedDate) }))
+    const formatCallTimes = (times: string[]) => {
+      if (times.length <= 1) return null
+      const short = times.map(t => {
+        try { const d = new Date(t); return !isNaN(d.getTime()) ? format(d, 'hh:mm a') : t.replace(/^\d+\/\d+\/\d+\s*/, '') } catch { return t }
+      })
+      return `Called ${times.length}x: ${short.join(', ')}`
+    }
+
+    const inserts = toSave.map(r => ({ phone: r.phone, clinic_name: phoneToClinic.get(normalizePhone(r.phone)) || null, notes: formatCallTimes(r.times) || 'Imported from Voice Go', logged_by: userId, logged_by_name: userName, call_date: selectedDate, called_at: parseVoiceGoTime(r.times[0] || '', selectedDate) }))
     const { error } = await supabase.from('missed_calls').insert(inserts)
     setImportSaving(false)
     if (error) { toast('Failed to save missed calls', 'error'); return }
@@ -860,6 +874,9 @@ export default function CallLogPage() {
                     if (k === 'phone') return (
                       <td key={k} className="px-4 py-3 align-top">
                         <a href={`tel:${e.phone.replace(/\s+/g, '')}`} onClick={ev => ev.stopPropagation()} className="font-mono text-sm text-emerald-400 font-medium hover:text-emerald-300 hover:underline whitespace-nowrap">{e.phone}</a>
+                        {tab === 'missed' && e.notes && e.notes !== 'Imported from Voice Go' && (
+                          <p className="text-[11px] text-text-tertiary mt-0.5">{e.notes}</p>
+                        )}
                       </td>
                     )
                     if (k === 'clinic') return <td key={k} className="px-4 py-3 text-text-secondary truncate align-top">{e.clinic}</td>
