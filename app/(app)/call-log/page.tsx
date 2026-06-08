@@ -222,6 +222,10 @@ export default function CallLogPage() {
   const suggestRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Dismiss modal
+  const [dismissEntry, setDismissEntry] = useState<CallEntry | null>(null)
+  const [dismissNote, setDismissNote] = useState('')
+
   // Voice Go import
   const [showImport, setShowImport] = useState(false)
   const [importRows, setImportRows] = useState<VoiceGoRow[]>([])
@@ -951,7 +955,7 @@ export default function CallLogPage() {
                             <button onClick={ev => { ev.stopPropagation(); handleResolve(e, 'no_answer') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors whitespace-nowrap">
                               No Answer
                             </button>
-                            <button onClick={ev => { ev.stopPropagation(); handleResolve(e, 'dismissed', 'Duplicate / same clinic') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-zinc-600 text-white hover:bg-zinc-700 transition-colors whitespace-nowrap">
+                            <button onClick={ev => { ev.stopPropagation(); setDismissEntry(e); setDismissNote('') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-zinc-600 text-white hover:bg-zinc-700 transition-colors whitespace-nowrap">
                               Dismiss
                             </button>
                           </div>
@@ -1040,7 +1044,7 @@ export default function CallLogPage() {
                     <div className="mt-1.5 flex items-center gap-1.5">
                       <button onClick={ev => { ev.stopPropagation(); window.open(`/log?phone=${encodeURIComponent(e.phone)}${e.clinic !== '-' ? `&clinic=${encodeURIComponent(e.clinic)}` : ''}&missed_id=${e.id}`, '_blank') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">Log Call</button>
                       <button onClick={ev => { ev.stopPropagation(); handleResolve(e, 'no_answer') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-amber-600 text-white hover:bg-amber-700 transition-colors">No Answer</button>
-                      <button onClick={ev => { ev.stopPropagation(); handleResolve(e, 'dismissed', 'Duplicate / same clinic') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-zinc-600 text-white hover:bg-zinc-700 transition-colors">Dismiss</button>
+                      <button onClick={ev => { ev.stopPropagation(); setDismissEntry(e); setDismissNote('') }} className="text-xs font-medium px-2 py-1 rounded-lg bg-zinc-600 text-white hover:bg-zinc-700 transition-colors">Dismiss</button>
                     </div>
                   )
                 )}
@@ -1099,6 +1103,40 @@ export default function CallLogPage() {
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
           <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
           <Button variant="danger" onClick={handleSave} disabled={!formPhone.trim() || saving}>{saving ? 'Saving...' : 'Log Missed Call'}</Button>
+        </div>
+      </ModalDialog>
+
+      {/* ── Dismiss Modal ─────────────────────────────────────────── */}
+      <ModalDialog open={!!dismissEntry} onClose={() => setDismissEntry(null)} title="Dismiss Missed Call" size="sm">
+        <div className="p-4 space-y-3">
+          <p className="text-sm text-text-secondary">
+            Dismissing <span className="font-mono font-medium text-text-primary">{dismissEntry?.phone}</span>
+            {dismissEntry?.clinic && dismissEntry.clinic !== '-' && <span> — {dismissEntry.clinic}</span>}
+          </p>
+          <div>
+            <Label>Remark *</Label>
+            <Textarea
+              value={dismissNote}
+              onChange={e => setDismissNote(e.target.value)}
+              placeholder="e.g. Same clinic already logged, duplicate entry, wrong number..."
+              rows={2}
+              autoFocus
+            />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-border">
+          <Button variant="secondary" onClick={() => setDismissEntry(null)}>Cancel</Button>
+          <Button
+            variant="danger"
+            disabled={!dismissNote.trim()}
+            onClick={async () => {
+              if (!dismissEntry || !dismissNote.trim()) return
+              await handleResolve(dismissEntry, 'dismissed', dismissNote.trim())
+              setDismissEntry(null)
+            }}
+          >
+            Dismiss
+          </Button>
         </div>
       </ModalDialog>
 
