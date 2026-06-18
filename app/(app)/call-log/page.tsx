@@ -949,8 +949,9 @@ export default function CallLogPage() {
                     if (k === 'clinic') return (
                       <td key={k} className="px-4 py-3 align-top">
                         <span className="text-text-secondary">{e.clinic}</span>
-                        {tab === 'missed' && e.renewalStatus && e.renewalStatus !== 'VALID MN' && (() => {
-                          const colors = RENEWAL_COLORS[e.renewalStatus] || { bg: 'bg-gray-500/20', text: 'text-gray-400' }
+                        {tab === 'missed' && e.renewalStatus && (() => {
+                          const key = e.renewalStatus.toUpperCase()
+                          const colors = RENEWAL_COLORS[key] || { bg: 'bg-gray-500/20', text: 'text-gray-400' }
                           return <span className={`ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${colors.bg} ${colors.text}`}>{e.renewalStatus}</span>
                         })()}
                       </td>

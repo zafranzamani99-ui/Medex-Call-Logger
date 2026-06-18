@@ -7,7 +7,7 @@ import {
   eachDayOfInterval, getDay, addDays, startOfISOWeek,
   getISOWeek,
 } from 'date-fns'
-import type { SaturdayShift, StandbyShift, ReplacementLeave, StaffRef, PublicHoliday, Profile, ShiftLog } from '@/lib/types'
+import type { SaturdayShift, StandbyShift, ReplacementLeave, StaffRef, PublicHoliday, Profile, ShiftLog, StandbyOverride } from '@/lib/types'
 import { formatDistanceToNow } from 'date-fns'
 import { toProperCase } from '@/lib/constants'
 import { ModalDialog } from '@/components/Modal'
@@ -15,7 +15,10 @@ import { Label, Input, Textarea, Select } from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import EmptyState from '@/components/ui/EmptyState'
 import { useToast } from '@/components/ui/Toast'
+import OTClaimSection from '@/components/OTClaimSection'
+import { useSearchParams } from 'next/navigation'
 
+type Section = 'schedules' | 'ot'
 type Tab = 'saturday' | 'standby' | 'leave'
 
 const HOLIDAY_SCOPES = ['federal', 'SEL', 'KUL']
@@ -23,15 +26,20 @@ const HOLIDAY_SCOPES = ['federal', 'SEL', 'KUL']
 export default function ShiftPage() {
   const supabase = createClient()
   const { toast } = useToast()
+  const searchParams = useSearchParams()
 
+  const [section, setSection] = useState<Section>(() => searchParams.get('section') === 'ot' ? 'ot' : 'schedules')
   const [tab, setTab] = useState<Tab>('saturday')
   const [currentMonth, setCurrentMonth] = useState(() => startOfMonth(new Date()))
   const [loading, setLoading] = useState(true)
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [canApprove, setCanApprove] = useState(false)
   const [agents, setAgents] = useState<Pick<Profile, 'id' | 'display_name'>[]>([])
   const [shiftLogs, setShiftLogs] = useState<ShiftLog[]>([])
   const [allStandby, setAllStandby] = useState<StandbyShift[]>([])
+  const [overrides, setOverrides] = useState<StandbyOverride[]>([])
 
   const [saturdayShifts, setSaturdayShifts] = useState<SaturdayShift[]>([])
   const [standbyShifts, setStandbyShifts] = useState<StandbyShift[]>([])
@@ -57,6 +65,15 @@ export default function ShiftPage() {
 
   // Hours detail modal
   const [hoursDetailFor, setHoursDetailFor] = useState<string | null>(null)
+
+  // Swap modal
+  const [showSwapModal, setShowSwapModal] = useState(false)
+  const [swapDate, setSwapDate] = useState('')
+  const [swapOriginalId, setSwapOriginalId] = useState('')
+  const [swapReplacementId, setSwapReplacementId] = useState('')
+  const [swapReason, setSwapReason] = useState('')
+  const [swapSaving, setSwapSaving] = useState(false)
+  const [editingSwap, setEditingSwap] = useState<StandbyOverride | null>(null)
 
   // Leave tab filters
   const [leaveFilterStaff, setLeaveFilterStaff] = useState('all')
@@ -105,19 +122,25 @@ export default function ShiftPage() {
       const uid = session.user.id
       setUserId(uid)
 
-      const [profileRes, agentsRes, holidaysRes, logsRes, allStandbyRes] = await Promise.all([
-        supabase.from('profiles').select('display_name').eq('id', uid).single(),
+      const [profileRes, agentsRes, holidaysRes, logsRes, allStandbyRes, overridesRes] = await Promise.all([
+        supabase.from('profiles').select('display_name, role').eq('id', uid).single(),
         supabase.from('profiles').select('id, display_name').eq('is_active', true).in('role', ['support', 'administrator']).order('display_name'),
         supabase.from('public_holidays').select('*').in('scope', HOLIDAY_SCOPES),
         supabase.from('shift_logs').select('*').order('created_at', { ascending: false }).limit(20),
         supabase.from('standby_shifts').select('*'),
+        supabase.from('standby_overrides').select('*').order('override_date'),
       ])
 
-      if (profileRes.data) setUserName(profileRes.data.display_name)
+      if (profileRes.data) {
+        setUserName(profileRes.data.display_name)
+        setIsAdmin(profileRes.data.role === 'admin' || profileRes.data.role === 'administrator')
+        setCanApprove(profileRes.data.role === 'administrator')
+      }
       if (agentsRes.data) setAgents(agentsRes.data)
       if (holidaysRes.data) setHolidays(holidaysRes.data as PublicHoliday[])
       if (logsRes.data) setShiftLogs(logsRes.data as ShiftLog[])
       if (allStandbyRes.data) setAllStandby(allStandbyRes.data as StandbyShift[])
+      if (overridesRes.data) setOverrides(overridesRes.data as StandbyOverride[])
 
       await Promise.all([loadMonthData(startOfMonth(new Date())), loadLeaves()])
       setLoading(false)
@@ -209,12 +232,22 @@ export default function ShiftPage() {
       ;(s.weekend_staff || []).forEach(r => { ensure(r.id, r.name); map[r.id].sunWeeks++ })
     })
 
+    // Swap adjustments: original loses hours, replacement gains hours
+    const swapAdj: Record<string, number> = {}
+    overrides.forEach(o => {
+      if (o.override_date > today) return
+      swapAdj[o.original_staff_id] = (swapAdj[o.original_staff_id] || 0) - o.hours
+      swapAdj[o.replacement_staff_id] = (swapAdj[o.replacement_staff_id] || 0) + o.hours
+      ensure(o.replacement_staff_id, o.replacement_staff_name)
+    })
+
     const rlByStaff: Record<string, number> = {}
     leaves.forEach(l => { rlByStaff[l.staff_id] = (rlByStaff[l.staff_id] || 0) + l.duration })
 
     return Object.entries(map)
       .map(([id, h]) => {
-        const earnedHrs = h.weekdayWeeks * WEEKDAY_HRS + h.sunWeeks * SUN_HRS
+        const swapHrs = swapAdj[id] || 0
+        const earnedHrs = h.weekdayWeeks * WEEKDAY_HRS + h.sunWeeks * SUN_HRS + swapHrs
         const rlDays = rlByStaff[id] || 0
         const usedHrs = rlDays * RL_DAY_HRS
         return {
@@ -224,6 +257,7 @@ export default function ShiftPage() {
           weekdayHrs: h.weekdayWeeks * WEEKDAY_HRS,
           sunWeeks: h.sunWeeks,
           sunHrs: h.sunWeeks * SUN_HRS,
+          swapHrs,
           earnedHrs,
           rlDays,
           usedHrs,
@@ -231,7 +265,7 @@ export default function ShiftPage() {
         }
       })
       .sort((a, b) => b.balanceHrs - a.balanceHrs)
-  }, [allStandby, leaves])
+  }, [allStandby, leaves, overrides])
 
   const hoursDetail = useMemo(() => {
     if (!hoursDetailFor) return null
@@ -253,10 +287,21 @@ export default function ShiftPage() {
     sundays.sort((a, b) => a.from.localeCompare(b.from))
 
     const rlEntries = leaves.filter(l => l.staff_id === hoursDetailFor).sort((a, b) => a.leave_date.localeCompare(b.leave_date))
+
+    const swapEntries = overrides
+      .filter(o => o.override_date <= today && (o.original_staff_id === hoursDetailFor || o.replacement_staff_id === hoursDetailFor))
+      .map(o => ({
+        date: o.override_date,
+        hours: o.original_staff_id === hoursDetailFor ? -o.hours : o.hours,
+        otherName: o.original_staff_id === hoursDetailFor ? o.replacement_staff_name : o.original_staff_name,
+        reason: o.reason,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+
     const summary = hoursSummary.find(h => h.id === hoursDetailFor)
 
-    return { weekdays, sundays, rlEntries, summary }
-  }, [hoursDetailFor, allStandby, leaves, hoursSummary])
+    return { weekdays, sundays, rlEntries, swapEntries, summary }
+  }, [hoursDetailFor, allStandby, leaves, overrides, hoursSummary])
 
   // ── Modal helpers ──────────────────────────────────────────────────────
 
@@ -463,6 +508,78 @@ export default function ShiftPage() {
     }
   }
 
+  // ── CRUD: Standby Swap ──────────────────────────────────────────────────
+
+  const openSwapModal = (existing?: StandbyOverride) => {
+    if (existing) {
+      setEditingSwap(existing)
+      setSwapDate(existing.override_date)
+      setSwapOriginalId(existing.original_staff_id)
+      setSwapReplacementId(existing.replacement_staff_id)
+      setSwapReason(existing.reason)
+    } else {
+      setEditingSwap(null)
+      setSwapDate('')
+      setSwapOriginalId('')
+      setSwapReplacementId('')
+      setSwapReason('')
+    }
+    setShowSwapModal(true)
+  }
+
+  const saveSwap = async () => {
+    if (!swapDate || !swapOriginalId || !swapReplacementId || !swapReason.trim()) {
+      toast('Please fill all fields', 'error'); return
+    }
+    if (swapOriginalId === swapReplacementId) {
+      toast('Original and replacement must be different', 'error'); return
+    }
+
+    setSwapSaving(true)
+    const origName = agents.find(a => a.id === swapOriginalId)?.display_name || ''
+    const replName = agents.find(a => a.id === swapReplacementId)?.display_name || ''
+
+    const payload = {
+      override_date: swapDate,
+      original_staff_id: swapOriginalId,
+      original_staff_name: origName,
+      replacement_staff_id: swapReplacementId,
+      replacement_staff_name: replName,
+      hours: 2,
+      reason: swapReason.trim(),
+      created_by: userId,
+    }
+
+    let error
+    if (editingSwap) {
+      ({ error } = await supabase.from('standby_overrides').update(payload).eq('id', editingSwap.id))
+    } else {
+      ({ error } = await supabase.from('standby_overrides').insert(payload))
+    }
+
+    if (!error) {
+      await logChange(editingSwap ? 'edit' : 'add', 'standby', `Swap ${format(new Date(swapDate + 'T00:00:00'), 'dd/MM/yyyy')} — ${toProperCase(origName)} → ${toProperCase(replName)} (${swapReason.trim()})`)
+      const { data: fresh } = await supabase.from('standby_overrides').select('*').order('override_date')
+      if (fresh) setOverrides(fresh as StandbyOverride[])
+      setShowSwapModal(false)
+      toast(editingSwap ? 'Swap updated' : 'Swap added')
+    } else {
+      toast('Failed to save swap', 'error')
+    }
+    setSwapSaving(false)
+  }
+
+  const deleteSwap = async (id: string) => {
+    if (!confirm('Delete this swap?')) return
+    const swap = overrides.find(o => o.id === id)
+    const { error } = await supabase.from('standby_overrides').delete().eq('id', id)
+    if (!error) {
+      if (swap) await logChange('delete', 'standby', `Swap ${format(new Date(swap.override_date + 'T00:00:00'), 'dd/MM/yyyy')} — ${toProperCase(swap.original_staff_name)} → ${toProperCase(swap.replacement_staff_name)}`)
+      setOverrides(prev => prev.filter(o => o.id !== id))
+      toast('Swap deleted')
+    }
+  }
+
   // ── Render helpers ─────────────────────────────────────────────────────
 
   const staffNames = (refs: StaffRef[]) =>
@@ -511,6 +628,25 @@ export default function ShiftPage() {
 
   return (
     <div className="max-w-4xl mx-auto">
+      {/* Section Toggle — Schedules vs OT Claim */}
+      <div className="flex items-center gap-3 mb-5 print:hidden">
+        <button onClick={() => setSection('schedules')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${section === 'schedules' ? 'bg-indigo-500/15 text-indigo-400 ring-1 ring-indigo-500/30' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-raised'}`}>
+          <svg className="size-4 inline-block mr-1.5 -mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" /></svg>
+          Schedules
+        </button>
+        <button onClick={() => setSection('ot')} className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${section === 'ot' ? 'bg-amber-500/15 text-amber-400 ring-1 ring-amber-500/30' : 'text-text-tertiary hover:text-text-primary hover:bg-surface-raised'}`}>
+          <svg className="size-4 inline-block mr-1.5 -mt-0.5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+          OT Claim
+        </button>
+      </div>
+
+      {/* ── OT Claim Section ─────────────────────────────────────── */}
+      {section === 'ot' && (
+        <OTClaimSection userId={userId} userName={userName} isAdmin={isAdmin} canApprove={canApprove} />
+      )}
+
+      {/* ── Schedules Section ────────────────────────────────────── */}
+      {section === 'schedules' && (<>
       {/* Tab Bar */}
       <div className="flex gap-1 mb-5 bg-surface-raised p-1 rounded-lg">
         {([
@@ -635,7 +771,10 @@ export default function ShiftPage() {
                 <svg className="size-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
               </button>
             </div>
-            <Button size="sm" onClick={openAddModal}>+ Add Week</Button>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={() => openSwapModal()}>Swap</Button>
+              <Button size="sm" onClick={openAddModal}>+ Add Week</Button>
+            </div>
           </div>
 
           {weeksInMonth.length === 0 ? (
@@ -711,6 +850,37 @@ export default function ShiftPage() {
               </table>
             </div>
           )}
+
+          {/* Swaps for current month */}
+          {(() => {
+            const monthStart = format(startOfMonth(currentMonth), 'yyyy-MM-dd')
+            const monthEnd = format(endOfMonth(currentMonth), 'yyyy-MM-dd')
+            const monthSwaps = overrides.filter(o => o.override_date >= monthStart && o.override_date <= monthEnd)
+            if (monthSwaps.length === 0) return null
+            return (
+              <div className="mt-4">
+                <h3 className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">Swaps this month</h3>
+                <div className="space-y-1">
+                  {monthSwaps.map(o => (
+                    <div key={o.id} className="flex items-center gap-2 text-xs py-1.5 px-3 rounded-lg bg-surface-raised/50 group">
+                      <span className="text-text-primary font-medium">{format(new Date(o.override_date + 'T00:00:00'), 'dd/MM')}</span>
+                      <span className="text-orange-400">{toProperCase(o.original_staff_name)}</span>
+                      <span className="text-text-muted">→</span>
+                      <span className="text-green-400">{toProperCase(o.replacement_staff_name)}</span>
+                      <span className="text-text-muted">({o.reason})</span>
+                      <span className="text-text-muted ml-auto">{o.hours}h</span>
+                      <button onClick={() => openSwapModal(o)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-surface-raised text-text-tertiary hover:text-indigo-400 transition-all">
+                        <svg className="size-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>
+                      </button>
+                      <button onClick={() => deleteSwap(o.id)} className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/10 text-text-tertiary hover:text-red-400 transition-all">
+                        <svg className="size-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })()}
         </>
       )}
 
@@ -735,6 +905,12 @@ export default function ShiftPage() {
                       <span className="text-text-tertiary">Sunday <span className="text-text-muted">(9h each)</span></span>
                       <span className="text-text-secondary font-medium tabular-nums">{h.sunWeeks}× = <span className="text-amber-400">{h.sunHrs}h</span></span>
                     </div>
+                    {h.swapHrs !== 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-text-tertiary">Swap</span>
+                        <span className={`font-medium tabular-nums ${h.swapHrs > 0 ? 'text-green-400' : 'text-orange-400'}`}>{h.swapHrs > 0 ? '+' : ''}{h.swapHrs}h</span>
+                      </div>
+                    )}
                     <div className="h-px bg-border my-1" />
                     <div className="flex items-center justify-between">
                       <span className="text-text-tertiary">Earned</span>
@@ -927,6 +1103,48 @@ export default function ShiftPage() {
         </div>
       </ModalDialog>
 
+      {/* Swap Modal */}
+      <ModalDialog
+        open={showSwapModal}
+        onClose={() => setShowSwapModal(false)}
+        title={editingSwap ? 'Edit Standby Swap' : 'Add Standby Swap'}
+        size="sm"
+      >
+        <div className="p-4 space-y-4">
+          <div>
+            <Label required>Date</Label>
+            <Input type="date" value={swapDate} onChange={e => setSwapDate(e.target.value)} />
+          </div>
+          <div>
+            <Label required>Original (absent)</Label>
+            <Select value={swapOriginalId} onChange={e => setSwapOriginalId(e.target.value)}>
+              <option value="">Who was on standby...</option>
+              {agents.map(a => (
+                <option key={a.id} value={a.id}>{toProperCase(a.display_name)}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label required>Replacement (covered)</Label>
+            <Select value={swapReplacementId} onChange={e => setSwapReplacementId(e.target.value)}>
+              <option value="">Who replaced...</option>
+              {agents.map(a => (
+                <option key={a.id} value={a.id}>{toProperCase(a.display_name)}</option>
+              ))}
+            </Select>
+          </div>
+          <div>
+            <Label required>Reason</Label>
+            <Input value={swapReason} onChange={e => setSwapReason(e.target.value)} placeholder="e.g. MC, Annual Leave" />
+          </div>
+          <p className="text-[11px] text-text-muted">Original person loses 2h, replacement gains 2h.</p>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" size="sm" onClick={() => setShowSwapModal(false)}>Cancel</Button>
+            <Button size="sm" onClick={saveSwap} loading={swapSaving}>Save</Button>
+          </div>
+        </div>
+      </ModalDialog>
+
       {/* Replacement Leave Modal */}
       <ModalDialog
         open={showModal && tab === 'leave'}
@@ -1087,6 +1305,28 @@ export default function ShiftPage() {
               )}
             </div>
 
+            {/* Swap Adjustments */}
+            {hoursDetail.swapEntries.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-orange-400 uppercase tracking-wider">Standby Swaps</span>
+                  <span className="text-xs font-bold text-text-primary tabular-nums">{hoursDetail.summary?.swapHrs || 0}h</span>
+                </div>
+                <div className="space-y-0.5">
+                  {hoursDetail.swapEntries.map((s, i) => (
+                    <div key={i} className="flex items-center justify-between py-1 px-2.5 rounded hover:bg-surface-raised/50 text-xs">
+                      <span className="text-text-secondary">
+                        {format(new Date(s.date + 'T00:00:00'), 'dd/MM/yyyy')}
+                        <span className="text-text-muted ml-1.5">{s.hours > 0 ? `covered for ${toProperCase(s.otherName)}` : `${toProperCase(s.otherName)} covered`}</span>
+                        <span className="text-text-muted ml-1">({s.reason})</span>
+                      </span>
+                      <span className={`font-medium tabular-nums ${s.hours > 0 ? 'text-green-400' : 'text-orange-400'}`}>{s.hours > 0 ? '+' : ''}{s.hours}h</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* RL Taken */}
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -1154,6 +1394,7 @@ export default function ShiftPage() {
           </div>
         </div>
       )}
+      </>)}
     </div>
   )
 }

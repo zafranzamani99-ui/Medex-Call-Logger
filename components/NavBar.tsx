@@ -220,6 +220,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
     assignment: { bg: 'bg-indigo-500/20', text: 'text-indigo-400', label: 'Assigned' },
     mention: { bg: 'bg-cyan-500/20', text: 'text-cyan-400', label: 'Mentioned' },
     priority: { bg: 'bg-red-500/20', text: 'text-red-400', label: 'High Priority' },
+    ot_claim: { bg: 'bg-amber-500/20', text: 'text-amber-400', label: 'OT Claim' },
   }
 
   const handleLogout = async () => {
@@ -539,7 +540,7 @@ export default function NavBar({ displayName, todayCalls = 0, openTickets = 0, k
       )}
 
       {/* ===== Notification FAB — bottom-right, all screens ===== */}
-      <div ref={bellRef} className="fixed z-50 right-5 bottom-[84px] md:bottom-6">
+      <div ref={bellRef} className="fixed z-50 right-5 bottom-[84px] md:bottom-6 print:hidden">
         <div className="relative">
           <button
             onClick={handleOpenBell}

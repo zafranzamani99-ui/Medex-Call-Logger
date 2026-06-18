@@ -406,7 +406,7 @@ export interface InboxReply {
 export interface Notification {
   id: string
   user_id: string
-  type: 'assignment' | 'mention' | 'priority'
+  type: 'assignment' | 'mention' | 'priority' | 'ot_claim'
   title: string
   body: string | null
   link: string | null
@@ -667,6 +667,19 @@ export interface ReplacementLeave {
   created_at: string
 }
 
+export interface StandbyOverride {
+  id: string
+  override_date: string
+  original_staff_id: string
+  original_staff_name: string
+  replacement_staff_id: string
+  replacement_staff_name: string
+  hours: number
+  reason: string
+  created_by: string | null
+  created_at: string
+}
+
 export interface ShiftLog {
   id: string
   action: 'add' | 'edit' | 'delete'
@@ -675,4 +688,35 @@ export interface ShiftLog {
   done_by: string | null
   done_by_name: string
   created_at: string
+}
+
+export interface OTClaimEntry {
+  date: string
+  from: string
+  to: string
+  hours: number
+  nature: string
+}
+
+export interface OTClaim {
+  id: string
+  user_id: string
+  user_name: string
+  designation: string
+  department: string
+  claim_month: string
+  reporting_manager: string
+  entries: OTClaimEntry[]
+  total_hours: number
+  status: 'draft' | 'submitted' | 'approved' | 'rejected'
+  submitted_at: string | null
+  approved_by: string | null
+  approved_by_name: string | null
+  approved_at: string | null
+  rejected_by: string | null
+  rejected_by_name: string | null
+  rejected_at: string | null
+  reject_reason: string | null
+  created_at: string
+  updated_at: string
 }
