@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { format, startOfDay, endOfDay } from 'date-fns'
-import { toProperCase } from '@/lib/constants'
+import { toProperCase, RENEWAL_COLORS } from '@/lib/constants'
 import { ModalDialog } from '@/components/Modal'
 import Button from '@/components/ui/Button'
 import { Label, Input, Textarea } from '@/components/ui/Input'
@@ -33,6 +33,7 @@ interface CallEntry {
   resolvedByName?: string | null
   resolvedAt?: string | null
   resolvedNote?: string | null
+  renewalStatus?: string | null
 }
 
 interface PhoneSuggestion {
@@ -322,6 +323,17 @@ export default function CallLogPage() {
     }
 
     combined.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime())
+
+    const clinicNames = Array.from(new Set(combined.filter(e => e.clinic && e.clinic !== '-').map(e => e.clinic)))
+    if (clinicNames.length > 0) {
+      const { data: clinicData } = await supabase.from('clinics').select('clinic_name, renewal_status').in('clinic_name', clinicNames)
+      if (clinicData) {
+        const statusMap = new Map<string, string>()
+        for (const c of clinicData) { if (c.renewal_status) statusMap.set(c.clinic_name, c.renewal_status) }
+        for (const e of combined) { e.renewalStatus = statusMap.get(e.clinic) || null }
+      }
+    }
+
     setAllEntries(combined)
     setLoading(false)
   }, [supabase])
@@ -578,9 +590,18 @@ export default function CallLogPage() {
       result.push(current.replace(/\t/g, '').trim()); return result
     }
 
-    // Parse all rows, track missed times + which numbers had Incoming (answered)
+    // Parse all rows, track missed times + latest incoming time per phone
     const missedByPhone = new Map<string, { phone: string; times: string[] }>()
-    const answeredPhones = new Set<string>()
+    const latestIncomingTime = new Map<string, number>()
+
+    const parseMinutes = (s: string): number => {
+      const m = s.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i)
+      if (!m) return -1
+      let h = parseInt(m[1]); const min = parseInt(m[2])
+      if (m[3].toUpperCase() === 'PM' && h !== 12) h += 12
+      if (m[3].toUpperCase() === 'AM' && h === 12) h = 0
+      return h * 60 + min
+    }
 
     for (let i = headerIdx + 1; i < lines.length; i++) {
       const vals = parseCsvLine(lines[i]); const phone = vals[callingIdx]?.trim()
@@ -590,7 +611,9 @@ export default function CallLogPage() {
       const time = timeIdx >= 0 ? (vals[timeIdx]?.trim() || '') : ''
 
       if (callType === 'incoming') {
-        answeredPhones.add(norm)
+        const mins = parseMinutes(time)
+        const prev = latestIncomingTime.get(norm) ?? -1
+        if (mins > prev) latestIncomingTime.set(norm, mins)
       } else if (callType === 'outgoing') {
         continue
       } else {
@@ -613,7 +636,9 @@ export default function CallLogPage() {
     const rows: VoiceGoRow[] = dedupedNumbers.map(cn => {
       const norm = normalizePhone(cn.phone)
       const logMatch = loggedPhones.get(norm)
-      const wasAnswered = answeredPhones.has(norm)
+      const incomingMins = latestIncomingTime.get(norm) ?? -1
+      const latestMissedMins = cn.times.reduce((max, t) => Math.max(max, parseMinutes(t)), -1)
+      const wasAnswered = incomingMins >= 0 && incomingMins >= latestMissedMins
       const matched = !!logMatch || wasAnswered
       return {
         times: cn.times, phone: cn.phone, matched,
@@ -921,7 +946,15 @@ export default function CallLogPage() {
                         <a href={`tel:${e.phone.replace(/\s+/g, '')}`} onClick={ev => ev.stopPropagation()} className="font-mono text-sm text-emerald-400 font-medium hover:text-emerald-300 hover:underline whitespace-nowrap">{formatPhone(e.phone)}</a>
                       </td>
                     )
-                    if (k === 'clinic') return <td key={k} className="px-4 py-3 text-text-secondary truncate align-top">{e.clinic}</td>
+                    if (k === 'clinic') return (
+                      <td key={k} className="px-4 py-3 align-top">
+                        <span className="text-text-secondary">{e.clinic}</span>
+                        {tab === 'missed' && e.renewalStatus && e.renewalStatus !== 'VALID MN' && (() => {
+                          const colors = RENEWAL_COLORS[e.renewalStatus] || { bg: 'bg-gray-500/20', text: 'text-gray-400' }
+                          return <span className={`ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${colors.bg} ${colors.text}`}>{e.renewalStatus}</span>
+                        })()}
+                      </td>
+                    )
                     if (k === 'staff') return <td key={k} className="px-4 py-3 align-top"><span className="text-xs text-accent font-medium">{toProperCase(e.staff)}</span></td>
                     if (k === 'source') return (
                       <td key={k} className="px-4 py-3 align-top">
