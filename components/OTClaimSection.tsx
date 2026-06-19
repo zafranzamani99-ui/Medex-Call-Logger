@@ -406,7 +406,7 @@ export default function OTClaimSection({ userId, userName, isAdmin, canApprove }
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Month</Label>
-              <Input type="month" value={formMonth} onChange={e => setFormMonth(e.target.value)} disabled={!!editingId} />
+              <Input type="month" value={formMonth} onChange={e => setFormMonth(e.target.value)} />
             </div>
             <div>
               <Label>Designation</Label>
