@@ -119,7 +119,7 @@ export default function OTClaimSection({ userId, userName, isAdmin, canApprove }
 
     setSaving(true)
 
-    const payload = {
+    const payload: Record<string, unknown> = {
       user_id: userId,
       user_name: userName,
       designation: formDesignation,
@@ -131,6 +131,13 @@ export default function OTClaimSection({ userId, userName, isAdmin, canApprove }
       status: submitNow ? 'submitted' : 'draft',
       submitted_at: submitNow ? new Date().toISOString() : null,
       updated_at: new Date().toISOString(),
+    }
+
+    if (editingId) {
+      payload.rejected_by = null
+      payload.rejected_by_name = null
+      payload.rejected_at = null
+      payload.reject_reason = null
     }
 
     let error
@@ -346,14 +353,16 @@ export default function OTClaimSection({ userId, userName, isAdmin, canApprove }
                           <svg className="size-3.5 inline-block mr-1 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                           PDF
                         </button>
-                        {!adminView && (c.status === 'draft' || c.status === 'rejected') && (
+                        {!adminView && c.status !== 'approved' && (
                           <>
                             <button onClick={() => openEditForm(c)} className="px-2.5 py-1 rounded text-xs font-medium bg-surface-raised text-text-secondary hover:text-text-primary transition-colors">
                               Edit
                             </button>
-                            <button onClick={() => handleSubmitExisting(c)} className="px-2.5 py-1 rounded text-xs font-medium bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 transition-colors">
-                              {c.status === 'rejected' ? 'Resubmit' : 'Submit'}
-                            </button>
+                            {c.status !== 'submitted' && (
+                              <button onClick={() => handleSubmitExisting(c)} className="px-2.5 py-1 rounded text-xs font-medium bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 transition-colors">
+                                {c.status === 'rejected' ? 'Resubmit' : 'Submit'}
+                              </button>
+                            )}
                             <button onClick={() => setDeletingId(c.id)} className="px-2.5 py-1 rounded text-xs font-medium bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors">
                               Delete
                             </button>
