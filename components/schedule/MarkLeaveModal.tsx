@@ -69,15 +69,30 @@ export default function MarkLeaveModal({ open, onClose, onSaved, agents, prefill
     let finalReason = reason === 'Other' ? (otherReason.trim() || 'Other') : reason
     if (reason === 'Annual' && halfDay !== 'Full Day') finalReason = `Annual (${halfDay})`
     const dates = expandRange(startDate, endDate)
-    const rows = dates.map(d => ({
-      staff_id: staffId,
-      leave_date: d,
-      reason: finalReason,
-      created_by: session?.user.id || null,
-    }))
-    const { error } = await supabase
-      .from('staff_leave')
-      .upsert(rows, { onConflict: 'staff_id,leave_date', ignoreDuplicates: true })
+    const isRL = reason === 'Replacement'
+    let error: { message: string } | null = null
+
+    if (isRL) {
+      const rlRows = dates.map(d => ({
+        staff_id: staffId,
+        staff_name: staffName || '',
+        leave_date: d,
+        duration: halfDay !== 'Full Day' ? 0.5 : 1,
+        notes: finalReason,
+        created_by: session?.user.id || null,
+      }))
+      ;({ error } = await supabase.from('replacement_leaves').insert(rlRows))
+    } else {
+      const rows = dates.map(d => ({
+        staff_id: staffId,
+        leave_date: d,
+        reason: finalReason,
+        created_by: session?.user.id || null,
+      }))
+      ;({ error } = await supabase
+        .from('staff_leave')
+        .upsert(rows, { onConflict: 'staff_id,leave_date', ignoreDuplicates: true }))
+    }
 
     setSaving(false)
     if (error) {
@@ -132,7 +147,7 @@ export default function MarkLeaveModal({ open, onClose, onSaved, agents, prefill
           </select>
         </div>
 
-        {reason === 'Annual' && (
+        {(reason === 'Annual' || reason === 'Replacement') && (
           <div className="flex gap-1.5">
             {HALF_DAY_OPTIONS.map(opt => (
               <button

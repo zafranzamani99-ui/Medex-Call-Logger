@@ -171,7 +171,7 @@ export default function InboxPage() {
   // ── Notification helper ─────────────────────────────────────────────────
   const createNotification = async (
     targetUserId: string,
-    type: 'assignment' | 'mention' | 'priority',
+    type: 'assignment' | 'mention' | 'priority' | 'reply',
     title: string,
     body: string,
     inboxMessageId: string,
@@ -341,10 +341,20 @@ export default function InboxPage() {
         m.id === msgId ? { ...m, reply_count: (m.reply_count || 0) + 1 } : m
       ))
 
-      // Send notifications for @mentions
+      // Notify ticket creator of reply
       if (msg) {
+        await createNotification(
+          msg.sent_by,
+          'reply',
+          `${toProperCase(userName)} replied`,
+          `${msg.ticket_ref} — ${chatText.trim().slice(0, 80)}`,
+          msgId,
+        )
+
+        // Send notifications for @mentions
         const mentionedIds = extractMentions(chatText)
         for (const mentionedId of mentionedIds) {
+          if (mentionedId === msg.sent_by) continue
           await createNotification(
             mentionedId,
             'mention',
