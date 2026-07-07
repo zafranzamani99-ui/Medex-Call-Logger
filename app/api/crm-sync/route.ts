@@ -4,18 +4,11 @@ import { performCrmSync } from '@/lib/crm-sync-logic'
 
 export const maxDuration = 120
 
-async function requireAdmin(): Promise<NextResponse | null> {
+// CRM sync is available to all signed-in staff (support, admin, administrator).
+async function requireAuth(): Promise<NextResponse | null> {
   const userClient = createServerClient()
   const { data: userRes } = await userClient.auth.getUser()
   if (!userRes?.user) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
-  const { data: profile } = await userClient
-    .from('profiles')
-    .select('role')
-    .eq('id', userRes.user.id)
-    .single()
-  if (profile?.role !== 'admin' && profile?.role !== 'administrator') {
-    return NextResponse.json({ error: 'Admin role required' }, { status: 403 })
-  }
   return null
 }
 
@@ -24,7 +17,7 @@ export async function POST() {
     return NextResponse.json({ error: 'CRM credentials not configured' }, { status: 500 })
   }
 
-  const authErr = await requireAdmin()
+  const authErr = await requireAuth()
   if (authErr) return authErr
 
   try {

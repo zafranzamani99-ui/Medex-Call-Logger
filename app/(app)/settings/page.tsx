@@ -454,9 +454,8 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* CRM Sync */}
-      {isAdminOrAbove(userRole) && (
-        <div className="bg-surface border border-border rounded-lg p-4 mb-4">
+      {/* CRM Sync — available to all roles (support, admin, administrator) */}
+      <div className="bg-surface border border-border rounded-lg p-4 mb-4">
           <h2 className="text-sm font-medium text-text-secondary mb-3">CRM Sync</h2>
           <p className="text-xs text-text-tertiary mb-3">
             Pull latest clinic data from the CRM database. This replaces the Excel upload for keeping clinic data fresh.
@@ -550,7 +549,6 @@ export default function SettingsPage() {
             <p className="mt-4 pt-4 border-t border-border text-xs text-text-muted">No sync history yet</p>
           )}
         </div>
-      )}
 
       {/* Sync Changes Modal */}
       {latestSync && latestSync.changes && latestSync.changes.length > 0 && (
