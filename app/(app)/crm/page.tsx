@@ -1,14 +1,18 @@
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import CrmDataTable from '@/components/crm/CrmDataTable'
-import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import NewClinicModal from '@/components/crm/NewClinicModal'
-import ReportsView from '@/components/reports/ReportsView'
 import Button from '@/components/ui/Button'
 import { isAdminOrAbove } from '@/lib/constants'
 import type { UserRole } from '@/lib/types'
+
+// Heavy, one-off views — load only when actually opened, keeping them off the
+// initial /crm bundle (ReportsView ~2,900 lines; ClinicProfilePanel ~1,900).
+const ReportsView = dynamic(() => import('@/components/reports/ReportsView'), { ssr: false })
+const ClinicProfilePanel = dynamic(() => import('@/components/ClinicProfilePanel'), { ssr: false })
 
 type MainTab = 'clinics' | 'reports'
 

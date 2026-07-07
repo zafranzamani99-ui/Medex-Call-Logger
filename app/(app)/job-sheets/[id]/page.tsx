@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import type { JobSheet, JobSheetChecklistItem, JobSheetIssueCategory, JobSheetImportantDetails, BackupStatus, JobOutcome, PaymentMethod } from '@/lib/types'
@@ -10,8 +11,10 @@ import Button from '@/components/ui/Button'
 import { Input, Label, Textarea, Select } from '@/components/ui/Input'
 import Badge from '@/components/ui/Badge'
 import { useToast } from '@/components/ui/Toast'
-import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import JobSheetPrintLayout from '@/components/JobSheetPrintLayout'
+
+// Heavy panel shown only on clinic click — load on demand.
+const ClinicProfilePanel = dynamic(() => import('@/components/ClinicProfilePanel'), { ssr: false })
 
 // Section wrapper
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

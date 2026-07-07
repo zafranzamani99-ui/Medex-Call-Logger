@@ -2,13 +2,16 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic } from '@/lib/types'
 import ClinicSearch from '@/components/ClinicSearch'
-import LicenseKeyModal from '@/components/LicenseKeyModal'
-import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import Button from '@/components/ui/Button'
 import { Label } from '@/components/ui/Input'
+
+// Heavy, click-only components — load on demand.
+const LicenseKeyModal = dynamic(() => import('@/components/LicenseKeyModal'), { ssr: false })
+const ClinicProfilePanel = dynamic(() => import('@/components/ClinicProfilePanel'), { ssr: false })
 
 // WHY: Dedicated License Key Request page — search clinic, open form, copy to Outlook.
 

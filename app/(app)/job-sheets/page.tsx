@@ -12,6 +12,7 @@ import EmptyState, { EmptyIcons } from '@/components/ui/EmptyState'
 import { ModalDialog } from '@/components/Modal'
 import ClinicSearch from '@/components/ClinicSearch'
 import { useToast } from '@/components/ui/Toast'
+import { getSnapshot, setSnapshot } from '@/lib/listSnapshot'
 
 const PAGE_SIZE = 20
 
@@ -22,8 +23,9 @@ export default function JobSheetsPage() {
 
   const [userId, setUserId] = useState('')
   const [userName, setUserName] = useState('')
-  const [jobSheets, setJobSheets] = useState<JobSheet[]>([])
-  const [loading, setLoading] = useState(true)
+  // Seed from the session snapshot so returning to this page paints instantly.
+  const [jobSheets, setJobSheets] = useState<JobSheet[]>(() => getSnapshot<JobSheet[]>('job-sheets') ?? [])
+  const [loading, setLoading] = useState(!getSnapshot('job-sheets'))
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
@@ -92,12 +94,20 @@ export default function JobSheetsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Keep the snapshot in sync with the list (fetches, creates, deletes).
+  useEffect(() => { setSnapshot('job-sheets', jobSheets) }, [jobSheets])
+
   const fetchJobSheets = async () => {
-    setLoading(true)
+    // No setLoading(true) here: on return visits we already show cached rows and
+    // revalidate silently. The skeleton only shows on the first load (initial state).
+    // Only the columns the list renders/filters — the row's heavy JSONB/text
+    // fields (checklist, service_done, etc.) are fetched on the detail page.
+    // Bound the fetch — 1000 rows is well above current volume and one request.
     const { data } = await supabase
       .from('job_sheets')
-      .select('*')
+      .select('id, js_number, service_date, clinic_name, service_by, service_types, status, clinic_code')
       .order('created_at', { ascending: false })
+      .limit(1000)
     setJobSheets((data as JobSheet[]) || [])
     setLoading(false)
   }

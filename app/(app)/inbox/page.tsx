@@ -9,6 +9,7 @@ import { toProperCase } from '@/lib/constants'
 import EmptyState from '@/components/ui/EmptyState'
 import { useToast } from '@/components/ui/Toast'
 import { SlidePanel } from '@/components/Modal'
+import { getSnapshot, setSnapshot } from '@/lib/listSnapshot'
 
 const PAGE_SIZE = 15
 const ARCHIVE_DAYS = 30
@@ -19,8 +20,10 @@ export default function InboxPage() {
   const supabase = createClient()
   const { toast } = useToast()
 
-  const [messages, setMessages] = useState<InboxMessage[]>([])
-  const [loading, setLoading] = useState(true)
+  // Seed from the session snapshot so returning to the inbox paints instantly;
+  // realtime + init() then revalidate in the background.
+  const [messages, setMessages] = useState<InboxMessage[]>(() => getSnapshot<InboxMessage[]>('inbox-messages') ?? [])
+  const [loading, setLoading] = useState(!getSnapshot('inbox-messages'))
   const [lastReadAt, setLastReadAt] = useState<string | null>(null)
   const [userName, setUserName] = useState('')
   const [userRole, setUserRole] = useState('')
@@ -51,12 +54,18 @@ export default function InboxPage() {
   useEffect(() => { chatOpenForRef.current = chatOpenFor }, [chatOpenFor])
 
   const fetchMessages = useCallback(async () => {
+    // Bound the fetch so it can't grow unbounded. 1000 is far above current
+    // volume; search/counts/archive read this in-memory set, so keep it generous.
     const { data } = await supabase
       .from('inbox_messages')
       .select('*')
       .order('created_at', { ascending: false })
+      .limit(1000)
     if (data) setMessages(data as InboxMessage[])
   }, [supabase])
+
+  // Keep the snapshot in sync with the list (fetch, realtime, mutations).
+  useEffect(() => { setSnapshot('inbox-messages', messages) }, [messages])
 
   useEffect(() => {
     async function init() {

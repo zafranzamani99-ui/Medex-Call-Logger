@@ -222,13 +222,16 @@ export default function ActivityPage() {
       setEntries(data as AuditEntry[])
       setTotal(count || 0)
 
-      // Extract unique agents on first load
+      // Build the agent filter list from the tiny profiles table instead of
+      // scanning the whole (ever-growing) audit_log. The audit trigger stamps
+      // changed_by = profiles.display_name, so this yields the same names.
       if (agents.length === 0) {
-        const { data: allAgents } = await supabase
-          .from('audit_log')
-          .select('changed_by')
-        if (allAgents) {
-          const unique = Array.from(new Set(allAgents.map((a: { changed_by: string }) => a.changed_by))).sort() as string[]
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('display_name')
+          .order('display_name')
+        if (profiles) {
+          const unique = Array.from(new Set(profiles.map((p: { display_name: string }) => p.display_name))).filter(Boolean) as string[]
           setAgents(unique)
         }
       }

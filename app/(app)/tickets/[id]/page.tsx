@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter, useParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import { format } from 'date-fns'
 import type { Ticket, TimelineEntry, TicketStatus, Channel, TicketPlan, InvoiceItem } from '@/lib/types'
@@ -17,10 +18,12 @@ import { DetailSkeleton } from '@/components/Skeleton'
 import Button from '@/components/ui/Button'
 import { Input, Textarea, Label } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/Toast'
-import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import PlanCard from '@/components/PlanCard'
 import TimelineEntryEditModal from '@/components/TimelineEntryEditModal'
 import { ModalDialog } from '@/components/Modal'
+
+// Heavy panel shown only when the clinic name is clicked — load on demand.
+const ClinicProfilePanel = dynamic(() => import('@/components/ClinicProfilePanel'), { ssr: false })
 
 // WHY: Ticket Detail — spec Section 9.
 // UPGRADE: Breadcrumb nav, two-column layout on lg, redesigned vertical timeline.
@@ -101,7 +104,10 @@ export default function TicketDetailPage() {
   }, [])
 
   const fetchTicket = async () => {
-    const [ticketRes, timelineRes, auditRes, planRes] = await Promise.all([
+    // WHY: schedules + knowledge_base only need ticketId, so batch them with the
+    // main queries instead of awaiting in series (4 round trips -> 2). Only
+    // job_sheets genuinely depends on the schedule id, so it stays a follow-up.
+    const [ticketRes, timelineRes, auditRes, planRes, schedRes, kbRes] = await Promise.all([
       supabase.from('tickets').select('*').eq('id', ticketId).single(),
       supabase.from('timeline_entries').select('*').eq('ticket_id', ticketId)
         .order('entry_date', { ascending: false })
@@ -111,6 +117,16 @@ export default function TicketDetailPage() {
         .order('created_at', { ascending: false }),
       supabase.from('ticket_plans').select('*').eq('ticket_id', ticketId)
         .order('set_at', { ascending: false }),
+      supabase.from('schedules')
+        .select('id, actual_duration_minutes, duration_estimate, schedule_type, schedule_date, schedule_time, status, agent_name')
+        .eq('source_ticket_id', ticketId)
+        .limit(1)
+        .maybeSingle(),
+      supabase.from('knowledge_base')
+        .select('id, issue, status')
+        .eq('source_ticket_id', ticketId)
+        .limit(1)
+        .maybeSingle(),
     ])
 
     if (ticketRes.data) {
@@ -138,16 +154,12 @@ export default function TicketDetailPage() {
     if (auditRes.data) setAuditEntries(auditRes.data)
     if (planRes.data) setPlanHistory(planRes.data as TicketPlan[])
 
-    // Fetch linked schedule (if this ticket was created from a schedule)
-    const { data: schedData } = await supabase
-      .from('schedules')
-      .select('id, actual_duration_minutes, duration_estimate, schedule_type, schedule_date, schedule_time, status, agent_name')
-      .eq('source_ticket_id', ticketId)
-      .limit(1)
-      .maybeSingle()
+    // Linked schedule (fetched above with the main batch)
+    const schedData = schedRes.data
     setLinkedSchedule(schedData)
+    setLinkedKbDraft(kbRes.data)
 
-    // Fetch linked job sheet (chained from schedule)
+    // Fetch linked job sheet (chained from schedule — the one dependent query)
     if (schedData?.id) {
       const { data: jsData } = await supabase
         .from('job_sheets')
@@ -158,14 +170,6 @@ export default function TicketDetailPage() {
     } else {
       setLinkedJobSheet(null)
     }
-
-    const { data: kbData } = await supabase
-      .from('knowledge_base')
-      .select('id, issue, status')
-      .eq('source_ticket_id', ticketId)
-      .limit(1)
-      .maybeSingle()
-    setLinkedKbDraft(kbData)
 
     setLoading(false)
   }

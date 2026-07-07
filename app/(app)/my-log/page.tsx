@@ -121,7 +121,8 @@ export default function MyLogPage() {
       }
     }
 
-    ticketQuery = ticketQuery.order('created_at', { ascending: false })
+    // Cap so the "All Time" range (no date filter) can't scan the whole table.
+    ticketQuery = ticketQuery.order('created_at', { ascending: false }).limit(1000)
 
     // Also fetch tickets updated in this period (created earlier but touched recently)
     let updatedQuery: typeof ticketQuery | null = null
@@ -157,7 +158,7 @@ export default function MyLogPage() {
       }
     }
 
-    lkQuery = lkQuery.order('created_at', { ascending: false })
+    lkQuery = lkQuery.order('created_at', { ascending: false }).limit(1000)
 
     // Fetch job sheets
     let jsQuery = supabase
@@ -174,7 +175,7 @@ export default function MyLogPage() {
         jsQuery = jsQuery.gte('created_at', dateFrom)
       }
     }
-    jsQuery = jsQuery.order('created_at', { ascending: false })
+    jsQuery = jsQuery.order('created_at', { ascending: false }).limit(1000)
 
     const queries: Promise<{ data: unknown }>[] = [ticketQuery, lkQuery, jsQuery]
     if (updatedQuery) queries.push(updatedQuery)

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import type { Clinic, OpenTicketWarning, IssueType, TicketStatus, Channel, KnowledgeBaseEntry, UserRole } from '@/lib/types'
 import { STATUSES, STATUS_COLORS, getIssueTypeColor, CALL_DURATIONS, SCHEDULE_TYPES, SCHEDULE_TYPE_COLORS, ISSUE_CATEGORIES, getIssueCategoryColor, ISSUE_TYPES, toProperCase, ADMIN_PRIORITY_CATEGORIES, ADMIN_ONLY_CATEGORIES, isAdminOrAbove, ADMIN_CUSTOMER_STATUS_TYPES } from '@/lib/constants'
@@ -11,12 +12,14 @@ import TimelineBuilder from '@/components/TimelineBuilder'
 import PillSelector from '@/components/PillSelector'
 import IssueTypeSelect from '@/components/IssueTypeSelect'
 
-import LicenseKeyModal from '@/components/LicenseKeyModal'
-import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import Button from '@/components/ui/Button'
 import { Input, Textarea, Label } from '@/components/ui/Input'
 import { useToast } from '@/components/ui/Toast'
 import { format } from 'date-fns'
+
+// Heavy, click-only components — keep them off this hot page's initial bundle.
+const LicenseKeyModal = dynamic(() => import('@/components/LicenseKeyModal'), { ssr: false })
+const ClinicProfilePanel = dynamic(() => import('@/components/ClinicProfilePanel'), { ssr: false })
 
 // WHY: Log Call form — spec Section 8. The most-used page (~80 times/day).
 // V3 redesign: Two-zone layout (form left, context right), grouped visual zones.

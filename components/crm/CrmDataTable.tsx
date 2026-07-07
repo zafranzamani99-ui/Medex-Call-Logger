@@ -21,6 +21,7 @@ import { buildColumns, DEFAULT_COLUMN_VISIBILITY, COLUMN_GROUPS } from './column
 import { ModalDialog } from '@/components/Modal'
 import Button from '@/components/ui/Button'
 import { useToast } from '@/components/ui/Toast'
+import { getSnapshot, setSnapshot } from '@/lib/listSnapshot'
 import {
   HorizontalDndProvider,
   SortableHeader,
@@ -126,8 +127,11 @@ function RenameableHeader({ header, renames, onRename }: {
 export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin = false }: CrmDataTableProps) {
   const supabase = createClient()
   const { toast } = useToast()
-  const [clinics, setClinics] = useState<Clinic[]>([])
-  const [loading, setLoading] = useState(true)
+  // Seed from the session snapshot so returning to /crm paints the ~3,800-row
+  // grid instantly instead of re-downloading it; init() revalidates in the
+  // background and realtime + inline edits keep the snapshot in sync.
+  const [clinics, setClinics] = useState<Clinic[]>(() => getSnapshot<Clinic[]>('crm-clinics') ?? [])
+  const [loading, setLoading] = useState(!getSnapshot('crm-clinics'))
   const [userId, setUserId] = useState<string | null>(null)
   const [userName, setUserName] = useState('')
 
@@ -258,6 +262,9 @@ export default function CrmDataTable({ onClinicSelect, refreshKey = 0, isAdmin =
     }
     init()
   }, [supabase, refreshKey])
+
+  // Keep the snapshot in sync with the grid (fetch, realtime, inline edits, delete).
+  useEffect(() => { setSnapshot('crm-clinics', clinics) }, [clinics])
 
   // Phase C.6 — realtime subscription on clinics table.
   // Keeps the table fresh when other admins create/update/delete while this tab is open.

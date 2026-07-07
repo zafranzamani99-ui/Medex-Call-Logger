@@ -94,6 +94,7 @@ export default function CallLogPage() {
   const missedTableRef = useRef<HTMLDivElement | null>(null)
 
   const [userId, setUserId] = useState('')
+  const [supportStaffIds, setSupportStaffIds] = useState<string[]>([])
   const [userName, setUserName] = useState('')
 
   // Source filter pills (call log tab only)
@@ -239,12 +240,12 @@ export default function CallLogPage() {
       const { data: { session } } = await supabase.auth.getSession()
       if (!session?.user) return
       setUserId(session.user.id)
-      const { data: p } = await supabase
-        .from('profiles')
-        .select('display_name')
-        .eq('id', session.user.id)
-        .single()
-      if (p) setUserName(p.display_name)
+      const [profileRes, staffRes] = await Promise.all([
+        supabase.from('profiles').select('display_name').eq('id', session.user.id).single(),
+        supabase.from('profiles').select('id').eq('is_active', true).in('role', ['support', 'administrator']),
+      ])
+      if (profileRes.data) setUserName(profileRes.data.display_name)
+      if (staffRes.data) setSupportStaffIds(staffRes.data.map((s: { id: string }) => s.id))
     })()
   }, [supabase])
 
@@ -277,26 +278,32 @@ export default function CallLogPage() {
     const dayStart = startOfDay(new Date(dateStr)).toISOString()
     const dayEnd = endOfDay(new Date(dateStr)).toISOString()
 
-    const [ticketRes, draftRes, missedRes] = await Promise.all([
-      supabase
+    let ticketQ = supabase
         .from('tickets')
         .select('id, caller_tel, clinic_name, created_by_name, submitted_at, created_at, status, ticket_ref')
         .not('caller_tel', 'is', null)
         .gte('created_at', dayStart)
         .lte('created_at', dayEnd)
-        .order('created_at', { ascending: false }),
-      supabase
+        .order('created_at', { ascending: false })
+    let draftQ = supabase
         .from('call_log_drafts')
         .select('id, form_data, updated_at, user_id, profiles:user_id(display_name)')
         .gte('updated_at', dayStart)
         .lte('updated_at', dayEnd)
-        .order('updated_at', { ascending: false }),
-      supabase
+        .order('updated_at', { ascending: false })
+    let missedQ = supabase
         .from('missed_calls')
         .select('*')
         .eq('call_date', dateStr)
-        .order('created_at', { ascending: false }),
-    ])
+        .order('created_at', { ascending: false })
+
+    if (supportStaffIds.length > 0) {
+      ticketQ = ticketQ.in('created_by', supportStaffIds)
+      draftQ = draftQ.in('user_id', supportStaffIds)
+      missedQ = missedQ.in('logged_by', supportStaffIds)
+    }
+
+    const [ticketRes, draftRes, missedRes] = await Promise.all([ticketQ, draftQ, missedQ])
 
     const combined: CallEntry[] = []
 
@@ -336,9 +343,9 @@ export default function CallLogPage() {
 
     setAllEntries(combined)
     setLoading(false)
-  }, [supabase])
+  }, [supabase, supportStaffIds])
 
-  useEffect(() => { loadData(selectedDate) }, [selectedDate, loadData])
+  useEffect(() => { if (supportStaffIds.length > 0) loadData(selectedDate) }, [selectedDate, loadData, supportStaffIds])
 
   // ── Derived data per tab ────────────────────────────────────────
   const logEntries = useMemo(() => allEntries.filter(e => e.source !== 'missed'), [allEntries])

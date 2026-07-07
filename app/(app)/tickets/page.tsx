@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/Input'
 import EmptyState, { EmptyIcons } from '@/components/ui/EmptyState'
 import HeaderFilter from '@/components/table/HeaderFilter'
 import { HorizontalDndProvider, SortableHeader, reorderColumns, PlainResizeProvider, PlainResizeHandle, PlainResizeIndicator } from '@/components/table/spreadsheet-kit'
+import { getSnapshot, setSnapshot } from '@/lib/listSnapshot'
 
 // WHY: History page — spec Section 10. All tickets with filters, search, CSV export.
 // UPGRADE: Desktop table layout at md:, sortable columns, filter chips, better pagination.
@@ -29,8 +30,10 @@ type SortDir = 'asc' | 'desc'
 export default function HistoryPage() {
   const router = useRouter()
   const supabase = createClient()
-  const [tickets, setTickets] = useState<Ticket[]>([])
-  const [loading, setLoading] = useState(true)
+  // Seed from the session snapshot so returning to History paints instantly
+  // (mount is always the default 90-day view).
+  const [tickets, setTickets] = useState<Ticket[]>(() => getSnapshot<Ticket[]>('tickets:90d') ?? [])
+  const [loading, setLoading] = useState(!getSnapshot('tickets:90d'))
   const [agents, setAgents] = useState<string[]>([])
 
   // Filters (spec Section 10.1)
@@ -233,8 +236,14 @@ export default function HistoryPage() {
   // Fetch tickets + timeline counts
   useEffect(() => {
     async function fetchTickets() {
-      setLoading(true)
+      // Only show the skeleton when we have nothing cached for this mode; on a
+      // return visit we paint cached rows and revalidate silently.
+      const snapKey = loadAllHistory ? 'tickets:all' : 'tickets:90d'
+      if (!getSnapshot(snapKey)) setLoading(true)
       const PAGE_SIZE = 1000
+      // Hard ceiling so "Load all history" can't scan the entire tickets table
+      // into browser memory. 5000 most-recent rows is far more than anyone scrolls.
+      const MAX_HISTORY_ROWS = 5000
       const allRows: (Ticket & { timeline_entries: [{ count: number }] })[] = []
       let from = 0
 
@@ -257,6 +266,7 @@ export default function HistoryPage() {
         if (!data || data.length === 0) break
         allRows.push(...(data as typeof allRows))
         if (data.length < PAGE_SIZE) break
+        if (allRows.length >= MAX_HISTORY_ROWS) break
         from += PAGE_SIZE
       }
 
@@ -273,6 +283,11 @@ export default function HistoryPage() {
     fetchTickets()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadAllHistory])
+
+  // Keep the snapshot in sync (fetches + optimistic delete), keyed by view mode.
+  useEffect(() => {
+    setSnapshot(loadAllHistory ? 'tickets:all' : 'tickets:90d', tickets)
+  }, [tickets, loadAllHistory])
 
   // Apply filters
   const filtered = useMemo(() => {

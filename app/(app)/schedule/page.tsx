@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -16,10 +17,12 @@ import Button from '@/components/ui/Button'
 import { Input, Label, Textarea } from '@/components/ui/Input'
 import ClinicSearch from '@/components/ClinicSearch'
 import StaffPicker from '@/components/StaffPicker'
-import ClinicProfilePanel from '@/components/ClinicProfilePanel'
 import RenewalBadge from '@/components/RenewalBadge'
 import type { Clinic } from '@/lib/types'
 import { useToast } from '@/components/ui/Toast'
+
+// Heavy panel shown only on clinic click — load on demand.
+const ClinicProfilePanel = dynamic(() => import('@/components/ClinicProfilePanel'), { ssr: false })
 
 // WHY: Schedule page — monthly calendar view for appointment management.
 // Replaces the team's Excel-based schedule tracker.

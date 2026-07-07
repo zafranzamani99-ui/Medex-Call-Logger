@@ -22,6 +22,50 @@ import { DashboardSkeleton } from '@/components/Skeleton'
 // WHY: Dashboard — spec Section 7. Command center for team.
 // Spatial design: Hero urgency zone → triage panel → activity timeline → charts
 
+// WHY: A live 1-second clock for each in-progress job. Isolated into its own
+// component so the ticking re-render stays local to this small label instead of
+// re-rendering the entire dashboard (charts included) every second.
+function WorkTimer({ s, onClick }: { s: Schedule; onClick: () => void }) {
+  const [, setTick] = useState(0)
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [])
+
+  const schedPaused = !!s.is_paused
+  const pausedTotalMs = s.total_paused_ms || 0
+  const pausedAtMs = s.paused_at ? new Date(s.paused_at).getTime() : 0
+  const pauseReason = s.pause_reason || ''
+  const elapsedSec = s.started_at
+    ? schedPaused
+      ? Math.max(0, Math.round((pausedAtMs - new Date(s.started_at).getTime() - pausedTotalMs) / 1000))
+      : Math.max(0, Math.round((Date.now() - new Date(s.started_at).getTime() - pausedTotalMs) / 1000))
+    : 0
+  const pauseDurationSec = schedPaused ? Math.max(0, Math.round((Date.now() - pausedAtMs) / 1000)) : 0
+  const workerName = s.pic_support || s.agent_name
+  const initial = workerName?.charAt(0)?.toUpperCase() || '?'
+  return (
+    <button onClick={onClick} className="flex items-center gap-2.5 group">
+      <div className={`size-7 rounded-full flex items-center justify-center text-[11px] font-bold ${schedPaused ? 'bg-zinc-500/15 text-zinc-400' : 'bg-amber-500/15 text-amber-400'}`}>
+        {initial}
+      </div>
+      <div className="text-left">
+        <div className="text-[13px] text-text-primary font-medium group-hover:text-amber-300 transition-colors">
+          {toProperCase(workerName)} <span className="text-text-muted font-normal">·</span> <span className="font-normal text-text-secondary">{s.schedule_type}</span> <span className="text-text-muted font-normal">@</span> <span className="font-normal text-text-secondary truncate">{s.clinic_name}</span>
+        </div>
+        {schedPaused ? (
+          <div className="text-[11px] font-semibold text-zinc-400 tabular-nums flex items-center gap-1">
+            <svg className="size-3" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
+            Paused {pauseReason ? `(${pauseReason})` : ''} · {Math.floor(pauseDurationSec / 60)}:{String(pauseDurationSec % 60).padStart(2, '0')} · Active: {formatWorkDurationLive(elapsedSec)}
+          </div>
+        ) : (
+          <div className="text-[11px] font-semibold text-amber-400 tabular-nums">{formatWorkDurationLive(elapsedSec)}</div>
+        )}
+      </div>
+    </button>
+  )
+}
+
 export default function DashboardPage() {
   const router = useRouter()
   const supabase = createClient()
@@ -42,7 +86,6 @@ export default function DashboardPage() {
   const [standbyWeekend, setStandbyWeekend] = useState<StaffRef[]>([])
   const [saturdayStaff, setSaturdayStaff] = useState<StaffRef[]>([])
   const [saturdayDate, setSaturdayDate] = useState('')
-  const [, setTick] = useState(0)
 
   const triageRef = useRef<HTMLDivElement>(null)
 
@@ -197,12 +240,6 @@ export default function DashboardPage() {
     fetchStandby()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  useEffect(() => {
-    if (activeWork.length === 0) return
-    const interval = setInterval(() => setTick(t => t + 1), 1000)
-    return () => clearInterval(interval)
-  }, [activeWork.length])
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const debouncedFetch = useCallback(() => {
@@ -409,44 +446,9 @@ export default function DashboardPage() {
                 <span className="text-[11px] font-semibold text-amber-400/80 uppercase tracking-wider">Working Now</span>
               </div>
               <div className="flex items-center gap-3 flex-wrap">
-                {activeWork.map((s) => {
-                  const schedPaused = !!s.is_paused
-                  const pausedTotalMs = s.total_paused_ms || 0
-                  const pausedAtMs = s.paused_at ? new Date(s.paused_at).getTime() : 0
-                  const pauseReason = s.pause_reason || ''
-                  const elapsedSec = s.started_at
-                    ? schedPaused
-                      ? Math.max(0, Math.round((pausedAtMs - new Date(s.started_at).getTime() - pausedTotalMs) / 1000))
-                      : Math.max(0, Math.round((Date.now() - new Date(s.started_at).getTime() - pausedTotalMs) / 1000))
-                    : 0
-                  const pauseDurationSec = schedPaused ? Math.max(0, Math.round((Date.now() - pausedAtMs) / 1000)) : 0
-                  const workerName = s.pic_support || s.agent_name
-                  const initial = workerName?.charAt(0)?.toUpperCase() || '?'
-                  return (
-                    <button
-                      key={s.id}
-                      onClick={() => router.push('/schedule')}
-                      className="flex items-center gap-2.5 group"
-                    >
-                      <div className={`size-7 rounded-full flex items-center justify-center text-[11px] font-bold ${schedPaused ? 'bg-zinc-500/15 text-zinc-400' : 'bg-amber-500/15 text-amber-400'}`}>
-                        {initial}
-                      </div>
-                      <div className="text-left">
-                        <div className="text-[13px] text-text-primary font-medium group-hover:text-amber-300 transition-colors">
-                          {toProperCase(workerName)} <span className="text-text-muted font-normal">·</span> <span className="font-normal text-text-secondary">{s.schedule_type}</span> <span className="text-text-muted font-normal">@</span> <span className="font-normal text-text-secondary truncate">{s.clinic_name}</span>
-                        </div>
-                        {schedPaused ? (
-                          <div className="text-[11px] font-semibold text-zinc-400 tabular-nums flex items-center gap-1">
-                            <svg className="size-3" fill="currentColor" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
-                            Paused {pauseReason ? `(${pauseReason})` : ''} · {Math.floor(pauseDurationSec / 60)}:{String(pauseDurationSec % 60).padStart(2, '0')} · Active: {formatWorkDurationLive(elapsedSec)}
-                          </div>
-                        ) : (
-                          <div className="text-[11px] font-semibold text-amber-400 tabular-nums">{formatWorkDurationLive(elapsedSec)}</div>
-                        )}
-                      </div>
-                    </button>
-                  )
-                })}
+                {activeWork.map((s) => (
+                  <WorkTimer key={s.id} s={s} onClick={() => router.push('/schedule')} />
+                ))}
               </div>
             </div>
           )}

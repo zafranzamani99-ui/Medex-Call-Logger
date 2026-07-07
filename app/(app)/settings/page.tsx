@@ -10,6 +10,7 @@ import type { UserRole } from '@/lib/types'
 import { toProperCase, isAdminOrAbove } from '@/lib/constants'
 import HolidaysSection from '@/components/settings/HolidaysSection'
 import KBMaintenanceSection from '@/components/settings/KBMaintenanceSection'
+import { invalidateClinicCache } from '@/components/ClinicSearch'
 
 // WHY: Settings page — spec Section 6.
 // 1. Display name edit (UC-22) — agent can change their name
@@ -381,6 +382,9 @@ export default function SettingsPage() {
     } finally {
       setUploading(false)
       setUploadProgress(null)
+      // Clinics changed en masse — drop the cached clinic list so the search
+      // dropdown re-downloads the fresh set on its next open.
+      invalidateClinicCache()
     }
   }
 

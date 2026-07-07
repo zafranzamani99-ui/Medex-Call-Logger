@@ -19,6 +19,65 @@ interface ClinicSearchProps {
   hideLabel?: boolean
 }
 
+// WHY: The clinic list (~3,900 rows, ~1-2 MB) barely changes but was re-downloaded
+// on EVERY mount of this component — call-log form, schedule modals, job sheets, LK.
+// That download blocks the input ("Loading clinics...") each time. Cache it at module
+// scope so it loads once per session and reopening any form reuses it instantly.
+// TTL bounds staleness (e.g. after a CRM upload); call invalidateClinicCache() to force
+// an immediate refresh after creating/editing a clinic.
+const CLINIC_COLUMNS = 'id, clinic_code, clinic_name, clinic_phone, mtn_start, mtn_expiry, renewal_status, product_type, city, state, registered_contact, email_main, email_secondary, lkey_line1, lkey_line2, lkey_line3, lkey_line4, lkey_line5'
+const CLINIC_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+let clinicCache: Clinic[] | null = null
+let clinicCacheAt = 0
+let clinicCachePromise: Promise<Clinic[]> | null = null
+
+async function fetchAllClinics(supabase: ReturnType<typeof createClient>): Promise<Clinic[]> {
+  // WHY: PostgREST caps at 1000 rows/request, so paginate to get all ~3,900.
+  const PAGE_SIZE = 1000
+  let allClinics: Clinic[] = []
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('clinics')
+      .select(CLINIC_COLUMNS)
+      .order('clinic_name')
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) {
+      console.error('[ClinicSearch] Failed to load clinics page:', from, error.message)
+      break
+    }
+    if (!data || data.length === 0) break
+    allClinics = allClinics.concat(data as unknown as Clinic[])
+    if (data.length < PAGE_SIZE) break
+    from += PAGE_SIZE
+  }
+  return allClinics
+}
+
+function loadClinicsCached(supabase: ReturnType<typeof createClient>): Promise<Clinic[]> {
+  if (clinicCache && Date.now() - clinicCacheAt < CLINIC_CACHE_TTL) {
+    return Promise.resolve(clinicCache)
+  }
+  if (!clinicCachePromise) {
+    clinicCachePromise = fetchAllClinics(supabase).then((list) => {
+      if (list.length > 0) { clinicCache = list; clinicCacheAt = Date.now() }
+      clinicCachePromise = null  // allow retry if this load returned nothing
+      return list
+    }).catch((err) => {
+      clinicCachePromise = null
+      throw err
+    })
+  }
+  return clinicCachePromise
+}
+
+/** Force the next ClinicSearch mount to re-download clinics (after upload/create/edit). */
+export function invalidateClinicCache() {
+  clinicCache = null
+  clinicCacheAt = 0
+  clinicCachePromise = null
+}
+
 export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel }: ClinicSearchProps) {
   const [query, setQuery] = useState('')
   const [clinics, setClinics] = useState<Clinic[]>([])
@@ -42,43 +101,22 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
     }
   }, [value])
 
-  // Load all clinics on mount — ~3,900 rows, fast enough client-side
+  // Load clinics on mount — served from the module cache after the first load
   useEffect(() => {
-    async function loadClinics() {
-      // WHY: Supabase PostgREST has a server-side max of 1000 rows per request.
-      // We have ~3,900 clinics so we MUST paginate to get them all.
-      // Without this, clinics beyond row 1000 (alphabetically) are invisible to search.
-      const PAGE_SIZE = 1000
-      const columns = 'id, clinic_code, clinic_name, clinic_phone, mtn_start, mtn_expiry, renewal_status, product_type, city, state, registered_contact, email_main, email_secondary, lkey_line1, lkey_line2, lkey_line3, lkey_line4, lkey_line5'
-      let allClinics: Clinic[] = []
-      let from = 0
-
-      while (true) {
-        const { data, error } = await supabase
-          .from('clinics')
-          .select(columns)
-          .order('clinic_name')
-          .range(from, from + PAGE_SIZE - 1)
-
-        if (error) {
-          console.error('[ClinicSearch] Failed to load clinics page:', from, error.message)
-          break
-        }
-        if (!data || data.length === 0) break
-
-        allClinics = allClinics.concat(data)
-        if (data.length < PAGE_SIZE) break
-        from += PAGE_SIZE
-      }
-
-      if (allClinics.length > 0) {
-        setClinics(allClinics)
-      } else {
-        console.warn('[ClinicSearch] No clinic data loaded')
-      }
+    let cancelled = false
+    // Warm cache: show instantly without a loading state
+    if (clinicCache && Date.now() - clinicCacheAt < CLINIC_CACHE_TTL) {
+      setClinics(clinicCache)
       setLoading(false)
+      return
     }
-    loadClinics()
+    loadClinicsCached(supabase).then((list) => {
+      if (cancelled) return
+      if (list.length > 0) setClinics(list)
+      else console.warn('[ClinicSearch] No clinic data loaded')
+      setLoading(false)
+    }).catch(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -93,7 +131,8 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
     includeScore: true,
   }), [clinics])
 
-  // Search on query change — skip if clinic already selected
+  // Search on query change — skip if clinic already selected.
+  // WHY: debounce so the O(n) Fuse search doesn't run on every keystroke (typing lag).
   useEffect(() => {
     if (query.length < 2 || selectedClinic) {
       setResults([])
@@ -101,9 +140,12 @@ export default function ClinicSearch({ onSelect, onOpenTickets, value, hideLabel
       return
     }
 
-    const fuseResults = fuse.search(query)
-    setResults(fuseResults.map((r) => r.item).slice(0, 15)) // Cap at 15 results
-    setShowDropdown(true)
+    const timer = setTimeout(() => {
+      const fuseResults = fuse.search(query)
+      setResults(fuseResults.map((r) => r.item).slice(0, 15)) // Cap at 15 results
+      setShowDropdown(true)
+    }, 180)
+    return () => clearTimeout(timer)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, clinics])
 
